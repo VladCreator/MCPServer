@@ -24,21 +24,36 @@ actual fun getDatabasePath(dbName: String): String {
 }
 
 /**
- * Provides the local IPv4 address of the Android device.
+ * Provides the local IPv4 network address of the active Wi-Fi/Ethernet interface.
  */
 actual fun getLocalIpAddress(): String {
     try {
-        val interfaces = NetworkInterface.getNetworkInterfaces()
+        val interfaces = NetworkInterface.getNetworkInterfaces() ?: return "127.0.0.1"
+        var candidateIp: String? = null
+
         while (interfaces.hasMoreElements()) {
             val networkInterface = interfaces.nextElement()
+            
+            // Ignore down or loopback interfaces
+            if (!networkInterface.isUp || networkInterface.isLoopback) continue
+
             val addresses = networkInterface.inetAddresses
             while (addresses.hasMoreElements()) {
                 val addr = addresses.nextElement()
                 if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                    return addr.hostAddress ?: "127.0.0.1"
+                    val hostAddress = addr.hostAddress ?: continue
+                    
+                    // Prioritize Wi-Fi (wlan), Ethernet (eth), or USB tethering (rndis)
+                    val interfaceName = networkInterface.name.lowercase()
+                    if (interfaceName.contains("wlan") || interfaceName.contains("eth") || interfaceName.contains("rndis")) {
+                        return hostAddress
+                    } else if (candidateIp == null) {
+                        candidateIp = hostAddress
+                    }
                 }
             }
         }
+        if (candidateIp != null) return candidateIp
     } catch (e: Exception) {
         e.printStackTrace()
     }

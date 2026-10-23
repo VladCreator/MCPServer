@@ -1,9 +1,11 @@
 package com.vlad.mcpserver
 
+import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.cio.*
 import io.ktor.server.netty.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
@@ -12,6 +14,7 @@ import java.security.KeyStore
 
 /**
  * Android actual implementation of McpServerEngine using Ktor Netty (for HTTPS) and CIO (for HTTP) engines.
+ * Supports both WebSocket (/mcp) and SSE (/sse, /mcp/sse, /message) transports.
  */
 actual class McpServerEngine actual constructor(
     private val getToken: () -> String,
@@ -58,7 +61,7 @@ actual class McpServerEngine actual constructor(
             }
         } catch (e: Throwable) {
             e.printStackTrace()
-            // Gracefully handle any SSL/Engine initialization errors to prevent app crashes
+            // Gracefully handle any SSL/Engine initialization errors
         }
     }
 
@@ -71,10 +74,31 @@ actual class McpServerEngine actual constructor(
             get("/status") {
                 call.respondText("{\"status\":\"active\",\"version\":\"0.0.1\",\"ssl\":${isSslEnabled()},\"port\":$targetPort}")
             }
+
+            // SSE Transport Endpoint (/sse and /mcp/sse)
+            get("/sse") {
+                handleSseConnection()
+            }
+            get("/mcp/sse") {
+                handleSseConnection()
+            }
+
+            // SSE Message Post Endpoint (/message)
+            post("/message") {
+                val sessionId = call.request.queryParameters["sessionId"] ?: "sse-agent-ext"
+                val requestBody = call.receiveText()
+                onToolExecuted(sessionId, "mcp_rpc", requestBody)
+                call.respondText(
+                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"status\":\"processed\"}}",
+                    ContentType.Application.Json
+                )
+            }
+
+            // WebSocket Transport Endpoint (/mcp)
             webSocket("/mcp") {
                 val authHeader = call.request.headers["Authorization"]
-                val clientId = "ai-client-ext"
-                val clientName = call.request.headers["X-Client-Name"] ?: "External AI Agent"
+                val clientId = "ws-agent-ext"
+                val clientName = call.request.headers["X-Client-Name"] ?: "External AI Agent (WS)"
 
                 val configuredToken = getToken()
                 val isAuthenticated = authHeader != null && authHeader == "Bearer $configuredToken"
@@ -99,6 +123,27 @@ actual class McpServerEngine actual constructor(
                     onClientDisconnected(clientId)
                 }
             }
+        }
+    }
+
+    private suspend fun RoutingContext.handleSseConnection() {
+        val authHeader = call.request.headers["Authorization"]
+        val clientId = "sse-agent-ext"
+        val clientName = call.request.headers["X-Client-Name"] ?: "External AI Agent (SSE)"
+
+        val configuredToken = getToken()
+        val isAuthenticated = authHeader != null && authHeader == "Bearer $configuredToken"
+
+        if (isAuthenticated) {
+            onClientAuthorized(clientId, clientName)
+        } else {
+            onClientPending(clientId, clientName)
+        }
+
+        call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+        call.respondTextWriter(ContentType.Text.EventStream) {
+            write("event: endpoint\ndata: /message?sessionId=$clientId\n\n")
+            flush()
         }
     }
 

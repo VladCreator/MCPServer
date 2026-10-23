@@ -6,7 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Unit tests for AppViewModel covering server state, client approval/rejection, token generation, SSL/TLS, and Theme toggling.
+ * Unit tests for AppViewModel covering server state, client approval/rejection, token generation, SSL/TLS, Theme toggling, and Local IP address resolution.
  */
 class AppViewModelTest {
 
@@ -100,5 +100,12 @@ class AppViewModelTest {
         
         viewModel.updateDarkMode(true)
         assertTrue(viewModel.isDarkMode)
+    }
+
+    @Test
+    fun testGetLocalIpAddress() {
+        val ip = getLocalIpAddress()
+        assertTrue(ip.isNotEmpty(), "IP address should not be empty")
+        assertTrue(ip.contains("."), "IP address should be a valid IPv4 string format")
     }
 }

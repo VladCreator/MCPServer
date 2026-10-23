@@ -603,57 +603,98 @@ fun App(viewModel: AppViewModel = viewModel()) {
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(1.dp, borderColor)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .background(
-                                        color = if (viewModel.isServerRunning) emeraldSuccess else textSecondary.copy(alpha = 0.5f),
-                                        shape = CircleShape
-                                    )
-                            )
-                            Column {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .background(
+                                            color = if (viewModel.isServerRunning) emeraldSuccess else textSecondary.copy(alpha = 0.5f),
+                                            shape = CircleShape
+                                        )
+                                )
                                 Text(
                                     text = viewModel.serverName,
                                     color = textPrimary,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+                            
+                            if (viewModel.isServerRunning && showUrlCopiedMessage) {
                                 Text(
-                                    text = if (viewModel.isServerRunning) viewModel.connectionUrl else "Server Stopped",
-                                    color = if (viewModel.isServerRunning) cyanElectric else textSecondary,
+                                    text = "Copied to Clipboard!",
+                                    color = emeraldSuccess,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
 
                         if (viewModel.isServerRunning) {
-                            Button(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(viewModel.connectionUrl))
-                                    showUrlCopiedMessage = true
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (showUrlCopiedMessage) "Copied!" else "Copy URL",
-                                    fontSize = 11.sp,
-                                    color = Color.White
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "WebSocket: ${viewModel.connectionUrl}",
+                                        color = cyanElectric,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "SSE Endpoint: ${viewModel.sseUrl}",
+                                        color = indigoGlow,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        onClick = {
+                                            clipboardManager.setText(AnnotatedString(viewModel.connectionUrl))
+                                            showUrlCopiedMessage = true
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = cyanElectric),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Copy WS", fontSize = 10.sp, color = if (isDark) bgObsidian else Color.White)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            clipboardManager.setText(AnnotatedString(viewModel.sseUrl))
+                                            showUrlCopiedMessage = true
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Copy SSE", fontSize = 10.sp, color = Color.White)
+                                    }
+                                }
                             }
+                        } else {
+                            Text(
+                                text = "Server Stopped",
+                                color = textSecondary,
+                                fontSize = 11.sp
+                            )
                         }
                     }
                 }

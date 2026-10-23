@@ -24,8 +24,16 @@ class AppViewModel : ViewModel() {
         get() {
             val scheme = if (sslEnabled) "wss" else "ws"
             val port = if (sslEnabled) 8443 else 8080
-            val ip = getLocalIpAddress()
+            val ip = getLocalIpAddress().trim()
             return "$scheme://$ip:$port/mcp"
+        }
+
+    val sseUrl: String
+        get() {
+            val scheme = if (sslEnabled) "https" else "http"
+            val port = if (sslEnabled) 8443 else 8080
+            val ip = getLocalIpAddress().trim()
+            return "$scheme://$ip:$port/sse"
         }
 
     var connectedClients = mutableStateOf(listOf<AiClient>())
