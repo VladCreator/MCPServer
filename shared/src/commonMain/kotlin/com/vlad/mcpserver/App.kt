@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,12 +21,13 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
- * Main Composable presenting the MCP server dashboard and settings screen with modern Light/Dark theme support.
+ * Main Composable presenting the MCP server dashboard, settings screen, and bottom connection status bar.
  */
 @Composable
 fun App(viewModel: AppViewModel = viewModel()) {
     val clipboardManager = LocalClipboardManager.current
     var showCopiedMessage by remember { mutableStateOf(false) }
+    var showUrlCopiedMessage by remember { mutableStateOf(false) }
 
     // Theme color palette definitions based on isDarkMode state
     val isDark = viewModel.isDarkMode
@@ -589,6 +591,68 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // Pinned Bottom Connection Status Bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = cardSlate,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, borderColor)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(
+                                        color = if (viewModel.isServerRunning) emeraldSuccess else textSecondary.copy(alpha = 0.5f),
+                                        shape = CircleShape
+                                    )
+                            )
+                            Column {
+                                Text(
+                                    text = viewModel.serverName,
+                                    color = textPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (viewModel.isServerRunning) viewModel.connectionUrl else "Server Stopped",
+                                    color = if (viewModel.isServerRunning) cyanElectric else textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        if (viewModel.isServerRunning) {
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(viewModel.connectionUrl))
+                                    showUrlCopiedMessage = true
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = if (showUrlCopiedMessage) "Copied!" else "Copy URL",
+                                    fontSize = 11.sp,
+                                    color = Color.White
+                                )
                             }
                         }
                     }

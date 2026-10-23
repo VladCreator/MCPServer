@@ -18,6 +18,16 @@ class AppViewModel : ViewModel() {
     var sslEnabled by mutableStateOf(false)
     var isDarkMode by mutableStateOf(true)
 
+    val serverName = "MCPServer Host"
+
+    val connectionUrl: String
+        get() {
+            val scheme = if (sslEnabled) "wss" else "ws"
+            val port = if (sslEnabled) 8443 else 8080
+            val ip = getLocalIpAddress()
+            return "$scheme://$ip:$port/mcp"
+        }
+
     var connectedClients = mutableStateOf(listOf<AiClient>())
         private set
 

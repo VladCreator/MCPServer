@@ -26,3 +26,8 @@ actual fun getDatabasePath(dbName: String): String {
     )
     return "${documentDirectory?.path}/${dbName}"
 }
+
+/**
+ * Provides the local IP address on iOS.
+ */
+actual fun getLocalIpAddress(): String = "127.0.0.1"
