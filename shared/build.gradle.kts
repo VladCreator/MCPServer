@@ -43,6 +43,7 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.compose.uiTooling)
+            implementation("io.ktor:ktor-server-netty:3.1.0")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
