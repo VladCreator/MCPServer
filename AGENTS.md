@@ -15,6 +15,11 @@ Its primary objectives are:
 4. **Modern, Clean, Intuitive UI**: Deliver a sleek, modern user experience with a custom modern color palette (avoiding default Material 3 color schemes), utilizing dark/deep tones, smooth cards, and clear status indicators.
 5. **SQLite Persistence**: Implement a SQLite database (via Room KMP or SQLite driver) to persistently store app settings, execution logs, and command histories.
 
+## Architectural Decisions & Security
+- **Hybrid Security Model**:
+  - **Bearer Token Authentication**: AI clients sending a valid `Authorization: Bearer <token>` header are automatically authorized and connected.
+  - **Manual Approval Fallback**: AI clients connecting without a valid token are placed in a pending queue. The user can interactively review and tap **Approve** or **Reject** directly from the main dashboard.
+
 ## Engineering Standards & Rules
 - **Language**: All source code, variable names, functions, classes, and code comments must be written strictly in **English**.
 

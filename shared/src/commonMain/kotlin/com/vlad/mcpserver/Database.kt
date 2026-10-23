@@ -77,6 +77,38 @@ class AppDatabase(private val dbPath: String) {
     }
 
     /**
+     * Saves or updates a setting in the database.
+     */
+    fun saveSetting(key: String, value: String) {
+        openConnection().use { connection ->
+            connection.prepare(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
+            ).use { statement ->
+                statement.bindText(1, key)
+                statement.bindText(2, value)
+                statement.step()
+            }
+        }
+    }
+
+    /**
+     * Retrieves a setting value by key from the database.
+     */
+    fun getSetting(key: String): String? {
+        openConnection().use { connection ->
+            connection.prepare(
+                "SELECT value FROM settings WHERE key = ?"
+            ).use { statement ->
+                statement.bindText(1, key)
+                if (statement.step()) {
+                    return statement.getText(0)
+                }
+            }
+        }
+        return null
+    }
+
+    /**
      * Inserts a new command execution log into history.
      */
     fun insertCommandHistory(aiClientId: String, toolName: String, arguments: String, status: String, result: String?) {

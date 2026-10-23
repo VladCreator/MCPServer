@@ -6,14 +6,22 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 
 /**
- * ViewModel managing the state of the MCP server, connected AI clients, and execution history.
+ * ViewModel managing settings, server state, connected AI clients, connection approvals, and execution history.
  */
 class AppViewModel : ViewModel() {
 
     var isServerRunning by mutableStateOf(false)
         private set
 
+    var showSettings by mutableStateOf(false)
+    var bearerToken by mutableStateOf("mcp_secret_token_2025")
+    var sslEnabled by mutableStateOf(false)
+    var isDarkMode by mutableStateOf(true)
+
     var connectedClients = mutableStateOf(listOf<AiClient>())
+        private set
+
+    var pendingClients = mutableStateOf(listOf<AiClient>())
         private set
 
     var executionLogs = mutableStateOf(listOf<ToolExecutionLog>())
@@ -21,14 +29,25 @@ class AppViewModel : ViewModel() {
 
     private var database: AppDatabase? = null
     private val mcpServerEngine = McpServerEngine(
-        onClientConnected = { id, name ->
-            connectedClients.value = listOf(
-                AiClient(id = id, name = name, status = "Connected", connectedAt = 1700000000L)
-            )
-            logCommand(id, "Connect", "Client connected to MCP port 8080", "SUCCESS", "Connection established.")
+        getToken = { bearerToken },
+        isSslEnabled = { sslEnabled },
+        onClientPending = { id, name ->
+            val client = AiClient(id = id, name = name, status = "Pending Approval", connectedAt = 1700000000L)
+            if (!pendingClients.value.any { it.id == id }) {
+                pendingClients.value = pendingClients.value + client
+            }
+            logCommand(id, "AuthPending", "Client requested access without valid token", "WARNING", "Pending manual approval.")
+        },
+        onClientAuthorized = { id, name ->
+            val client = AiClient(id = id, name = name, status = "Authenticated", connectedAt = 1700000000L)
+            if (!connectedClients.value.any { it.id == id }) {
+                connectedClients.value = connectedClients.value + client
+            }
+            logCommand(id, "AuthSuccess", "Client authenticated via Bearer Token", "SUCCESS", "Connection authorized.")
         },
         onClientDisconnected = { id ->
-            connectedClients.value = emptyList()
+            connectedClients.value = connectedClients.value.filter { it.id != id }
+            pendingClients.value = pendingClients.value.filter { it.id != id }
             logCommand(id, "Disconnect", "Client disconnected", "SUCCESS", "Connection closed.")
         },
         onToolExecuted = { clientId, toolName, args ->
@@ -42,33 +61,84 @@ class AppViewModel : ViewModel() {
             val db = AppDatabase(path)
             db.initDatabase()
             database = db
+            
+            // Load persisted settings
+            db.getSetting("bearer_token")?.let { bearerToken = it }
+            db.getSetting("ssl_enabled")?.let { sslEnabled = it.toBoolean() }
+            db.getSetting("dark_mode")?.let { isDarkMode = it.toBoolean() }
+
             loadHistory()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
+    fun toggleSettings() {
+        showSettings = !showSettings
+    }
+
+    fun updateBearerToken(newToken: String) {
+        bearerToken = newToken
+        database?.saveSetting("bearer_token", newToken)
+    }
+
     /**
-     * Toggles the MCP server active state, enabling/disabling port 8080.
+     * Generates a secure 14-character random Bearer token and saves it.
+     */
+    fun generateSecureToken(): String {
+        val charPool = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*"
+        val newToken = (1..14)
+            .map { kotlin.random.Random.nextInt(0, charPool.length) }
+            .map(charPool::get)
+            .joinToString("")
+        updateBearerToken(newToken)
+        return newToken
+    }
+
+    fun updateSslEnabled(enabled: Boolean) {
+        sslEnabled = enabled
+        database?.saveSetting("ssl_enabled", enabled.toString())
+    }
+
+    fun updateDarkMode(enabled: Boolean) {
+        isDarkMode = enabled
+        database?.saveSetting("dark_mode", enabled.toString())
+    }
+
+    /**
+     * Toggles the MCP server active state, enabling/disabling port 8080/8443.
      */
     fun toggleServer() {
         isServerRunning = !isServerRunning
         if (isServerRunning) {
             mcpServerEngine.start()
-            connectedClients.value = listOf(
-                AiClient(
-                    id = "ai-agent-01",
-                    name = "Claude Agent (Vision & UI Test)",
-                    status = "Ready on Port 8080",
-                    connectedAt = 1700000000L
-                )
-            )
-            logCommand("System", "StartServer", "Port: 8080", "SUCCESS", "MCP Server started successfully on port 8080.")
+            val port = if (sslEnabled) "8443 (HTTPS/WSS)" else "8080 (HTTP/WS)"
+            logCommand("System", "StartServer", "Port: $port", "SUCCESS", "MCP Server started successfully.")
         } else {
             mcpServerEngine.stop()
             connectedClients.value = emptyList()
+            pendingClients.value = emptyList()
             logCommand("System", "StopServer", "", "SUCCESS", "MCP Server stopped.")
         }
+    }
+
+    /**
+     * Manually approves a pending AI client connection request.
+     */
+    fun approveClient(clientId: String) {
+        val client = pendingClients.value.find { it.id == clientId } ?: return
+        pendingClients.value = pendingClients.value.filter { it.id != clientId }
+        val approvedClient = client.copy(status = "Manually Approved")
+        connectedClients.value = connectedClients.value + approvedClient
+        logCommand(clientId, "ManualApproval", "User approved client connection", "SUCCESS", "Client moved to active.")
+    }
+
+    /**
+     * Manually rejects a pending AI client connection request.
+     */
+    fun rejectClient(clientId: String) {
+        pendingClients.value = pendingClients.value.filter { it.id != clientId }
+        logCommand(clientId, "ManualReject", "User rejected client connection", "FAILED", "Connection denied.")
     }
 
     /**
