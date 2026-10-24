@@ -198,7 +198,7 @@ class McpDispatcher(
         }
 
         val result = try {
-            executor.execute(toolName, arguments)
+            executor.execute(session.client.id, toolName, arguments)
         } catch (error: kotlinx.coroutines.CancellationException) {
             throw error
         } catch (error: Throwable) {

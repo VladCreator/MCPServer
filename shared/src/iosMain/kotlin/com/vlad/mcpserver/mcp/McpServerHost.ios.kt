@@ -7,7 +7,8 @@ package com.vlad.mcpserver.mcp
  */
 actual fun createMcpServerHost(
     getToken: () -> String,
-    isSslEnabled: () -> Boolean
+    isSslEnabled: () -> Boolean,
+    shouldConfirmTools: () -> Boolean
 ): McpServerHost = UnsupportedMcpServerHost()
 
 /**

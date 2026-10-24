@@ -21,14 +21,24 @@ import java.io.File
 /**
  * Android implementation of the device tools.
  *
- * Only tools that can be implemented honestly with the current permissions are
- * advertised. Camera and touch injection need extra user consent and platform
- * services, so they stay unavailable for now.
+ * Sensitive tools (file reads, camera and touch injection) go through the
+ * consent gate supplied by the server host, which asks the user in the
+ * dashboard before executing them.
  */
-class AndroidToolExecutor(private val context: Context) : ToolExecutor {
+class AndroidToolExecutor(
+    private val context: Context,
+    private val consent: suspend (clientId: String, toolName: String, arguments: JsonObject) -> Boolean =
+        { _, _, _ -> true }
+) : ToolExecutor {
 
-    override suspend fun execute(toolName: String, arguments: JsonObject): ToolResult =
-        withContext(Dispatchers.IO) {
+    override suspend fun execute(
+        clientId: String,
+        toolName: String,
+        arguments: JsonObject
+    ): ToolResult = withContext(Dispatchers.IO) {
+            if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, arguments)) {
+                return@withContext ToolResult("User rejected the tool call.", isError = true)
+            }
             when (toolName) {
                 "get_device_info" -> deviceInfo()
                 "read_file" -> readFile(arguments)

@@ -88,6 +88,7 @@ class McpDispatcherTest {
         val text = result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
         assertEquals("file contents", text)
         assertEquals("read_file", executor.lastTool)
+        assertEquals("test-client", executor.lastClientId)
         assertEquals("/tmp/a.txt", executor.lastArguments!!["path"]!!.jsonPrimitive.content)
     }
 
@@ -245,10 +246,12 @@ class McpDispatcherTest {
     private class FakeExecutor(
         private val result: ToolResult
     ) : ToolExecutor {
+        var lastClientId: String? = null
         var lastTool: String? = null
         var lastArguments: JsonObject? = null
 
-        override suspend fun execute(toolName: String, arguments: JsonObject): ToolResult {
+        override suspend fun execute(clientId: String, toolName: String, arguments: JsonObject): ToolResult {
+            lastClientId = clientId
             lastTool = toolName
             lastArguments = arguments
             return result

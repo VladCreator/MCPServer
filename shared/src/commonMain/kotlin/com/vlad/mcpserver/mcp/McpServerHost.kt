@@ -19,12 +19,14 @@ interface McpServerHost {
     fun stop()
     fun approve(clientId: String)
     fun reject(clientId: String)
+    fun resolveToolApproval(requestId: String, approved: Boolean)
     fun close()
 }
 
 expect fun createMcpServerHost(
     getToken: () -> String,
-    isSslEnabled: () -> Boolean
+    isSslEnabled: () -> Boolean,
+    shouldConfirmTools: () -> Boolean
 ): McpServerHost
 
 /**
@@ -53,6 +55,8 @@ class UnsupportedMcpServerHost : McpServerHost {
     override fun approve(clientId: String) = Unit
 
     override fun reject(clientId: String) = Unit
+
+    override fun resolveToolApproval(requestId: String, approved: Boolean) = Unit
 
     override fun close() = Unit
 }

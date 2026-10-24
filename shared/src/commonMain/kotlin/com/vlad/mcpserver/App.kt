@@ -41,6 +41,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
     val connectedClients by viewModel.connectedClients.collectAsState()
     val pendingClients by viewModel.pendingClients.collectAsState()
     val executionLogs by viewModel.executionLogs.collectAsState()
+    val toolApprovalRequests by viewModel.toolApprovalRequests.collectAsState()
 
     val isRunning = status is ServerStatus.Running
     val isStarting = status is ServerStatus.Starting
@@ -298,6 +299,41 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             }
                         }
 
+                        // Sensitive tool confirmation
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(bgObsidian, RoundedCornerShape(12.dp))
+                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Confirm sensitive tools",
+                                    color = textPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Ask before camera, touch and file reads.",
+                                    color = textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Switch(
+                                checked = viewModel.confirmSensitiveTools,
+                                onCheckedChange = { viewModel.updateConfirmSensitiveTools(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = indigoGlow,
+                                    uncheckedThumbColor = textSecondary,
+                                    uncheckedTrackColor = bgObsidian
+                                )
+                            )
+                        }
+
                         // SSL/TLS Toggle Switch
                         Row(
                             modifier = Modifier
@@ -393,6 +429,76 @@ fun App(viewModel: AppViewModel = viewModel()) {
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                // Sensitive tool calls waiting for explicit approval
+                if (toolApprovalRequests.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = cardSlate)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "Tool approval required",
+                                color = warningYellow,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            toolApprovalRequests.forEach { request ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(bgObsidian, RoundedCornerShape(10.dp))
+                                        .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                                        .padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = request.toolName,
+                                        color = textPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${request.clientName} · ${request.clientId}",
+                                        color = textSecondary,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = request.arguments,
+                                        color = textSecondary,
+                                        fontSize = 11.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { viewModel.resolveToolApproval(request.id, true) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = emeraldSuccess),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Approve tool", fontSize = 11.sp, color = Color.White)
+                                        }
+                                        Button(
+                                            onClick = { viewModel.resolveToolApproval(request.id, false) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Reject", fontSize = 11.sp, color = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Pending AI Connection Requests Section
                 if (pendingClients.isNotEmpty()) {
                     Card(

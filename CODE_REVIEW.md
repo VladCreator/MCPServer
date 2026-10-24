@@ -57,14 +57,18 @@ Implementado y verificado en un emulador Android 16 (API 37):
       queda como `fg-service` y el servidor sigue respondiendo en segundo plano.
 - [x] Token cifrado en reposo con AES-256-GCM y Android Keystore; migración automática
       del valor plano existente.
-- [x] Tests: 34 pruebas (dispatcher, auth, ViewModel), `BUILD SUCCESSFUL`; compilación
-      iOS correcta.
+- [x] Confirmación por herramienta: `read_file`, `take_photo` y `touch_test` pausan
+      la llamada y muestran **Approve tool / Reject** en el dashboard; el gate se puede
+      desactivar en Ajustes.
+- [x] Tests: 37 pruebas (dispatcher, auth, ViewModel, aprobaciones), `BUILD SUCCESSFUL`;
+      compilación iOS correcta.
 
 Verificado con `curl` en el emulador: initialize, tools/list, tools/call,
 lectura de archivo, notificación, toma de foto JPEG de 189 KB devuelta como bloque
 `image`, tap que abrió Ajustes, aprobación pendiente, rechazo (401), SSE completo,
 DELETE de sesión (204/404), HTTPS con HTTP/2, fingerprint estable, foreground service
-activo y token descifrado tras reiniciar el proceso.
+activo, token descifrado tras reiniciar el proceso, aprobación/rechazo de una tool
+sensible y bypass del gate al desactivar la confirmación.
 
 Pendiente (P2): mDNS/QR, pulido de UI, firma/release, servicio `dataSync` de larga
 duración y reinstalación en la tablet. Ver [`README.md`](README.md) para el estado actual.
@@ -669,10 +673,11 @@ curl -i -X POST http://127.0.0.1:18080/mcp \
 | Estado de UI | ❌ "Active" aunque fallara | ✅ Stopped/Starting/Running/Failed + error |
 | DB | ❌ timestamps falsos, conexión por operación | ✅ WAL, timestamps reales, conexión serializada |
 | Herramientas | ❌ simuladas | ✅ 5 reales (cámara, touch, archivo, notificación, info) |
-| Tests | ⚠️ 10, sin servidor | ✅ 34, protocolo/auth/ViewModel |
+| Tests | ⚠️ 10, sin servidor | ✅ 37, protocolo/auth/ViewModel/aprobaciones |
 | Foreground service | ❌ | ✅ `dataSync` + notificación |
 | Cámara/touch | ❌ | ✅ CameraX (primer plano) y AccessibilityService |
 | Token en reposo | ❌ plano | ✅ AES-256-GCM + Android Keystore |
+| Confirmación por tool | ❌ | ✅ gate con Aprobar/Rechazar + ajuste |
 | mDNS/QR | ❌ | ⬜ P2 |
 
 El detalle de los cambios y los endpoints está en [`README.md`](README.md).

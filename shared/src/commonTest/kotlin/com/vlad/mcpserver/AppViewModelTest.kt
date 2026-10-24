@@ -4,6 +4,7 @@ import com.vlad.mcpserver.mcp.McpClient
 import com.vlad.mcpserver.mcp.McpServerHost
 import com.vlad.mcpserver.mcp.ServerEvent
 import com.vlad.mcpserver.mcp.ServerStatus
+import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.Transport
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -126,6 +127,56 @@ class AppViewModelTest {
     }
 
     @Test
+    fun toolApprovalRequestCanBeApproved() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+        val request = ToolApprovalRequest(
+            id = "approval-1",
+            clientId = "c1",
+            clientName = "Test Agent",
+            toolName = "take_photo",
+            arguments = "{}",
+            requestedAt = 1_700_000_000_000L
+        )
+
+        host.emit(ServerEvent.ToolApprovalRequested(request))
+        assertEquals(1, viewModel.toolApprovalRequests.value.size)
+
+        viewModel.resolveToolApproval("approval-1", true)
+
+        assertEquals(0, viewModel.toolApprovalRequests.value.size)
+        assertEquals(listOf("approval-1" to true), host.resolvedToolApprovals)
+    }
+
+    @Test
+    fun toolApprovalRequestIsRemovedWhenResolved() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+        val request = ToolApprovalRequest(
+            id = "approval-2",
+            clientId = "c1",
+            clientName = "Test Agent",
+            toolName = "read_file",
+            arguments = """{"path":"/tmp/x"}""",
+            requestedAt = 1_700_000_000_000L
+        )
+
+        host.emit(ServerEvent.ToolApprovalRequested(request))
+        assertEquals(1, viewModel.toolApprovalRequests.value.size)
+
+        host.emit(ServerEvent.ToolApprovalResolved("approval-2", false))
+        assertEquals(0, viewModel.toolApprovalRequests.value.size)
+    }
+
+    @Test
+    fun sensitiveToolConfirmationCanBeDisabled() = runTest {
+        val viewModel = viewModel(FakeMcpServerHost())
+        assertTrue(viewModel.confirmSensitiveTools)
+        viewModel.updateConfirmSensitiveTools(false)
+        assertFalse(viewModel.confirmSensitiveTools)
+    }
+
+    @Test
     fun failedStatusIsExposed() = runTest {
         val host = FakeMcpServerHost()
         val viewModel = viewModel(host)
@@ -145,7 +196,7 @@ class AppViewModelTest {
 
     private fun viewModel(host: FakeMcpServerHost): AppViewModel =
         AppViewModel(
-            hostFactory = { _, _ -> host },
+            hostFactory = { _, _, _ -> host },
             databasePathProvider = { null },
             dispatcher = UnconfinedTestDispatcher(),
             uiDispatcher = UnconfinedTestDispatcher()
@@ -171,6 +222,7 @@ class AppViewModelTest {
         var stopCount = 0
         val approved = mutableListOf<String>()
         val rejected = mutableListOf<String>()
+        val resolvedToolApprovals = mutableListOf<Pair<String, Boolean>>()
 
         override fun start() {
             startCount++
@@ -188,6 +240,10 @@ class AppViewModelTest {
 
         override fun reject(clientId: String) {
             rejected += clientId
+        }
+
+        override fun resolveToolApproval(requestId: String, approved: Boolean) {
+            resolvedToolApprovals += requestId to approved
         }
 
         override fun close() {

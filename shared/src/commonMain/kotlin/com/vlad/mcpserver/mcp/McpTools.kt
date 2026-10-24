@@ -15,7 +15,8 @@ data class ToolDefinition(
     val description: String,
     val inputSchema: JsonObject,
     val required: List<String> = emptyList(),
-    val available: Boolean = true
+    val available: Boolean = true,
+    val sensitive: Boolean = false
 )
 
 /**
@@ -31,7 +32,7 @@ data class ToolResult(
 )
 
 interface ToolExecutor {
-    suspend fun execute(toolName: String, arguments: JsonObject): ToolResult
+    suspend fun execute(clientId: String, toolName: String, arguments: JsonObject): ToolResult
 }
 
 /**
@@ -56,7 +57,8 @@ object McpTools {
                 put("type", "string")
                 put("description", "Absolute path inside the app sandbox")
             }
-        }
+        },
+        sensitive = true
     )
 
     val createNotification: ToolDefinition = ToolDefinition(
@@ -85,7 +87,8 @@ object McpTools {
                 put("description", "Optional quality hint; currently ignored")
             }
         },
-        available = true
+        available = true,
+        sensitive = true
     )
 
     val touchTest: ToolDefinition = ToolDefinition(
@@ -103,7 +106,8 @@ object McpTools {
                 put("description", "Y coordinate in screen pixels")
             }
         },
-        available = true
+        available = true,
+        sensitive = true
     )
 
     val all: List<ToolDefinition> = listOf(
@@ -117,6 +121,8 @@ object McpTools {
     fun available(): List<ToolDefinition> = all.filter { it.available }
 
     fun find(name: String): ToolDefinition? = available().firstOrNull { it.name == name }
+
+    fun isSensitive(name: String): Boolean = all.firstOrNull { it.name == name }?.sensitive == true
 
     private fun schema(
         required: List<String>,

@@ -9,6 +9,7 @@ import com.vlad.mcpserver.mcp.McpClient
 import com.vlad.mcpserver.mcp.McpServerHost
 import com.vlad.mcpserver.mcp.ServerEvent
 import com.vlad.mcpserver.mcp.ServerStatus
+import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.ToolCallOutcome
 import com.vlad.mcpserver.mcp.createMcpServerHost
 import com.vlad.mcpserver.mcp.newSecureToken
@@ -35,9 +36,10 @@ import kotlinx.coroutines.withContext
  * lists, so there is no read-modify-write race between transports.
  */
 class AppViewModel(
-    hostFactory: (() -> String, () -> Boolean) -> McpServerHost = { getToken, isSsl ->
-        createMcpServerHost(getToken, isSsl)
-    },
+    hostFactory: (() -> String, () -> Boolean, () -> Boolean) -> McpServerHost =
+        { getToken, isSsl, confirmTools ->
+            createMcpServerHost(getToken, isSsl, confirmTools)
+        },
     private val databasePathProvider: () -> String? = {
         runCatching { getDatabasePath("mcp_server.db") }.getOrNull()
     },
@@ -59,6 +61,9 @@ class AppViewModel(
     var sslEnabled by mutableStateOf(false)
         private set
 
+    var confirmSensitiveTools by mutableStateOf(true)
+        private set
+
     var storageError by mutableStateOf<String?>(null)
         private set
 
@@ -66,7 +71,11 @@ class AppViewModel(
 
     val serverName = "MCPServer Host"
 
-    private val serverHost: McpServerHost = hostFactory({ bearerToken }, { sslEnabled })
+    private val serverHost: McpServerHost = hostFactory(
+        { bearerToken },
+        { sslEnabled },
+        { confirmSensitiveTools }
+    )
     val serverStatus: StateFlow<ServerStatus> = serverHost.status
 
     private val connectedState = MutableStateFlow<List<AiClient>>(emptyList())
@@ -77,6 +86,9 @@ class AppViewModel(
 
     private val executionLogsState = MutableStateFlow<List<ToolExecutionLog>>(emptyList())
     val executionLogs: StateFlow<List<ToolExecutionLog>> = executionLogsState.asStateFlow()
+
+    private val toolApprovalsState = MutableStateFlow<List<ToolApprovalRequest>>(emptyList())
+    val toolApprovalRequests: StateFlow<List<ToolApprovalRequest>> = toolApprovalsState.asStateFlow()
 
     private var database: AppDatabase? = null
     private var tokenSaveJob: Job? = null
@@ -157,6 +169,28 @@ class AppViewModel(
         scope.launch { database?.saveSetting("dark_mode", enabled.toString()) }
     }
 
+    fun updateConfirmSensitiveTools(enabled: Boolean) {
+        confirmSensitiveTools = enabled
+        scope.launch { database?.saveSetting("confirm_tools", enabled.toString()) }
+    }
+
+    fun resolveToolApproval(requestId: String, approved: Boolean) {
+        val request = toolApprovalsState.value.firstOrNull { it.id == requestId }
+        toolApprovalsState.update { list -> list.filterNot { it.id == requestId } }
+        serverHost.resolveToolApproval(requestId, approved)
+        if (request != null) {
+            scope.launch {
+                logEvent(
+                    request.clientId,
+                    "ToolApproval",
+                    request.toolName,
+                    if (approved) "SUCCESS" else "FAILED",
+                    if (approved) "User approved the tool call." else "User rejected the tool call."
+                )
+            }
+        }
+    }
+
     fun toggleServer() {
         when (serverStatus.value) {
             is ServerStatus.Running, is ServerStatus.Starting -> stopServer()
@@ -218,6 +252,7 @@ class AppViewModel(
         val needsMigration = rawToken != null && !SecretCodec.isEncrypted(rawToken) && storedToken != null
         val storedSsl = opened.getSetting("ssl_enabled")?.toBooleanStrictOrNull()
         val storedDark = opened.getSetting("dark_mode")?.toBooleanStrictOrNull()
+        val storedConfirmTools = opened.getSetting("confirm_tools")?.toBooleanStrictOrNull()
         val tokenToPersist = if (storedToken == null) bearerToken else null
         val logs = opened.getCommandHistories()
 
@@ -225,6 +260,7 @@ class AppViewModel(
             if (storedToken != null) bearerToken = storedToken
             storedSsl?.let { sslEnabled = it }
             storedDark?.let { isDarkMode = it }
+            storedConfirmTools?.let { confirmSensitiveTools = it }
             executionLogsState.value = logs
         }
 
@@ -281,6 +317,17 @@ class AppViewModel(
             is ServerEvent.Disconnected -> {
                 pendingState.update { list -> list.filterNot { it.id == event.clientId } }
                 connectedState.update { list -> list.filterNot { it.id == event.clientId } }
+                toolApprovalsState.update { list -> list.filterNot { it.clientId == event.clientId } }
+            }
+
+            is ServerEvent.ToolApprovalRequested -> {
+                toolApprovalsState.update { list ->
+                    if (list.any { it.id == event.request.id }) list else list + event.request
+                }
+            }
+
+            is ServerEvent.ToolApprovalResolved -> {
+                toolApprovalsState.update { list -> list.filterNot { it.id == event.requestId } }
             }
 
             is ServerEvent.ToolCalled -> {

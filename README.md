@@ -17,6 +17,9 @@ not implemented there yet).
   `tools/list`, `tools/call`, batching and standard error codes.
 - **Hybrid authentication**: `Authorization: Bearer <token>` or manual approval from
   the dashboard (pending requests wait up to 60 seconds).
+- **Per-tool confirmation**: sensitive tools (`read_file`, `take_photo`,
+  `touch_test`) pause and ask for **Approve tool / Reject** in the dashboard before
+  executing. The confirmation can be disabled in Settings.
 - **TLS/HTTPS** with a self-signed certificate generated on first use. The SHA-256
   fingerprint is shown in the dashboard.
 - **SQLite** persistence for settings and command history (WAL, real timestamps,
@@ -135,9 +138,12 @@ origin (DNS-rebinding/CSRF protection) and limit request bodies to 256 KB.
 | `take_photo` | Available (foreground) | Captures a JPEG with CameraX and returns an MCP `image` content block plus the file path. The app must be in the foreground. |
 | `touch_test` | Available (accessibility) | Injects a tap at `x,y`. Requires the user to enable **MCP Touch Service** in Android accessibility settings. |
 
-Tools that cannot run in the current state return `isError: true` with an actionable
-message instead of a fake success. Touch injection is powerful: enable the
-accessibility service only if you trust the clients that hold the bearer token.
+Sensitive tools (`read_file`, `take_photo`, `touch_test`) wait for an explicit
+**Approve tool** action in the dashboard before running. The **Confirm sensitive
+tools** switch in Settings disables this gate. Tools that cannot run in the current
+state return `isError: true` with an actionable message instead of a fake success.
+Touch injection is powerful: enable the accessibility service only if you trust the
+clients that hold the bearer token.
 
 ## TLS
 
@@ -160,10 +166,11 @@ addresses, `localhost` and `127.0.0.1`:
 ./gradlew :shared:compileKotlinIosSimulatorArm64
 ```
 
-The suite (34 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
-validation, errors/batches/notifications, bearer parsing, token storage behavior and
-the ViewModel event flow. Camera and accessibility behavior are verified manually on a
-device/emulator because they need platform services.
+The suite (37 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
+validation, errors/batches/notifications, bearer parsing, token storage behavior,
+tool-approval events and the ViewModel event flow. Camera, accessibility, foreground
+service and approval UI are verified manually on a device/emulator because they need
+platform services.
 
 ## Architecture
 
@@ -196,9 +203,9 @@ is consistent across HTTP, SSE and WebSocket.
 - `take_photo` only runs while the app is in the foreground. Capturing from the
   background would require a camera foreground service and Android's background
   camera restrictions.
-- `touch_test` requires the user to enable the accessibility service manually. There is
-  no per-call confirmation yet; the bearer token and pending-approval flow are the
-  current gates.
+- `touch_test` requires the user to enable the accessibility service manually.
+- The per-tool confirmation can be disabled; when disabled, an approved session can
+  call sensitive tools without another prompt.
 - The app does not advertise itself over mDNS/Bonjour or show a QR code yet.
 - Self-signed TLS requires client trust; for production, use a proper certificate or
   pin the fingerprint.

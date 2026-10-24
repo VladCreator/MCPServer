@@ -71,16 +71,18 @@ private const val DEFAULT_HTTPS_PORT = 8443
 private const val APPROVAL_TIMEOUT_MS = 60_000L
 private const val SESSION_IDLE_TIMEOUT_MS = 10 * 60_000L
 private const val MAX_BODY_BYTES = 256 * 1024
+private const val TOOL_APPROVAL_TIMEOUT_MS = 60_000L
 private const val KEEP_ALIVE_INTERVAL_MS = 15_000L
 
 actual fun createMcpServerHost(
     getToken: () -> String,
-    isSslEnabled: () -> Boolean
+    isSslEnabled: () -> Boolean,
+    shouldConfirmTools: () -> Boolean
 ): McpServerHost {
     if (!isAppContextInitialized()) {
         return UnsupportedMcpServerHost()
     }
-    return AndroidMcpServerHost(appContext, getToken, isSslEnabled)
+    return AndroidMcpServerHost(appContext, getToken, isSslEnabled, shouldConfirmTools)
 }
 
 private val secureRandom = SecureRandom()
@@ -104,7 +106,8 @@ actual fun newSecureToken(): String {
 private class AndroidMcpServerHost(
     private val context: Context,
     private val getToken: () -> String,
-    private val isSslEnabled: () -> Boolean
+    private val isSslEnabled: () -> Boolean,
+    private val shouldConfirmTools: () -> Boolean
 ) : McpServerHost {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -119,13 +122,16 @@ private class AndroidMcpServerHost(
     private val sessions = ConcurrentHashMap<String, McpSession>()
     private val pending = ConcurrentHashMap<String, McpSession>()
     private val lastSeen = ConcurrentHashMap<String, Long>()
+    private val toolApprovals = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Boolean>>()
 
     private var engine: EmbeddedServer<*, *>? = null
     private var reaper: Job? = null
 
     private val dispatcher = McpDispatcher(
         tools = McpTools.available(),
-        executor = AndroidToolExecutor(context),
+        executor = AndroidToolExecutor(context) { clientId, toolName, arguments ->
+            requestToolApproval(clientId, toolName, arguments)
+        },
         onToolCall = { record -> eventFlow.tryEmit(ServerEvent.ToolCalled(record)) }
     )
 
@@ -169,12 +175,17 @@ private class AndroidMcpServerHost(
         session.reject()
     }
 
+    override fun resolveToolApproval(requestId: String, approved: Boolean) {
+        toolApprovals.remove(requestId)?.complete(approved)
+    }
+
     override fun close() {
         reaper?.cancel()
         reaper = null
         val current = engine
         engine = null
         runCatching { current?.stop(0, 250) }
+        cancelToolApprovals()
         closeAllSessions()
         scope.cancel()
     }
@@ -233,6 +244,7 @@ private class AndroidMcpServerHost(
         if (current != null) {
             runCatching { current.stop(500, 1_500) }
         }
+        cancelToolApprovals()
         closeAllSessions()
         statusState.value = ServerStatus.Stopped
     }
@@ -539,6 +551,44 @@ private class AndroidMcpServerHost(
 
         closeSession(session)
         return false
+    }
+
+    private suspend fun requestToolApproval(
+        clientId: String,
+        toolName: String,
+        arguments: kotlinx.serialization.json.JsonObject
+    ): Boolean {
+        if (!shouldConfirmTools() || !McpTools.isSensitive(toolName)) return true
+
+        val client = sessions[clientId]?.client
+        val request = ToolApprovalRequest(
+            id = UUID.randomUUID().toString(),
+            clientId = clientId,
+            clientName = client?.name ?: "Unknown client",
+            toolName = toolName,
+            arguments = arguments.toString().take(2_000),
+            requestedAt = nowMillis()
+        )
+        val decision = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        toolApprovals[request.id] = decision
+        eventFlow.emit(ServerEvent.ToolApprovalRequested(request))
+
+        val approved = try {
+            withTimeoutOrNull(TOOL_APPROVAL_TIMEOUT_MS) { decision.await() } ?: false
+        } catch (error: CancellationException) {
+            toolApprovals.remove(request.id)
+            eventFlow.tryEmit(ServerEvent.ToolApprovalResolved(request.id, false))
+            throw error
+        }
+        toolApprovals.remove(request.id)
+        eventFlow.tryEmit(ServerEvent.ToolApprovalResolved(request.id, approved))
+        return approved
+    }
+
+    private fun cancelToolApprovals() {
+        val snapshot = toolApprovals.values.toList()
+        toolApprovals.clear()
+        snapshot.forEach { it.complete(false) }
     }
 
     private fun newSession(call: ApplicationCall, transport: Transport): McpSession {

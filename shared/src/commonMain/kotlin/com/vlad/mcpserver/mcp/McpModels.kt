@@ -54,6 +54,18 @@ data class ToolCallRecord(
 )
 
 /**
+ * A sensitive tool call waiting for explicit user approval.
+ */
+data class ToolApprovalRequest(
+    val id: String,
+    val clientId: String,
+    val clientName: String,
+    val toolName: String,
+    val arguments: String,
+    val requestedAt: Long
+)
+
+/**
  * Events emitted by the platform server host and consumed by the ViewModel.
  */
 sealed interface ServerEvent {
@@ -61,6 +73,8 @@ sealed interface ServerEvent {
     data class Authorized(val client: McpClient) : ServerEvent
     data class Disconnected(val clientId: String) : ServerEvent
     data class ToolCalled(val record: ToolCallRecord) : ServerEvent
+    data class ToolApprovalRequested(val request: ToolApprovalRequest) : ServerEvent
+    data class ToolApprovalResolved(val requestId: String, val approved: Boolean) : ServerEvent
 }
 
 /**
