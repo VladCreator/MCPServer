@@ -14,26 +14,40 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         appContext = applicationContext
 
-        requestNotificationPermissionIfNeeded()
+        requestRuntimePermissionsIfNeeded()
 
         setContent {
             App()
         }
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            requestPermissions(
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                NOTIFICATION_PERMISSION_REQUEST
-            )
+    override fun onResume() {
+        super.onResume()
+        AppVisibility.isForeground = true
+    }
+
+    override fun onPause() {
+        AppVisibility.isForeground = false
+        super.onPause()
+    }
+
+    private fun requestRuntimePermissionsIfNeeded() {
+        val permissions = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                add(Manifest.permission.CAMERA)
+            }
+        }
+        if (permissions.isNotEmpty()) {
+            requestPermissions(permissions.toTypedArray(), RUNTIME_PERMISSIONS_REQUEST)
         }
     }
 
     private companion object {
-        const val NOTIFICATION_PERMISSION_REQUEST = 100
+        const val RUNTIME_PERMISSIONS_REQUEST = 100
     }
 }

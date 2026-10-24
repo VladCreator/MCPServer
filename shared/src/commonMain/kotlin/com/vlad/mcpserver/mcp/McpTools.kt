@@ -25,7 +25,9 @@ data class ToolDefinition(
  */
 data class ToolResult(
     val text: String,
-    val isError: Boolean = false
+    val isError: Boolean = false,
+    val imageBase64: String? = null,
+    val imageMimeType: String? = null
 )
 
 interface ToolExecutor {
@@ -75,22 +77,33 @@ object McpTools {
 
     val takePhoto: ToolDefinition = ToolDefinition(
         name = "take_photo",
-        description = "Capture a photo with the device camera (not enabled yet).",
+        description = "Capture a JPEG photo with the device camera. The MCPServer app must be " +
+            "in the foreground while the capture runs.",
         inputSchema = schema(emptyList()) {
-            putJsonObject("quality") { put("type", "string") }
+            putJsonObject("quality") {
+                put("type", "string")
+                put("description", "Optional quality hint; currently ignored")
+            }
         },
-        available = false
+        available = true
     )
 
     val touchTest: ToolDefinition = ToolDefinition(
         name = "touch_test",
-        description = "Inject a tap on the device screen (requires the accessibility service, not enabled yet).",
+        description = "Inject a tap at the given screen coordinates. Requires the user to enable " +
+            "the MCP Touch Service in Android accessibility settings.",
         required = listOf("x", "y"),
         inputSchema = schema(listOf("x", "y")) {
-            putJsonObject("x") { put("type", "integer") }
-            putJsonObject("y") { put("type", "integer") }
+            putJsonObject("x") {
+                put("type", "integer")
+                put("description", "X coordinate in screen pixels")
+            }
+            putJsonObject("y") {
+                put("type", "integer")
+                put("description", "Y coordinate in screen pixels")
+            }
         },
-        available = false
+        available = true
     )
 
     val all: List<ToolDefinition> = listOf(

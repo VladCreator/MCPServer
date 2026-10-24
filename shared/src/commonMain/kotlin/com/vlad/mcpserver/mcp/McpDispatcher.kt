@@ -228,6 +228,15 @@ class McpDispatcher(
             id,
             buildJsonObject {
                 putJsonArray("content") {
+                    if (result.imageBase64 != null) {
+                        add(
+                            buildJsonObject {
+                                put("type", "image")
+                                put("data", result.imageBase64)
+                                put("mimeType", result.imageMimeType ?: "image/jpeg")
+                            }
+                        )
+                    }
                     add(
                         buildJsonObject {
                             put("type", "text")

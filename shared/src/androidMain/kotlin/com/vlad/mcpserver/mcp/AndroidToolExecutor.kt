@@ -7,6 +7,9 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import com.vlad.mcpserver.McpTouchAccessibilityService
+import com.vlad.mcpserver.AppVisibility
+import com.vlad.mcpserver.CameraCapture
 import com.vlad.mcpserver.getLocalIpAddress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,6 +33,8 @@ class AndroidToolExecutor(private val context: Context) : ToolExecutor {
                 "get_device_info" -> deviceInfo()
                 "read_file" -> readFile(arguments)
                 "create_notification" -> createNotification(arguments)
+                "touch_test" -> tap(arguments)
+                "take_photo" -> takePhoto()
                 else -> ToolResult("Tool '$toolName' is not available.", isError = true)
             }
         }
@@ -135,6 +140,70 @@ class AndroidToolExecutor(private val context: Context) : ToolExecutor {
             ToolResult("Notification posted with id $id: $title")
         }.getOrElse { error ->
             ToolResult("Unable to post notification: ${error.message}", isError = true)
+        }
+    }
+
+    private suspend fun takePhoto(): ToolResult {
+        if (!AppVisibility.isForeground) {
+            return ToolResult(
+                "Camera capture is only allowed while the MCPServer app is in the foreground. " +
+                    "Open the app and try again.",
+                isError = true
+            )
+        }
+        if (context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return ToolResult(
+                "Camera permission is not granted. Enable it in Android settings and try again.",
+                isError = true
+            )
+        }
+        val captured = CameraCapture(context).capture()
+        return captured.fold(
+            onSuccess = { file ->
+                val bytes = runCatching { file.readBytes() }.getOrNull()
+                if (bytes == null) {
+                    ToolResult("Photo saved to ${file.absolutePath} but could not be read.", isError = true)
+                } else {
+                    ToolResult(
+                        text = "Photo captured: ${file.absolutePath} (${bytes.size} bytes)",
+                        imageBase64 = java.util.Base64.getEncoder().encodeToString(bytes),
+                        imageMimeType = "image/jpeg"
+                    )
+                }
+            },
+            onFailure = { error ->
+                ToolResult(
+                    "Camera capture failed: ${error.message ?: error::class.simpleName}",
+                    isError = true
+                )
+            }
+        )
+    }
+
+    private suspend fun tap(arguments: JsonObject): ToolResult {
+        val service = McpTouchAccessibilityService.instance()
+            ?: return ToolResult(
+                "Touch injection is disabled. Enable 'MCP Touch Service' in " +
+                    "Android Settings > Accessibility, then try again.",
+                isError = true
+            )
+        val x = (arguments["x"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull()
+        val y = (arguments["y"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull()
+        if (x == null || y == null) {
+            return ToolResult("Arguments x and y are required.", isError = true)
+        }
+        val metrics = context.resources.displayMetrics
+        if (x < 0f || y < 0f || x >= metrics.widthPixels || y >= metrics.heightPixels) {
+            return ToolResult(
+                "Coordinates are outside the screen (${metrics.widthPixels}x${metrics.heightPixels}).",
+                isError = true
+            )
+        }
+        val dispatched = service.tap(x, y)
+        return if (dispatched) {
+            ToolResult("Tap dispatched at (${x.toInt()}, ${y.toInt()}).")
+        } else {
+            ToolResult("The system rejected the gesture.", isError = true)
         }
     }
 

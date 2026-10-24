@@ -68,8 +68,8 @@ class McpDispatcherTest {
         assertTrue(tools.contains("read_file"))
         assertTrue(tools.contains("create_notification"))
         assertTrue(tools.contains("get_device_info"))
-        assertFalse(tools.contains("take_photo"))
-        assertFalse(tools.contains("touch_test"))
+        assertTrue(tools.contains("touch_test"))
+        assertTrue(tools.contains("take_photo"))
     }
 
     @Test
@@ -112,6 +112,19 @@ class McpDispatcherTest {
         val response = dispatcher.handle(
             session,
             """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"read_file","arguments":{}}}"""
+        )!!.jsonObject
+
+        assertEquals(JsonRpcErrorCode.INVALID_PARAMS, errorCode(response))
+    }
+
+    @Test
+    fun touchTestRequiresCoordinates() = runTest {
+        val dispatcher = dispatcher()
+        val session = initializedSession(dispatcher)
+
+        val response = dispatcher.handle(
+            session,
+            """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"touch_test","arguments":{}}}"""
         )!!.jsonObject
 
         assertEquals(JsonRpcErrorCode.INVALID_PARAMS, errorCode(response))

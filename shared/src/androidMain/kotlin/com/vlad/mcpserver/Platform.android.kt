@@ -3,6 +3,7 @@ package com.vlad.mcpserver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -112,5 +113,16 @@ actual fun stopServerForegroundService() {
     if (!::appContext.isInitialized) return
     runCatching {
         appContext.stopService(Intent(appContext, McpServerKeepAliveService::class.java))
+    }
+}
+
+
+actual fun openSystemAccessibilitySettings() {
+    if (!::appContext.isInitialized) return
+    runCatching {
+        appContext.startActivity(
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
     }
 }

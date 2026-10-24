@@ -334,6 +334,38 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             )
                         }
 
+                        // Touch injection access
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(bgObsidian, RoundedCornerShape(12.dp))
+                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Touch injection (touch_test)",
+                                    color = textPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Enable MCP Touch Service in Android accessibility settings.",
+                                    color = textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Button(
+                                onClick = { viewModel.openTouchAccessibilitySettings() },
+                                colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Open", fontSize = 11.sp)
+                            }
+                        }
+
                         Spacer(modifier = Modifier.weight(1f))
 
                         // Info Box

@@ -132,7 +132,7 @@ class AppViewModel(
         tokenSaveJob?.cancel()
         tokenSaveJob = scope.launch {
             delay(500)
-            database?.saveSetting("bearer_token", cleaned)
+            persistToken(cleaned)
         }
     }
 
@@ -173,6 +173,10 @@ class AppViewModel(
         serverHost.stop()
     }
 
+    fun openTouchAccessibilitySettings() {
+        openSystemAccessibilitySettings()
+    }
+
     /**
      * Approves a pending session. The transport that is waiting for the
      * decision resumes and emits [ServerEvent.Authorized].
@@ -207,9 +211,11 @@ class AppViewModel(
         }
         database = opened
 
-        val storedToken = opened.getSetting("bearer_token")
+        val rawToken = opened.getSetting("bearer_token")
+        val storedToken = decodeToken(rawToken)
             ?.takeIf { it.isNotBlank() }
             ?.let { BearerAuth.sanitizeToken(it) }
+        val needsMigration = rawToken != null && !SecretCodec.isEncrypted(rawToken) && storedToken != null
         val storedSsl = opened.getSetting("ssl_enabled")?.toBooleanStrictOrNull()
         val storedDark = opened.getSetting("dark_mode")?.toBooleanStrictOrNull()
         val tokenToPersist = if (storedToken == null) bearerToken else null
@@ -222,10 +228,23 @@ class AppViewModel(
             executionLogsState.value = logs
         }
 
-        if (tokenToPersist != null) {
-            // First run: persist the random token generated at construction.
-            opened.saveSetting("bearer_token", tokenToPersist)
+        if (needsMigration && storedToken != null) {
+            persistToken(storedToken)
         }
+        if (tokenToPersist != null) {
+            // First run (or an unreadable keystore entry): persist the current token.
+            persistToken(tokenToPersist)
+        }
+    }
+
+    private fun decodeToken(raw: String?): String? {
+        if (raw == null) return null
+        return if (SecretCodec.isEncrypted(raw)) decryptSecret(raw) else raw
+    }
+
+    private suspend fun persistToken(token: String) {
+        val encoded = encryptSecret(token) ?: token
+        database?.saveSetting("bearer_token", encoded)
     }
 
     private suspend fun handleEvent(event: ServerEvent) {

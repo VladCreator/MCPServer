@@ -41,3 +41,6 @@ actual fun nowMillis(): Long = time(null) * 1000L
 actual fun startServerForegroundService(port: Int, secure: Boolean) = Unit
 
 actual fun stopServerForegroundService() = Unit
+
+
+actual fun openSystemAccessibilitySettings() = Unit

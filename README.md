@@ -23,6 +23,10 @@ not implemented there yet).
   bounded history).
 - **Dashboard**: server status, pending requests with remote address, connected agents,
   tool execution log and connection URLs.
+- **Foreground service**: while the server runs, a `dataSync` foreground service keeps
+  the process alive with a persistent notification.
+- **Device tools**: camera capture (CameraX), tap injection (AccessibilityService),
+  sandboxed file reads and notifications.
 
 ## Requirements
 
@@ -51,7 +55,9 @@ development environment.
 2. Open **Settings** and copy the bearer token. It is generated on first launch and
    stored in the app's database.
 3. Configure your MCP client with the `/mcp` URL and the `Authorization: Bearer <token>`
-   header.
+   header. The app requests notification and camera permissions on first launch. For
+   `touch_test`, open **Settings → Touch injection → Open** and enable
+   **MCP Touch Service** in Android accessibility settings.
 
 Example client configuration (the exact schema depends on the client):
 
@@ -126,11 +132,12 @@ origin (DNS-rebinding/CSRF protection) and limit request bodies to 256 KB.
 | `get_device_info` | Available | Android version, manufacturer, model, app version and local IP. |
 | `read_file` | Available | Reads UTF-8 text files inside the app sandbox (`files`, `cache`, external files). Max 64 KB. |
 | `create_notification` | Available | Posts a system notification. Requires the notification permission. |
-| `take_photo` | Not advertised yet | Needs CameraX, runtime permission and a foreground camera flow. |
-| `touch_test` | Not advertised yet | Needs an AccessibilityService enabled by the user. |
+| `take_photo` | Available (foreground) | Captures a JPEG with CameraX and returns an MCP `image` content block plus the file path. The app must be in the foreground. |
+| `touch_test` | Available (accessibility) | Injects a tap at `x,y`. Requires the user to enable **MCP Touch Service** in Android accessibility settings. |
 
-Unavailable tools are intentionally omitted from `tools/list` instead of returning
-fake success messages.
+Tools that cannot run in the current state return `isError: true` with an actionable
+message instead of a fake success. Touch injection is powerful: enable the
+accessibility service only if you trust the clients that hold the bearer token.
 
 ## TLS
 
@@ -143,6 +150,8 @@ addresses, `localhost` and `127.0.0.1`:
 - Clients must trust the certificate (or use "insecure/trust on first use" for local
   testing). If the device IP changes, the certificate is regenerated and the
   fingerprint changes.
+- The bearer token is encrypted at rest with an AES-256-GCM key in the Android
+  Keystore; the app database only stores the `enc:v1:` payload.
 
 ## Tests
 
@@ -151,8 +160,10 @@ addresses, `localhost` and `127.0.0.1`:
 ./gradlew :shared:compileKotlinIosSimulatorArm64
 ```
 
-The suite covers JSON-RPC dispatch, protocol negotiation, tool schema validation,
-errors/batches/notifications, bearer parsing and the ViewModel event flow.
+The suite (34 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
+validation, errors/batches/notifications, bearer parsing, token storage behavior and
+the ViewModel event flow. Camera and accessibility behavior are verified manually on a
+device/emulator because they need platform services.
 
 ## Architecture
 
@@ -166,6 +177,10 @@ shared/
     Database.kt      SQLite (WAL, serialized access)
   androidMain/
     mcp/             Ktor server (CIO/Netty), Streamable HTTP/SSE/WS, TLS, tools
+    McpServerKeepAliveService.kt      Foreground service + notification
+    McpTouchAccessibilityService.kt   Tap injection
+    CameraCapture.kt                  CameraX still capture
+    SecretStorage.android.kt          Keystore AES/GCM token encryption
   iosMain/           Unsupported host (server is Android-only)
 ```
 
@@ -175,13 +190,16 @@ is consistent across HTTP, SSE and WebSocket.
 
 ## Known limitations / next steps
 
-- The server is not a foreground service yet. It runs while the app process is alive;
-  Android may kill it in the background. A foreground service with a persistent
-  notification is the next P1 item.
-- Camera capture and touch injection need additional platform services and user
-  consent.
-- The bearer token is stored in the app's SQLite database. App backup is disabled,
-  but encrypting the token with the Android Keystore is still pending.
+- The keep-alive service uses `dataSync`; Android 15+ limits that foreground type to a
+  few hours per day. A long-running host should use a dedicated foreground type and a
+  battery-optimization exemption.
+- `take_photo` only runs while the app is in the foreground. Capturing from the
+  background would require a camera foreground service and Android's background
+  camera restrictions.
+- `touch_test` requires the user to enable the accessibility service manually. There is
+  no per-call confirmation yet; the bearer token and pending-approval flow are the
+  current gates.
+- The app does not advertise itself over mDNS/Bonjour or show a QR code yet.
 - Self-signed TLS requires client trust; for production, use a proper certificate or
   pin the fingerprint.
 

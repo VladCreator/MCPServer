@@ -45,6 +45,10 @@ kotlin {
             implementation(libs.compose.uiTooling)
             implementation("io.ktor:ktor-server-netty:3.1.0")
             implementation("org.bouncycastle:bcpkix-jdk18on:1.80.2")
+            implementation(libs.androidx.camera.core)
+            implementation(libs.androidx.camera.camera2)
+            implementation(libs.androidx.camera.lifecycle)
+            implementation(libs.androidx.core.ktx)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

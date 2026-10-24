@@ -50,19 +50,24 @@ Implementado y verificado en un emulador Android 16 (API 37):
 - [x] SQLite con WAL, timestamps reales, `last_insert_rowid`, una conexión serializada
       y poda del historial.
 - [x] Herramientas reales: `get_device_info`, `read_file` (sandbox, 64 KB) y
-      `create_notification` (permiso POST_NOTIFICATIONS). `take_photo` y `touch_test`
-      no se anuncian hasta implementar CameraX/AccessibilityService.
+      `create_notification` (permiso POST_NOTIFICATIONS), `take_photo` (CameraX) y
+      `touch_test` (AccessibilityService).
 - [x] Token aleatorio de 32 bytes (Base64 URL-safe) persistido, sin token por defecto.
-- [x] Tests: 33 pruebas (dispatcher, auth, ViewModel), `BUILD SUCCESSFUL`; compilación
+- [x] Servicio en primer plano (`dataSync`) con notificación persistente; el proceso
+      queda como `fg-service` y el servidor sigue respondiendo en segundo plano.
+- [x] Token cifrado en reposo con AES-256-GCM y Android Keystore; migración automática
+      del valor plano existente.
+- [x] Tests: 34 pruebas (dispatcher, auth, ViewModel), `BUILD SUCCESSFUL`; compilación
       iOS correcta.
 
 Verificado con `curl` en el emulador: initialize, tools/list, tools/call,
-lectura de archivo, notificación, aprobación pendiente, rechazo (401), SSE completo,
-DELETE de sesión (204/404), HTTPS con HTTP/2 y fingerprint estable.
+lectura de archivo, notificación, toma de foto JPEG de 189 KB devuelta como bloque
+`image`, tap que abrió Ajustes, aprobación pendiente, rechazo (401), SSE completo,
+DELETE de sesión (204/404), HTTPS con HTTP/2, fingerprint estable, foreground service
+activo y token descifrado tras reiniciar el proceso.
 
-Pendiente (P1/P2): foreground service, CameraX, AccessibilityService, cifrado del
-token con Keystore, mDNS/QR, pulido de UI y reinstalación en la tablet. Ver
-[`README.md`](README.md) para el estado actual.
+Pendiente (P2): mDNS/QR, pulido de UI, firma/release, servicio `dataSync` de larga
+duración y reinstalación en la tablet. Ver [`README.md`](README.md) para el estado actual.
 
 ---
 
@@ -663,9 +668,11 @@ curl -i -X POST http://127.0.0.1:18080/mcp \
 | TLS | ❌ NPE con keystore vacío | ✅ certificado generado, SAN, fingerprint estable |
 | Estado de UI | ❌ "Active" aunque fallara | ✅ Stopped/Starting/Running/Failed + error |
 | DB | ❌ timestamps falsos, conexión por operación | ✅ WAL, timestamps reales, conexión serializada |
-| Herramientas | ❌ simuladas | ✅ 3 reales; 2 pendientes de servicios de plataforma |
-| Tests | ⚠️ 10, sin servidor | ✅ 33, protocolo/auth/ViewModel |
-| Foreground service | ❌ | ⬜ P1 |
-| Cámara/touch | ❌ | ⬜ P1 |
+| Herramientas | ❌ simuladas | ✅ 5 reales (cámara, touch, archivo, notificación, info) |
+| Tests | ⚠️ 10, sin servidor | ✅ 34, protocolo/auth/ViewModel |
+| Foreground service | ❌ | ✅ `dataSync` + notificación |
+| Cámara/touch | ❌ | ✅ CameraX (primer plano) y AccessibilityService |
+| Token en reposo | ❌ plano | ✅ AES-256-GCM + Android Keystore |
+| mDNS/QR | ❌ | ⬜ P2 |
 
 El detalle de los cambios y los endpoints está en [`README.md`](README.md).

@@ -32,3 +32,10 @@ expect fun startServerForegroundService(port: Int, secure: Boolean)
  * Stops the foreground keep-alive service.
  */
 expect fun stopServerForegroundService()
+
+
+/**
+ * Opens the system accessibility settings so the user can enable the touch
+ * injection service.
+ */
+expect fun openSystemAccessibilitySettings()
