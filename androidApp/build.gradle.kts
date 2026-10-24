@@ -28,13 +28,13 @@ android {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.0.1"
     }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/INDEX.LIST"
-            excludes += "META-INF/io.netty.versions.properties"
+            pickFirsts += "META-INF/io.netty.versions.properties"
         }
     }
     buildTypes {

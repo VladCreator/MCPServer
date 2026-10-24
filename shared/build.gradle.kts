@@ -44,6 +44,7 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.compose.uiTooling)
             implementation("io.ktor:ktor-server-netty:3.1.0")
+            implementation("org.bouncycastle:bcpkix-jdk18on:1.80.2")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -61,9 +62,11 @@ kotlin {
             implementation("io.ktor:ktor-server-cio:3.1.0")
             implementation("io.ktor:ktor-server-websockets:3.1.0")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
         }
     }
 }

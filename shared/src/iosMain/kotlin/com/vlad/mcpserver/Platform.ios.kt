@@ -4,6 +4,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDomainMask
+import platform.posix.time
 import platform.UIKit.UIDevice
 
 class IOSPlatform: Platform {
@@ -31,3 +32,12 @@ actual fun getDatabasePath(dbName: String): String {
  * Provides the local IP address on iOS.
  */
 actual fun getLocalIpAddress(): String = "127.0.0.1"
+
+
+@OptIn(ExperimentalForeignApi::class)
+actual fun nowMillis(): Long = time(null) * 1000L
+
+
+actual fun startServerForegroundService(port: Int, secure: Boolean) = Unit
+
+actual fun stopServerForegroundService() = Unit

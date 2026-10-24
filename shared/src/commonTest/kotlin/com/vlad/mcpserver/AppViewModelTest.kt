@@ -1,111 +1,205 @@
 package com.vlad.mcpserver
 
+import com.vlad.mcpserver.mcp.McpClient
+import com.vlad.mcpserver.mcp.McpServerHost
+import com.vlad.mcpserver.mcp.ServerEvent
+import com.vlad.mcpserver.mcp.ServerStatus
+import com.vlad.mcpserver.mcp.Transport
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-/**
- * Unit tests for AppViewModel covering server state, client approval/rejection, token generation, SSL/TLS, Theme toggling, and Local IP address resolution.
- */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModelTest {
 
     @Test
-    fun testServerToggleState() {
-        val viewModel = AppViewModel()
+    fun serverStartsAndStops() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+
         assertFalse(viewModel.isServerRunning)
-        
         viewModel.toggleServer()
         assertTrue(viewModel.isServerRunning)
-        
+        assertEquals(1, host.startCount)
+
         viewModel.toggleServer()
         assertFalse(viewModel.isServerRunning)
+        assertEquals(1, host.stopCount)
     }
 
     @Test
-    fun testClientApprovalFlow() {
-        val viewModel = AppViewModel()
-        
-        // Initially empty
-        assertEquals(0, viewModel.pendingClients.value.size)
-        assertEquals(0, viewModel.connectedClients.value.size)
-        
-        // Manually simulate adding a pending client
-        val testClient = AiClient(id = "test-ai-1", name = "Test AI Agent", status = "Pending Approval", connectedAt = 1700000000L)
-        viewModel.pendingClients.value = listOf(testClient)
-        
+    fun pendingClientIsShownAndApproved() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+        val client = client("c1")
+
+        host.emit(ServerEvent.Pending(client))
         assertEquals(1, viewModel.pendingClients.value.size)
-        
-        // Approve client
-        viewModel.approveClient("test-ai-1")
-        
+        assertEquals("Pending Approval", viewModel.pendingClients.value.first().status)
+        assertEquals("192.168.1.20", viewModel.pendingClients.value.first().remoteAddress)
+
+        viewModel.approveClient("c1")
+        assertEquals(listOf("c1"), host.approved)
         assertEquals(0, viewModel.pendingClients.value.size)
+
+        host.emit(ServerEvent.Authorized(client))
         assertEquals(1, viewModel.connectedClients.value.size)
-        assertEquals("Manually Approved", viewModel.connectedClients.value.first().status)
+        assertEquals("Authenticated", viewModel.connectedClients.value.first().status)
+
+        host.emit(ServerEvent.Disconnected("c1"))
+        assertEquals(0, viewModel.connectedClients.value.size)
     }
 
     @Test
-    fun testClientRejectionFlow() {
-        val viewModel = AppViewModel()
-        
-        val testClient = AiClient(id = "test-ai-2", name = "Malicious AI", status = "Pending Approval", connectedAt = 1700000000L)
-        viewModel.pendingClients.value = listOf(testClient)
-        
-        assertEquals(1, viewModel.pendingClients.value.size)
-        
-        // Reject client
-        viewModel.rejectClient("test-ai-2")
-        
+    fun pendingClientCanBeRejected() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+        val client = client("c2")
+
+        host.emit(ServerEvent.Pending(client))
+        viewModel.rejectClient("c2")
+
+        assertEquals(listOf("c2"), host.rejected)
         assertEquals(0, viewModel.pendingClients.value.size)
         assertEquals(0, viewModel.connectedClients.value.size)
     }
 
     @Test
-    fun testBearerTokenUpdate() {
-        val viewModel = AppViewModel()
-        val customToken = "custom_secure_ai_token_999"
-        
-        viewModel.updateBearerToken(customToken)
-        assertEquals(customToken, viewModel.bearerToken)
+    fun tokenCanBeUpdated() = runTest {
+        val viewModel = viewModel(FakeMcpServerHost())
+        val custom = "custom_secure_ai_token_999"
+        viewModel.updateBearerToken(custom)
+        assertEquals(custom, viewModel.bearerToken)
     }
 
     @Test
-    fun testSecureTokenGeneration() {
-        val viewModel = AppViewModel()
-        val generatedToken = viewModel.generateSecureToken()
-        
-        assertEquals(14, generatedToken.length)
-        assertEquals(generatedToken, viewModel.bearerToken)
+    fun secureTokenIsGenerated() = runTest {
+        val viewModel = viewModel(FakeMcpServerHost())
+        val token = viewModel.generateSecureToken()
+        assertTrue(token.length >= 40, "Expected a long URL-safe token, got ${token.length} chars")
+        assertEquals(token, viewModel.bearerToken)
     }
 
     @Test
-    fun testSslToggle() {
-        val viewModel = AppViewModel()
+    fun emptyTokenIsReported() = runTest {
+        val viewModel = viewModel(FakeMcpServerHost())
+        viewModel.updateBearerToken("")
+        assertTrue(viewModel.tokenWarning != null)
+    }
+
+    @Test
+    fun sslToggleStopsRunningServer() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
         assertFalse(viewModel.sslEnabled)
-        
+
+        viewModel.startServer()
+        assertTrue(viewModel.isServerRunning)
+
         viewModel.updateSslEnabled(true)
         assertTrue(viewModel.sslEnabled)
-        
-        viewModel.updateSslEnabled(false)
-        assertFalse(viewModel.sslEnabled)
+        assertEquals(1, host.stopCount)
+        assertFalse(viewModel.isServerRunning)
+        assertTrue(viewModel.connectionUrl.startsWith("https://"))
+        assertTrue(viewModel.connectionUrl.endsWith(":8443/mcp"))
     }
 
     @Test
-    fun testDarkModeToggle() {
-        val viewModel = AppViewModel()
+    fun darkModeCanBeToggled() = runTest {
+        val viewModel = viewModel(FakeMcpServerHost())
         assertTrue(viewModel.isDarkMode)
-        
         viewModel.updateDarkMode(false)
         assertFalse(viewModel.isDarkMode)
-        
         viewModel.updateDarkMode(true)
         assertTrue(viewModel.isDarkMode)
     }
 
     @Test
-    fun testGetLocalIpAddress() {
+    fun failedStatusIsExposed() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+        host.fail("Address already in use")
+
+        val status = viewModel.serverStatus.value
+        assertIs<ServerStatus.Failed>(status)
+        assertEquals("Address already in use", status.message)
+        assertFalse(viewModel.isServerRunning)
+    }
+
+    @Test
+    fun localIpAddressIsNotEmpty() {
         val ip = getLocalIpAddress()
-        assertTrue(ip.isNotEmpty(), "IP address should not be empty")
-        assertTrue(ip.contains("."), "IP address should be a valid IPv4 string format")
+        assertTrue(ip.isNotEmpty())
+    }
+
+    private fun viewModel(host: FakeMcpServerHost): AppViewModel =
+        AppViewModel(
+            hostFactory = { _, _ -> host },
+            databasePathProvider = { null },
+            dispatcher = UnconfinedTestDispatcher(),
+            uiDispatcher = UnconfinedTestDispatcher()
+        )
+
+    private fun client(id: String): McpClient =
+        McpClient(
+            id = id,
+            name = "Test Agent",
+            remoteAddress = "192.168.1.20",
+            transport = Transport.STREAMABLE_HTTP,
+            connectedAt = 1_700_000_000_000L
+        )
+
+    private class FakeMcpServerHost : McpServerHost {
+        private val statusState = MutableStateFlow<ServerStatus>(ServerStatus.Stopped)
+        private val eventFlow = MutableSharedFlow<ServerEvent>(extraBufferCapacity = 32)
+
+        override val status: StateFlow<ServerStatus> = statusState.asStateFlow()
+        override val events: SharedFlow<ServerEvent> = eventFlow.asSharedFlow()
+
+        var startCount = 0
+        var stopCount = 0
+        val approved = mutableListOf<String>()
+        val rejected = mutableListOf<String>()
+
+        override fun start() {
+            startCount++
+            statusState.value = ServerStatus.Running(port = 8080, secure = false)
+        }
+
+        override fun stop() {
+            stopCount++
+            statusState.value = ServerStatus.Stopped
+        }
+
+        override fun approve(clientId: String) {
+            approved += clientId
+        }
+
+        override fun reject(clientId: String) {
+            rejected += clientId
+        }
+
+        override fun close() {
+            statusState.value = ServerStatus.Stopped
+        }
+
+        suspend fun emit(event: ServerEvent) {
+            eventFlow.emit(event)
+        }
+
+        fun fail(message: String) {
+            statusState.value = ServerStatus.Failed(message)
+        }
     }
 }

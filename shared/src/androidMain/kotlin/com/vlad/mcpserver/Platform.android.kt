@@ -1,6 +1,7 @@
 package com.vlad.mcpserver
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -19,8 +20,40 @@ actual fun getPlatform(): Platform = AndroidPlatform()
 /**
  * Provides the absolute database file path on Android.
  */
+fun isAppContextInitialized(): Boolean = ::appContext.isInitialized
+
 actual fun getDatabasePath(dbName: String): String {
-    return appContext.getDatabasePath(dbName).absolutePath
+    val file = appContext.getDatabasePath(dbName)
+    file.parentFile?.mkdirs()
+    return file.absolutePath
+}
+
+/**
+ * Returns every non-loopback IPv4 address of the device. Used by the TLS
+ * certificate SAN and by the dashboard.
+ */
+fun getAllLocalIpv4Addresses(): List<String> {
+    val addresses = linkedSetOf<String>()
+    try {
+        val interfaces = NetworkInterface.getNetworkInterfaces() ?: return listOf("127.0.0.1")
+        while (interfaces.hasMoreElements()) {
+            val networkInterface = interfaces.nextElement()
+            if (!networkInterface.isUp || networkInterface.isLoopback) continue
+            val inetAddresses = networkInterface.inetAddresses
+            while (inetAddresses.hasMoreElements()) {
+                val address = inetAddresses.nextElement()
+                if (address is Inet4Address && !address.isLoopbackAddress && !address.isLinkLocalAddress) {
+                    address.hostAddress?.let { addresses += it }
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    if (addresses.isEmpty()) {
+        addresses += getLocalIpAddress()
+    }
+    return addresses.toList()
 }
 
 /**
@@ -58,4 +91,26 @@ actual fun getLocalIpAddress(): String {
         e.printStackTrace()
     }
     return "127.0.0.1"
+}
+
+
+actual fun nowMillis(): Long = System.currentTimeMillis()
+
+
+actual fun startServerForegroundService(port: Int, secure: Boolean) {
+    if (!::appContext.isInitialized) return
+    runCatching {
+        val intent = Intent(appContext, McpServerKeepAliveService::class.java).apply {
+            putExtra(McpServerKeepAliveService.EXTRA_PORT, port)
+            putExtra(McpServerKeepAliveService.EXTRA_SECURE, secure)
+        }
+        appContext.startForegroundService(intent)
+    }
+}
+
+actual fun stopServerForegroundService() {
+    if (!::appContext.isInitialized) return
+    runCatching {
+        appContext.stopService(Intent(appContext, McpServerKeepAliveService::class.java))
+    }
 }
