@@ -264,8 +264,8 @@ class AppViewModel(
             executionLogsState.value = logs
         }
 
-        if (needsMigration && storedToken != null) {
-            persistToken(storedToken)
+        if (needsMigration) {
+            storedToken?.let { persistToken(it) }
         }
         if (tokenToPersist != null) {
             // First run (or an unreadable keystore entry): persist the current token.

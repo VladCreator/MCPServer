@@ -1,912 +1,537 @@
 package com.vlad.mcpserver
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vlad.mcpserver.mcp.ServerStatus
+import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * Main Composable presenting the MCP server dashboard, settings screen, and bottom connection status bar.
+ * Minimal Material 3 dashboard for the local MCP server.
+ *
+ * The main column is centered and width-limited on tablets. Secondary
+ * information (settings, endpoints, fingerprints) lives in bottom sheets so the
+ * dashboard only shows what is actionable right now.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App(viewModel: AppViewModel = viewModel()) {
-    val clipboardManager = LocalClipboardManager.current
-    var showCopiedMessage by remember { mutableStateOf(false) }
-    var showUrlCopiedMessage by remember { mutableStateOf(false) }
-
     val status by viewModel.serverStatus.collectAsState()
     val connectedClients by viewModel.connectedClients.collectAsState()
     val pendingClients by viewModel.pendingClients.collectAsState()
     val executionLogs by viewModel.executionLogs.collectAsState()
     val toolApprovalRequests by viewModel.toolApprovalRequests.collectAsState()
 
-    val isRunning = status is ServerStatus.Running
-    val isStarting = status is ServerStatus.Starting
-    val lastError = (status as? ServerStatus.Failed)?.message
+    val clipboardManager = LocalClipboardManager.current
 
-    LaunchedEffect(showCopiedMessage) {
-        if (showCopiedMessage) {
-            delay(1_500)
-            showCopiedMessage = false
-        }
-    }
-    LaunchedEffect(showUrlCopiedMessage) {
-        if (showUrlCopiedMessage) {
-            delay(1_500)
-            showUrlCopiedMessage = false
-        }
+    var showSettings by remember { mutableStateOf(false) }
+    var showConnection by remember { mutableStateOf(false) }
+    var showAllLogs by remember { mutableStateOf(false) }
+
+    val copy: (String, String) -> Unit = { _, value ->
+        clipboardManager.setText(AnnotatedString(value))
     }
 
-    // Theme color palette definitions based on isDarkMode state
-    val isDark = viewModel.isDarkMode
-    
-    val bgObsidian = if (isDark) Color(0xFF0B0F19) else Color(0xFFF1F5F9)
-    val cardSlate = if (isDark) Color(0xFF161E2E) else Color(0xFFFFFFFF)
-    val indigoGlow = if (isDark) Color(0xFF6366F1) else Color(0xFF4F46E5)
-    val cyanElectric = if (isDark) Color(0xFF06B6D4) else Color(0xFF0891B2)
-    val emeraldSuccess = if (isDark) Color(0xFF10B981) else Color(0xFF059669)
-    val warningYellow = if (isDark) Color(0xFFF59E0B) else Color(0xFFD97706)
-    val textPrimary = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val borderColor = if (isDark) Color(0xFF2D3748) else Color(0xFFE2E8F0)
+    McpTheme(darkTheme = viewModel.isDarkMode) {
+        SystemBarAppearance(useDarkIcons = !viewModel.isDarkMode)
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = bgObsidian
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.TopCenter
             ) {
-                Column {
-                    Text(
-                        text = if (viewModel.showSettings) "Security & Theme" else "MCP Server Host",
-                        color = textPrimary,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (viewModel.showSettings) "Configure Token, SSL & Theme" else "v0.0.1 • Hybrid Auth Gateway",
-                        color = textSecondary,
-                        fontSize = 12.sp
-                    )
-                }
-                
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Settings Toggle Button
-                    Button(
-                        onClick = { viewModel.toggleSettings() },
-                        colors = ButtonDefaults.buttonColors(containerColor = cardSlate),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, borderColor)
-                    ) {
-                        Text(
-                            text = if (viewModel.showSettings) "Dashboard" else "Settings",
-                            color = textPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(max = 900.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp),
+                    contentPadding = PaddingValues(top = 10.dp, bottom = 28.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item(key = "header") {
+                        AppHeader(
+                            status = status,
+                            onSettings = { showSettings = true }
                         )
                     }
 
-                    // Server switch button (only shown on dashboard)
-                    if (!viewModel.showSettings) {
-                        val serverButtonColor = when (status) {
-                            is ServerStatus.Running -> emeraldSuccess
-                            is ServerStatus.Starting -> warningYellow
-                            is ServerStatus.Failed -> Color(0xFFDC2626)
-                            else -> indigoGlow
+                    item(key = "server") {
+                        ServerCard(
+                            status = status,
+                            agentCount = connectedClients.size,
+                            onStart = viewModel::startServer,
+                            onStop = viewModel::stopServer,
+                            onConnect = { showConnection = true }
+                        )
+                    }
+
+                    if (toolApprovalRequests.isNotEmpty()) {
+                        item(key = "tool-approvals") {
+                            ToolApprovalCard(
+                                requests = toolApprovalRequests,
+                                onResolve = viewModel::resolveToolApproval
+                            )
                         }
-                        val serverButtonLabel = when (status) {
-                            is ServerStatus.Running -> "Active"
-                            is ServerStatus.Starting -> "Starting"
-                            is ServerStatus.Failed -> "Retry"
-                            is ServerStatus.Unsupported -> "Unsupported"
-                            else -> "Start"
+                    }
+
+                    if (pendingClients.isNotEmpty()) {
+                        item(key = "pending") {
+                            PendingClientsCard(
+                                clients = pendingClients,
+                                onApprove = viewModel::approveClient,
+                                onReject = viewModel::rejectClient
+                            )
                         }
-                        Button(
-                            onClick = { viewModel.toggleServer() },
-                            enabled = !isStarting && status !is ServerStatus.Unsupported,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = serverButtonColor,
-                                disabledContainerColor = serverButtonColor.copy(alpha = 0.55f)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text(
-                                text = serverButtonLabel,
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp
+                    }
+
+                    if (connectedClients.isNotEmpty()) {
+                        item(key = "agents") {
+                            ConnectedAgentsCard(clients = connectedClients)
+                        }
+                    }
+
+                    if (executionLogs.isNotEmpty()) {
+                        item(key = "activity") {
+                            ActivityCard(
+                                logs = executionLogs,
+                                showAll = showAllLogs,
+                                onToggleAll = { showAllLogs = !showAllLogs }
                             )
                         }
                     }
                 }
             }
+        }
 
-            if (viewModel.showSettings) {
-                // Settings View
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = cardSlate)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp)
+        if (showSettings) {
+            SettingsSheet(
+                viewModel = viewModel,
+                status = status,
+                onDismiss = { showSettings = false },
+                onCopy = copy
+            )
+        }
+
+        if (showConnection) {
+            ConnectionSheet(
+                viewModel = viewModel,
+                status = status,
+                onDismiss = { showConnection = false },
+                onCopy = copy
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppHeader(
+    status: ServerStatus,
+    onSettings: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "MCP Server",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                StatusPill(status)
+            }
+            Text(
+                text = "Local device tools for AI agents",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(onClick = onSettings) {
+            Icon(
+                imageVector = Icons.Rounded.Settings,
+                contentDescription = "Settings",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(status: ServerStatus) {
+    val colors = MaterialTheme.colorScheme
+    val warning = LocalMcpExtraColors.current.warning
+    val color = when (status) {
+        is ServerStatus.Running -> colors.tertiary
+        is ServerStatus.Starting -> warning
+        is ServerStatus.Failed -> colors.error
+        else -> colors.onSurfaceVariant
+    }
+    Surface(
+        color = color.copy(alpha = 0.12f),
+        contentColor = color,
+        shape = CircleShape
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .background(color, CircleShape)
+            )
+            Text(
+                text = statusLabel(status),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ServerCard(
+    status: ServerStatus,
+    agentCount: Int,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onConnect: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            when (status) {
+                is ServerStatus.Running -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = "Settings & Preferences",
-                            color = textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-
-                        // Dark/Light Theme Toggle Switch
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(bgObsidian, RoundedCornerShape(12.dp))
-                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Dark Theme",
-                                    color = textPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = if (viewModel.isDarkMode) "Using Dark Obsidian mode" else "Using Light Clean mode",
-                                    color = textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Switch(
-                                checked = viewModel.isDarkMode,
-                                onCheckedChange = { viewModel.updateDarkMode(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = indigoGlow,
-                                    uncheckedThumbColor = textSecondary,
-                                    uncheckedTrackColor = bgObsidian
-                                )
-                            )
-                        }
-
-                        // Bearer Token Input & Action Buttons
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Bearer Token",
-                                    color = textPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                if (showCopiedMessage) {
-                                    Text(
-                                        text = "Copied to Clipboard!",
-                                        color = emeraldSuccess,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            
-                            OutlinedTextField(
-                                value = viewModel.bearerToken,
-                                onValueChange = { viewModel.updateBearerToken(it) },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = indigoGlow,
-                                    unfocusedBorderColor = borderColor,
-                                    focusedTextColor = textPrimary,
-                                    unfocusedTextColor = textPrimary,
-                                    cursorColor = indigoGlow
-                                ),
-                                singleLine = true
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = { viewModel.generateSecureToken() },
-                                    modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Text("Generate Token", fontSize = 11.sp)
-                                }
-                                Button(
-                                    onClick = {
-                                        clipboardManager.setText(AnnotatedString(viewModel.bearerToken))
-                                        showCopiedMessage = true
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = cyanElectric),
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Text("Copy Token", fontSize = 11.sp, color = if (isDark) bgObsidian else Color.White, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
-                            Text(
-                                text = "AI clients must send 'Authorization: Bearer <token>' in connection headers.",
-                                color = textSecondary,
-                                fontSize = 11.sp
-                            )
-
-                            viewModel.tokenWarning?.let { warning ->
-                                Text(
-                                    text = warning,
-                                    color = warningYellow,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-
-                            viewModel.storageError?.let { error ->
-                                Text(
-                                    text = error,
-                                    color = Color(0xFFDC2626),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        // Sensitive tool confirmation
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(bgObsidian, RoundedCornerShape(12.dp))
-                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Confirm sensitive tools",
-                                    color = textPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Ask before camera, touch and file reads.",
-                                    color = textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Switch(
-                                checked = viewModel.confirmSensitiveTools,
-                                onCheckedChange = { viewModel.updateConfirmSensitiveTools(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = indigoGlow,
-                                    uncheckedThumbColor = textSecondary,
-                                    uncheckedTrackColor = bgObsidian
-                                )
-                            )
-                        }
-
-                        // SSL/TLS Toggle Switch
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(bgObsidian, RoundedCornerShape(12.dp))
-                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Enable SSL/TLS (HTTPS / WSS)",
-                                    color = textPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Switches server port from 8080 (HTTP) to 8443 (HTTPS).",
-                                    color = textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Switch(
-                                checked = viewModel.sslEnabled,
-                                onCheckedChange = { viewModel.updateSslEnabled(it) },
-                                enabled = !isRunning && !isStarting,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = indigoGlow,
-                                    uncheckedThumbColor = textSecondary,
-                                    uncheckedTrackColor = bgObsidian
-                                )
-                            )
-                        }
-
-                        // Touch injection access
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(bgObsidian, RoundedCornerShape(12.dp))
-                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Touch injection (touch_test)",
-                                    color = textPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Enable MCP Touch Service in Android accessibility settings.",
-                                    color = textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Button(
-                                onClick = { viewModel.openTouchAccessibilitySettings() },
-                                colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("Open", fontSize = 11.sp)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.weight(1f))
-
-                        // Info Box
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .background(indigoGlow.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
-                                .border(1.dp, indigoGlow.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                                .padding(12.dp)
+                                .size(34.dp)
+                                .background(colors.tertiary.copy(alpha = 0.12f), CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Note: Unauthenticated clients connecting without this token will appear in the Pending Approval queue on the dashboard.",
-                                color = cyanElectric,
-                                fontSize = 12.sp
+                            Icon(
+                                imageVector = Icons.Rounded.Dns,
+                                contentDescription = null,
+                                tint = colors.tertiary,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                    }
-                }
-            } else {
-                // Dashboard content scrolls; the connection bar stays pinned below.
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                // Sensitive tool calls waiting for explicit approval
-                if (toolApprovalRequests.isNotEmpty()) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = cardSlate)
-                    ) {
                         Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
                         ) {
                             Text(
-                                text = "Tool approval required",
-                                color = warningYellow,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
+                                text = "Server is live",
+                                style = MaterialTheme.typography.titleMedium
                             )
-                            toolApprovalRequests.forEach { request ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(bgObsidian, RoundedCornerShape(10.dp))
-                                        .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                        .padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = request.toolName,
-                                        color = textPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        text = "${request.clientName} · ${request.clientId}",
-                                        color = textSecondary,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = request.arguments,
-                                        color = textSecondary,
-                                        fontSize = 11.sp,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(
-                                            onClick = { viewModel.resolveToolApproval(request.id, true) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = emeraldSuccess),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text("Approve tool", fontSize = 11.sp, color = Color.White)
-                                        }
-                                        Button(
-                                            onClick = { viewModel.resolveToolApproval(request.id, false) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text("Reject", fontSize = 11.sp, color = Color.White)
-                                        }
-                                    }
-                                }
-                            }
+                            Text(
+                                text = "${if (status.secure) "HTTPS" else "HTTP"} · ${status.port} · $agentCount ${if (agentCount == 1) "agent" else "agents"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = onConnect,
+                            shape = MaterialTheme.shapes.small,
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Link,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Connect", style = MaterialTheme.typography.labelMedium)
+                        }
+                        FilledTonalIconButton(
+                            onClick = onStop,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Stop,
+                                contentDescription = "Stop server",
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
 
-                // Pending AI Connection Requests Section
-                if (pendingClients.isNotEmpty()) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = cardSlate)
+                is ServerStatus.Starting -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Pending Connection Requests",
-                                    color = warningYellow,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .background(warningYellow.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "${pendingClients.size} Pending",
-                                        color = warningYellow,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            pendingClients.forEach { client ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(bgObsidian, RoundedCornerShape(10.dp))
-                                        .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = client.name,
-                                            color = textPrimary,
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            text = "ID: ${client.id}" + (client.remoteAddress?.let { " • $it" } ?: ""),
-                                            color = textSecondary,
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(
-                                            onClick = { viewModel.approveClient(client.id) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = emeraldSuccess),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text("Approve", fontSize = 11.sp, color = Color.White)
-                                        }
-                                        Button(
-                                            onClick = { viewModel.rejectClient(client.id) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text("Reject", fontSize = 11.sp, color = Color.White)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Connected AIs Section
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = cardSlate)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Connected AI Agents",
-                                color = textPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        color = if (connectedClients.isNotEmpty()) emeraldSuccess.copy(alpha = 0.2f) else textSecondary.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "${connectedClients.size} Online",
-                                    color = if (connectedClients.isNotEmpty()) emeraldSuccess else textSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        if (connectedClients.isEmpty()) {
-                            Text(
-                                text = "No AI agents connected. Start the server to accept connections.",
-                                color = textSecondary,
-                                fontSize = 13.sp
-                            )
-                        } else {
-                            connectedClients.forEach { client ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(bgObsidian, RoundedCornerShape(10.dp))
-                                        .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = client.name,
-                                            color = textPrimary,
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "ID: ${client.id}" + (client.remoteAddress?.let { " • $it" } ?: ""),
-                                            color = textSecondary,
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .background(cyanElectric.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = client.status,
-                                            color = cyanElectric,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Live Tools & Commands Execution Log
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(280.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = cardSlate)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "Executed Tools & Commands Log",
-                            color = textPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
                         )
-
-                        if (executionLogs.isEmpty()) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No tool commands executed yet.",
-                                    color = textSecondary,
-                                    fontSize = 13.sp
-                                )
-                            }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(executionLogs) { log ->
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(bgObsidian, RoundedCornerShape(10.dp))
-                                            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                            .padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = "${formatLogTime(log.timestamp)}  ${log.toolName}",
-                                                color = cyanElectric,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp
-                                            )
-                                            Text(
-                                                text = log.status,
-                                                color = when (log.status) {
-                                                    "SUCCESS" -> emeraldSuccess
-                                                    "WARNING" -> warningYellow
-                                                    else -> Color.Red
-                                                },
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                        Text(
-                                            text = "Args: ${log.arguments}",
-                                            color = textSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                        log.result?.let {
-                                            Text(
-                                                text = "Result: $it",
-                                                color = textPrimary,
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        Text(
+                            text = "Starting server…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant
+                        )
                     }
                 }
 
-                } // end scrollable dashboard content
-
-                // Pinned Bottom Connection Status Bar
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = cardSlate,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, borderColor)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                is ServerStatus.Failed -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .background(
-                                            color = when (status) {
-                                                is ServerStatus.Running -> emeraldSuccess
-                                                is ServerStatus.Starting -> warningYellow
-                                                is ServerStatus.Failed -> Color(0xFFDC2626)
-                                                else -> textSecondary.copy(alpha = 0.5f)
-                                            },
-                                            shape = CircleShape
-                                        )
-                                )
-                                Text(
-                                    text = "${viewModel.serverName} · ${statusLabel(status)}",
-                                    color = textPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            
-                            if (isRunning && showUrlCopiedMessage) {
-                                Text(
-                                    text = "Copied to Clipboard!",
-                                    color = emeraldSuccess,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        Icon(
+                            imageVector = Icons.Rounded.WarningAmber,
+                            contentDescription = null,
+                            tint = colors.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Couldn't start the server",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = status.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.error,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
+                    }
+                    Button(onClick = onStart, shape = MaterialTheme.shapes.small) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Retry", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
 
-                        when (status) {
-                            is ServerStatus.Running -> {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "HTTP: ${viewModel.connectionUrl}",
-                                            color = cyanElectric,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = "SSE: ${viewModel.sseUrl}",
-                                            color = indigoGlow,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Button(
-                                            onClick = {
-                                                clipboardManager.setText(AnnotatedString(viewModel.connectionUrl))
-                                                showUrlCopiedMessage = true
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = cyanElectric),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text("Copy HTTP", fontSize = 10.sp, color = if (isDark) bgObsidian else Color.White)
-                                        }
-                                        Button(
-                                            onClick = {
-                                                clipboardManager.setText(AnnotatedString(viewModel.sseUrl))
-                                                showUrlCopiedMessage = true
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = indigoGlow),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text("Copy SSE", fontSize = 10.sp, color = Color.White)
-                                        }
-                                    }
-                                }
+                is ServerStatus.Unsupported -> {
+                    Text(
+                        text = "The embedded server is only available on Android.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant
+                    )
+                }
 
-                                (status as? ServerStatus.Running)?.fingerprint?.let { fingerprint ->
-                                    Text(
-                                        text = "TLS SHA-256: $fingerprint",
-                                        color = textSecondary,
-                                        fontSize = 9.sp,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
+                else -> {
+                    Text(
+                        text = "Turn this device into an MCP server",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Expose camera, touch, files and notifications to AI clients on your local network.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant
+                    )
+                    Button(onClick = onStart, shape = MaterialTheme.shapes.small) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Start server", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
 
-                            is ServerStatus.Failed -> {
-                                Text(
-                                    text = "Last error: $lastError",
-                                    color = Color(0xFFDC2626),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-
-                            is ServerStatus.Starting -> {
-                                Text(
-                                    text = "Starting server…",
-                                    color = warningYellow,
-                                    fontSize = 11.sp
-                                )
-                            }
-
-                            is ServerStatus.Unsupported -> {
-                                Text(
-                                    text = "The embedded server is only available on Android.",
-                                    color = textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
-
-                            else -> {
-                                Text(
-                                    text = "Server stopped",
-                                    color = textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
+@Composable
+private fun ToolApprovalCard(
+    requests: List<ToolApprovalRequest>,
+    onResolve: (String, Boolean) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val warning = LocalMcpExtraColors.current.warning
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = warning.copy(alpha = 0.08f)),
+        border = BorderStroke(1.dp, warning.copy(alpha = 0.30f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.WarningAmber,
+                    contentDescription = null,
+                    tint = warning,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Tool approval",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = requests.size.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = warning
+                )
+            }
+            requests.forEach { request ->
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        text = request.toolName,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        text = "${request.clientName} · ${request.arguments}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { onResolve(request.id, true) },
+                            shape = MaterialTheme.shapes.small,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Approve", style = MaterialTheme.typography.labelMedium)
+                        }
+                        TextButton(onClick = { onResolve(request.id, false) }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = colors.error
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Reject",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.error
+                            )
                         }
                     }
                 }
@@ -915,20 +540,764 @@ fun App(viewModel: AppViewModel = viewModel()) {
     }
 }
 
+@Composable
+private fun PendingClientsCard(
+    clients: List<AiClient>,
+    onApprove: (String) -> Unit,
+    onReject: (String) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val warning = LocalMcpExtraColors.current.warning
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Devices,
+                    contentDescription = null,
+                    tint = warning,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Connection requests",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = clients.size.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = warning
+                )
+            }
+            clients.forEach { client ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = client.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = listOfNotNull(
+                                client.remoteAddress,
+                                client.id.take(8)
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    FilledTonalButton(
+                        onClick = { onApprove(client.id) },
+                        shape = MaterialTheme.shapes.small,
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Approve", style = MaterialTheme.typography.labelMedium)
+                    }
+                    IconButton(onClick = { onReject(client.id) }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Reject",
+                            tint = colors.error
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectedAgentsCard(clients: List<AiClient>) {
+    val colors = MaterialTheme.colorScheme
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Devices,
+                    contentDescription = null,
+                    tint = colors.tertiary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Connected agents",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = clients.size.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant
+                )
+            }
+            clients.forEachIndexed { index, client ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(colors.tertiary, CircleShape)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = client.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = listOfNotNull(
+                                client.remoteAddress,
+                                client.status
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (index < clients.lastIndex) {
+                    HorizontalDivider(color = colors.outlineVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityCard(
+    logs: List<ToolExecutionLog>,
+    showAll: Boolean,
+    onToggleAll: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val visible = if (showAll) logs.take(20) else logs.take(4)
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Activity",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                if (logs.size > 4) {
+                    TextButton(onClick = onToggleAll) {
+                        Text(
+                            text = if (showAll) "Show less" else "Show all",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+            visible.forEachIndexed { index, log ->
+                ActivityRow(log)
+                if (index < visible.lastIndex) {
+                    HorizontalDivider(color = colors.outlineVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityRow(log: ToolExecutionLog) {
+    val colors = MaterialTheme.colorScheme
+    val warning = LocalMcpExtraColors.current.warning
+    val statusColor = when (log.status) {
+        "SUCCESS" -> colors.tertiary
+        "WARNING" -> warning
+        else -> colors.error
+    }
+    var expanded by remember(log.id) { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(statusColor, CircleShape)
+            )
+            Text(
+                text = log.toolName,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = formatLogTime(log.timestamp),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = null,
+                tint = colors.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 4.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text = log.arguments,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
+                )
+                log.result?.takeIf { it.isNotBlank() }?.let { result ->
+                    Text(
+                        text = result,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSheet(
+    viewModel: AppViewModel,
+    status: ServerStatus,
+    onDismiss: () -> Unit,
+    onCopy: (String, String) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var tokenVisible by remember { mutableStateOf(false) }
+    var copiedLabel by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(copiedLabel) {
+        if (copiedLabel != null) {
+            delay(1_500)
+            copiedLabel = null
+        }
+    }
+
+    val copyAndNotify: (String, String) -> Unit = { label, value ->
+        onCopy(label, value)
+        copiedLabel = label
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.surface,
+        contentColor = colors.onSurface,
+        sheetMaxWidth = 640.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            SheetHeader(title = "Settings", onDismiss = onDismiss)
+            copiedLabel?.let { label ->
+                Text(
+                    text = "$label copied",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.tertiary
+                )
+            }
+            SectionLabel("Access")
+            Text(
+                text = "Bearer token",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            OutlinedTextField(
+                value = viewModel.bearerToken,
+                onValueChange = viewModel::updateBearerToken,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                visualTransformation = if (tokenVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    IconButton(onClick = { tokenVisible = !tokenVisible }) {
+                        Icon(
+                            imageVector = if (tokenVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = if (tokenVisible) "Hide token" else "Show token"
+                        )
+                    }
+                }
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { viewModel.generateSecureToken() }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Autorenew,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Generate", style = MaterialTheme.typography.labelMedium)
+                }
+                TextButton(onClick = { copyAndNotify("Token", viewModel.bearerToken) }) {
+                    Icon(
+                        imageVector = Icons.Rounded.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Copy", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            viewModel.tokenWarning?.let { warning ->
+                Text(
+                    text = warning,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalMcpExtraColors.current.warning
+                )
+            }
+            viewModel.storageError?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.error
+                )
+            }
+
+            SheetDivider()
+            SectionLabel("Security")
+            SwitchRow(
+                title = "Confirm sensitive tools",
+                subtitle = "Ask before camera, touch and file reads.",
+                checked = viewModel.confirmSensitiveTools,
+                onCheckedChange = viewModel::updateConfirmSensitiveTools
+            )
+            SwitchRow(
+                title = "HTTPS / TLS",
+                subtitle = "Requires restarting the server.",
+                checked = viewModel.sslEnabled,
+                onCheckedChange = viewModel::updateSslEnabled,
+                enabled = status !is ServerStatus.Running && status !is ServerStatus.Starting
+            )
+            SwitchRow(
+                title = "Dark theme",
+                subtitle = "Use the deep obsidian palette.",
+                checked = viewModel.isDarkMode,
+                onCheckedChange = viewModel::updateDarkMode
+            )
+
+            SheetDivider()
+            SectionLabel("Device access")
+            ActionRow(
+                title = "Touch injection",
+                subtitle = "Required for the touch_test tool.",
+                action = "Open",
+                onClick = viewModel::openTouchAccessibilitySettings
+            )
+
+            SheetDivider()
+            Text(
+                text = "MCPServer 0.0.1 · Streamable HTTP, SSE and local tools",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConnectionSheet(
+    viewModel: AppViewModel,
+    status: ServerStatus,
+    onDismiss: () -> Unit,
+    onCopy: (String, String) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showWebSocket by remember { mutableStateOf(false) }
+    var showFingerprint by remember { mutableStateOf(false) }
+    var copiedLabel by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(copiedLabel) {
+        if (copiedLabel != null) {
+            delay(1_500)
+            copiedLabel = null
+        }
+    }
+
+    val copyAndNotify: (String, String) -> Unit = { label, value ->
+        onCopy(label, value)
+        copiedLabel = label
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.surface,
+        contentColor = colors.onSurface,
+        sheetMaxWidth = 640.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SheetHeader(title = "Connect a client", onDismiss = onDismiss)
+            copiedLabel?.let { label ->
+                Text(
+                    text = "$label copied",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.tertiary
+                )
+            }
+            Text(
+                text = "Point your MCP client at the Streamable HTTP endpoint and send the bearer token.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
+            )
+
+            EndpointRow(
+                label = "Streamable HTTP",
+                value = viewModel.connectionUrl,
+                onCopy = { copyAndNotify("Endpoint", it) }
+            )
+            EndpointRow(
+                label = "SSE (legacy)",
+                value = viewModel.sseUrl,
+                onCopy = { copyAndNotify("SSE endpoint", it) }
+            )
+
+            TextButton(onClick = { showWebSocket = !showWebSocket }) {
+                Text(
+                    text = if (showWebSocket) "Hide legacy WebSocket" else "Show legacy WebSocket",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            if (showWebSocket) {
+                EndpointRow(
+                    label = "WebSocket (legacy)",
+                    value = viewModel.wsUrl,
+                    onCopy = { copyAndNotify("WebSocket endpoint", it) }
+                )
+            }
+
+            HorizontalDivider(color = colors.outlineVariant)
+            Text(
+                text = "Authorization",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Bearer <token>",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { copyAndNotify("Token", viewModel.bearerToken) }) {
+                    Icon(
+                        imageVector = Icons.Rounded.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Copy token", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+
+            if (status is ServerStatus.Running && status.fingerprint != null) {
+                HorizontalDivider(color = colors.outlineVariant)
+                TextButton(onClick = { showFingerprint = !showFingerprint }) {
+                    Text(
+                        text = if (showFingerprint) "Hide TLS fingerprint" else "TLS fingerprint",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                if (showFingerprint) {
+                    Surface(
+                        color = colors.surfaceVariant,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = status.fingerprint,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { copyAndNotify("Fingerprint", status.fingerprint) }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ContentCopy,
+                                    contentDescription = "Copy fingerprint",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "The client must keep the request open while you approve the connection.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun EndpointRow(
+    label: String,
+    value: String,
+    onCopy: (String) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        color = colors.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(onClick = { onCopy(value) }) {
+                Icon(
+                    imageVector = Icons.Rounded.ContentCopy,
+                    contentDescription = "Copy $label",
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetHeader(
+    title: String,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = onDismiss) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Close"
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun SheetDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(vertical = 8.dp),
+        color = MaterialTheme.colorScheme.outlineVariant
+    )
+}
+
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+                disabledCheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                disabledCheckedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                disabledUncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                disabledUncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        )
+    }
+}
+
+@Composable
+private fun ActionRow(
+    title: String,
+    subtitle: String,
+    action: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        TextButton(onClick = onClick) {
+            Icon(
+                imageVector = Icons.Rounded.TouchApp,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(action, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+private fun statusLabel(status: ServerStatus): String = when (status) {
+    is ServerStatus.Running -> "Live"
+    is ServerStatus.Starting -> "Starting"
+    is ServerStatus.Failed -> "Error"
+    is ServerStatus.Unsupported -> "N/A"
+    else -> "Off"
+}
 
 private fun formatLogTime(epochMillis: Long): String {
-    if (epochMillis <= 0L) return "--:--:--"
+    if (epochMillis <= 0L) return "--:--"
     return Instant.fromEpochMilliseconds(epochMillis)
         .toLocalDateTime(TimeZone.currentSystemDefault())
         .time
         .toString()
-        .take(8)
-}
-
-private fun statusLabel(status: ServerStatus): String = when (status) {
-    is ServerStatus.Running -> "Active"
-    is ServerStatus.Starting -> "Starting"
-    is ServerStatus.Failed -> "Failed"
-    is ServerStatus.Unsupported -> "Unsupported"
-    else -> "Stopped"
+        .take(5)
 }

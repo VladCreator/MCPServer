@@ -60,6 +60,9 @@ Implementado y verificado en un emulador Android 16 (API 37):
 - [x] Confirmación por herramienta: `read_file`, `take_photo` y `touch_test` pausan
       la llamada y muestran **Approve tool / Reject** en el dashboard; el gate se puede
       desactivar en Ajustes.
+- [x] UI rediseñada con Material 3: tema propio oscuro/claro, tarjetas compactas,
+      layout centrado con ancho máximo en tablet, bottom sheets para ajustes/conexión,
+      feedback de copiado y estados vacíos ocultos.
 - [x] Tests: 37 pruebas (dispatcher, auth, ViewModel, aprobaciones), `BUILD SUCCESSFUL`;
       compilación iOS correcta.
 
@@ -678,6 +681,7 @@ curl -i -X POST http://127.0.0.1:18080/mcp \
 | Cámara/touch | ❌ | ✅ CameraX (primer plano) y AccessibilityService |
 | Token en reposo | ❌ plano | ✅ AES-256-GCM + Android Keystore |
 | Confirmación por tool | ❌ | ✅ gate con Aprobar/Rechazar + ajuste |
+| UI | ❌ colores manuales, tarjetas apiladas | ✅ Material 3, tema propio, sheets, layout tablet |
 | mDNS/QR | ❌ | ⬜ P2 |
 
 El detalle de los cambios y los endpoints está en [`README.md`](README.md).

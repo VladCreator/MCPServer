@@ -31,6 +31,22 @@ not implemented there yet).
 - **Device tools**: camera capture (CameraX), tap injection (AccessibilityService),
   sandboxed file reads and notifications.
 
+## UI
+
+Material 3 with a custom obsidian/indigo palette, compact cards and bottom sheets for
+secondary information. The main column is capped at 900 dp and centered on tablets,
+so the dashboard stays readable instead of stretching across a large screen.
+
+| Dashboard | Connection sheet |
+| --- | --- |
+| ![Dashboard](docs/screenshots/dashboard-dark.png) | ![Connection](docs/screenshots/connect.png) |
+| **Settings sheet** | **Tablet layout** |
+| ![Settings](docs/screenshots/settings.png) | ![Tablet](docs/screenshots/tablet.png) |
+
+Settings, endpoints and the TLS fingerprint live in sheets so the dashboard only shows
+what is actionable: server state, pending approvals, connected agents and recent
+activity.
+
 ## Requirements
 
 - macOS/Linux with JDK 21+ (the project was built with JDK 25).
