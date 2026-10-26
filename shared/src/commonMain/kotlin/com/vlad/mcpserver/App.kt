@@ -6,7 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -97,7 +100,7 @@ import kotlinx.datetime.toLocalDateTime
  * information (settings, endpoints, fingerprints) lives in bottom sheets so the
  * dashboard only shows what is actionable right now.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun App(viewModel: AppViewModel = viewModel()) {
     val status by viewModel.serverStatus.collectAsState()
@@ -144,14 +147,43 @@ fun App(viewModel: AppViewModel = viewModel()) {
                         )
                     }
 
-                    item(key = "server") {
-                        ServerCard(
-                            status = status,
-                            agentCount = connectedClients.size,
-                            onStart = viewModel::startServer,
-                            onStop = viewModel::stopServer,
-                            onConnect = { showConnection = true }
-                        )
+                    item(key = "overview") {
+                        // Width is resolved here because BoxWithConstraints cannot live inside
+                        // FlowRow children that use fillMaxRowHeight (intrinsic measurement).
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val hasAgents = connectedClients.isNotEmpty()
+                            val sideBySide = hasAgents &&
+                                maxWidth >= OVERVIEW_CARD_MIN_WIDTH * 2 + OVERVIEW_GAP
+                            val serverCardWidth = if (sideBySide) (maxWidth - OVERVIEW_GAP) / 2 else maxWidth
+                            val compactServer = serverCardWidth < COMPACT_SERVER_CARD_WIDTH
+                            // Flex layout: cards share a row when there is room and wrap otherwise.
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(OVERVIEW_GAP),
+                                verticalArrangement = Arrangement.spacedBy(OVERVIEW_GAP),
+                                maxItemsInEachRow = 2
+                            ) {
+                                val cardModifier = Modifier
+                                    .weight(1f)
+                                    .widthIn(min = OVERVIEW_CARD_MIN_WIDTH)
+                                    .fillMaxRowHeight()
+                                ServerCard(
+                                    status = status,
+                                    agentCount = connectedClients.size,
+                                    onStart = viewModel::startServer,
+                                    onStop = viewModel::stopServer,
+                                    onConnect = { showConnection = true },
+                                    compact = compactServer,
+                                    modifier = cardModifier
+                                )
+                                if (hasAgents) {
+                                    ConnectedAgentsCard(
+                                        clients = connectedClients,
+                                        modifier = cardModifier
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     if (toolApprovalRequests.isNotEmpty()) {
@@ -170,12 +202,6 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                 onApprove = viewModel::approveClient,
                                 onReject = viewModel::rejectClient
                             )
-                        }
-                    }
-
-                    if (connectedClients.isNotEmpty()) {
-                        item(key = "agents") {
-                            ConnectedAgentsCard(clients = connectedClients)
                         }
                     }
 
@@ -294,11 +320,13 @@ private fun ServerCard(
     agentCount: Int,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onConnect: () -> Unit
+    onConnect: () -> Unit,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier.fillMaxWidth()
 ) {
     val colors = MaterialTheme.colorScheme
     OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
     ) {
@@ -310,6 +338,34 @@ private fun ServerCard(
         ) {
             when (status) {
                 is ServerStatus.Running -> {
+                    val connectButton = @Composable { buttonModifier: Modifier ->
+                        FilledTonalButton(
+                            onClick = onConnect,
+                            shape = MaterialTheme.shapes.small,
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            modifier = buttonModifier
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Link,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Connect", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                    val stopButton = @Composable {
+                        FilledTonalIconButton(
+                            onClick = onStop,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Stop,
+                                contentDescription = "Stop server",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -343,28 +399,18 @@ private fun ServerCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        FilledTonalButton(
-                            onClick = onConnect,
-                            shape = MaterialTheme.shapes.small,
-                            contentPadding = PaddingValues(horizontal = 12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Link,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Connect", style = MaterialTheme.typography.labelMedium)
+                        if (!compact) {
+                            connectButton(Modifier)
+                            stopButton()
                         }
-                        FilledTonalIconButton(
-                            onClick = onStop,
-                            modifier = Modifier.size(40.dp)
+                    }
+                    if (compact) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Stop,
-                                contentDescription = "Stop server",
-                                modifier = Modifier.size(18.dp)
-                            )
+                            connectButton(Modifier.weight(1f))
+                            stopButton()
                         }
                     }
                 }
@@ -633,10 +679,10 @@ private fun PendingClientsCard(
 }
 
 @Composable
-private fun ConnectedAgentsCard(clients: List<AiClient>) {
+private fun ConnectedAgentsCard(clients: List<AiClient>, modifier: Modifier = Modifier.fillMaxWidth()) {
     val colors = MaterialTheme.colorScheme
     OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
     ) {
@@ -667,40 +713,118 @@ private fun ConnectedAgentsCard(clients: List<AiClient>) {
                     color = colors.onSurfaceVariant
                 )
             }
-            clients.forEachIndexed { index, client ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(colors.tertiary, CircleShape)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = client.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = listOfNotNull(
-                                client.remoteAddress,
-                                client.status
-                            ).joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                if (index < clients.lastIndex) {
+            val groups = clients.groupBy { it.remoteAddress ?: "Unknown address" }.toList()
+            groups.forEachIndexed { index, (address, agents) ->
+                AgentGroup(address = address, agents = agents)
+                if (index < groups.lastIndex) {
                     HorizontalDivider(color = colors.outlineVariant)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Agents sharing the same IP address. Single agents render inline; multiple
+ * agents collapse under an address header that can be expanded.
+ */
+@Composable
+private fun AgentGroup(address: String, agents: List<AiClient>) {
+    val colors = MaterialTheme.colorScheme
+    if (agents.size == 1) {
+        val client = agents.first()
+        AgentRow(
+            title = client.name,
+            subtitle = listOf(address, client.status).joinToString(" · ")
+        )
+        return
+    }
+
+    var expanded by remember(address) { mutableStateOf(false) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(colors.tertiary, CircleShape)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = address,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${agents.size} agents · " +
+                        agents.map { it.name }.distinct().joinToString(", "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                text = agents.size.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onTertiary,
+                modifier = Modifier
+                    .background(colors.tertiary, CircleShape)
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = colors.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier.padding(start = 14.dp, top = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                agents.forEach { client ->
+                    AgentRow(title = client.name, subtitle = client.status, dotSize = 4)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentRow(title: String, subtitle: String, dotSize: Int = 6) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(dotSize.dp)
+                .background(colors.tertiary, CircleShape)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -980,7 +1104,7 @@ private fun SettingsSheet(
 
             SheetDivider()
             Text(
-                text = "MCPServer 0.0.1 · Streamable HTTP, SSE and local tools",
+                text = "MCPServer 0.0.2 · Streamable HTTP, SSE and local tools",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp)
@@ -1327,3 +1451,11 @@ private fun formatLogTime(epochMillis: Long): String {
         .toString()
         .take(5)
 }
+
+/** Minimum width of the Server and Connected agents cards before they wrap. */
+private val OVERVIEW_CARD_MIN_WIDTH = 280.dp
+
+private val OVERVIEW_GAP = 12.dp
+
+/** Below this width the Server card moves its actions under the status text. */
+private val COMPACT_SERVER_CARD_WIDTH = 420.dp
