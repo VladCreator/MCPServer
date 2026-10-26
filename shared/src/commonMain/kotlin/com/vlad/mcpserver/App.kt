@@ -63,6 +63,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -79,6 +80,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vlad.mcpserver.mcp.ServerStatus
 import com.vlad.mcpserver.mcp.ToolApprovalRequest
@@ -953,11 +956,26 @@ private fun SettingsSheet(
 
             SheetDivider()
             SectionLabel("Device access")
+            var touchServiceEnabled by remember { mutableStateOf(isTouchServiceEnabled()) }
+            var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted()) }
+            // Re-check when returning from the system settings screens.
+            LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                touchServiceEnabled = isTouchServiceEnabled()
+                overlayGranted = isOverlayPermissionGranted()
+            }
             ActionRow(
                 title = "Touch injection",
                 subtitle = "Required for the touch_test tool.",
                 action = "Open",
-                onClick = viewModel::openTouchAccessibilitySettings
+                onClick = viewModel::openTouchAccessibilitySettings,
+                granted = touchServiceEnabled
+            )
+            ActionRow(
+                title = "Display over other apps",
+                subtitle = "Lets launch_app open apps while MCPServer is in the background.",
+                action = "Open",
+                onClick = viewModel::openOverlaySettings,
+                granted = overlayGranted
             )
 
             SheetDivider()
@@ -1254,7 +1272,8 @@ private fun ActionRow(
     title: String,
     subtitle: String,
     action: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    granted: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -1273,14 +1292,21 @@ private fun ActionRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        // Stays clickable when granted so the user can revoke it from system settings.
         TextButton(onClick = onClick) {
+            val tint = if (granted) MaterialTheme.colorScheme.tertiary else LocalContentColor.current
             Icon(
-                imageVector = Icons.Rounded.TouchApp,
+                imageVector = if (granted) Icons.Rounded.Check else Icons.Rounded.TouchApp,
                 contentDescription = null,
+                tint = tint,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(Modifier.width(4.dp))
-            Text(action, style = MaterialTheme.typography.labelMedium)
+            Text(
+                text = if (granted) "Allowed" else action,
+                style = MaterialTheme.typography.labelMedium,
+                color = tint
+            )
         }
     }
 }

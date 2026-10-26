@@ -19,6 +19,9 @@ Its primary objectives are:
 - **Hybrid Security Model**:
   - **Bearer Token Authentication**: AI clients sending a valid `Authorization: Bearer <token>` header are automatically authorized and connected.
   - **Manual Approval Fallback**: AI clients connecting without a valid token are placed in a pending queue. The user can interactively review and tap **Approve** or **Reject** directly from the main dashboard.
+- **USB Connection Support (ADB Port Forwarding)**:
+  - Supports USB cable connections via ADB port forwarding (`adb forward tcp:8080 tcp:8080`).
+  - Allows AI clients on the computer to connect via `http://localhost:8080/sse` or `ws://localhost:8080/mcp` without requiring a Wi-Fi network.
 
 ## Engineering Standards & Rules
 - **Language**: All source code, variable names, functions, classes, and code comments must be written strictly in **English**.

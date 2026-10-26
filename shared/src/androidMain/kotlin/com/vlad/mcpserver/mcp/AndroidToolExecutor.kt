@@ -5,8 +5,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import com.vlad.mcpserver.McpTouchAccessibilityService
 import com.vlad.mcpserver.AppVisibility
 import com.vlad.mcpserver.CameraCapture
@@ -45,6 +47,7 @@ class AndroidToolExecutor(
                 "create_notification" -> createNotification(arguments)
                 "touch_test" -> tap(arguments)
                 "take_photo" -> takePhoto()
+                "launch_app" -> launchApp(arguments)
                 else -> ToolResult("Tool '$toolName' is not available.", isError = true)
             }
         }
@@ -217,6 +220,45 @@ class AndroidToolExecutor(
         }
     }
 
+    private suspend fun launchApp(arguments: JsonObject): ToolResult {
+        val packageName = (arguments["package_name"] as? JsonPrimitive)?.contentOrNull?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return ToolResult("Missing required argument: package_name", isError = true)
+        if (!PACKAGE_NAME_REGEX.matches(packageName)) {
+            return ToolResult("Invalid package name: $packageName", isError = true)
+        }
+
+        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+            ?: return ToolResult(
+                "App '$packageName' is not installed or has no launcher activity.",
+                isError = true
+            )
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+
+        // Android blocks background activity starts unless the app is visible, has a
+        // bound accessibility service or holds "Display over other apps".
+        if (!AppVisibility.isForeground &&
+            McpTouchAccessibilityService.instance() == null &&
+            !Settings.canDrawOverlays(context)
+        ) {
+            return ToolResult(
+                "Cannot launch apps while MCPServer is in the background. Grant 'Display over " +
+                    "other apps' (MCPServer Settings > Device access), enable 'MCP Touch Service' " +
+                    "in Accessibility, or open MCPServer, then try again.",
+                isError = true
+            )
+        }
+
+        return withContext(Dispatchers.Main) {
+            runCatching {
+                context.startActivity(intent)
+                ToolResult("Launched $packageName.")
+            }.getOrElse { error ->
+                ToolResult("Unable to launch $packageName: ${error.message}", isError = true)
+            }
+        }
+    }
+
     private fun hasNotificationPermission(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
         return context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
@@ -226,5 +268,6 @@ class AndroidToolExecutor(
     private companion object {
         const val MAX_FILE_BYTES = 64 * 1024
         const val CHANNEL_ID = "mcp_tools"
+        val PACKAGE_NAME_REGEX = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }
 }

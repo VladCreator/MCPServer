@@ -110,12 +110,27 @@ object McpTools {
         sensitive = true
     )
 
+    val launchApp: ToolDefinition = ToolDefinition(
+        name = "launch_app",
+        description = "Launch an installed app by its package name (e.g. com.android.settings). " +
+            "Only apps with a launcher entry can be opened.",
+        required = listOf("package_name"),
+        inputSchema = schema(listOf("package_name")) {
+            putJsonObject("package_name") {
+                put("type", "string")
+                put("description", "Android package name of the app to launch")
+            }
+        },
+        sensitive = true
+    )
+
     val all: List<ToolDefinition> = listOf(
         getDeviceInfo,
         readFile,
         createNotification,
         takePhoto,
-        touchTest
+        touchTest,
+        launchApp
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }

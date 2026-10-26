@@ -211,6 +211,10 @@ class AppViewModel(
         openSystemAccessibilitySettings()
     }
 
+    fun openOverlaySettings() {
+        openOverlayPermissionSettings()
+    }
+
     /**
      * Approves a pending session. The transport that is waiting for the
      * decision resumes and emits [ServerEvent.Authorized].

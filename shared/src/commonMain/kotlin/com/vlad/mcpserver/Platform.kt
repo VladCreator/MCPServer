@@ -39,3 +39,15 @@ expect fun stopServerForegroundService()
  * injection service.
  */
 expect fun openSystemAccessibilitySettings()
+
+/**
+ * Opens the "Display over other apps" settings page so the user can let the
+ * launch_app tool start activities while MCPServer is in the background.
+ */
+expect fun openOverlayPermissionSettings()
+
+/** Whether the "Display over other apps" permission is granted. */
+expect fun isOverlayPermissionGranted(): Boolean
+
+/** Whether the MCP Touch accessibility service is enabled and connected. */
+expect fun isTouchServiceEnabled(): Boolean

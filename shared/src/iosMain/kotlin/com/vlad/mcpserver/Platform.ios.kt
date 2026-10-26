@@ -44,3 +44,9 @@ actual fun stopServerForegroundService() = Unit
 
 
 actual fun openSystemAccessibilitySettings() = Unit
+
+actual fun openOverlayPermissionSettings() = Unit
+
+actual fun isOverlayPermissionGranted(): Boolean = false
+
+actual fun isTouchServiceEnabled(): Boolean = false

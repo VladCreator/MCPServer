@@ -70,6 +70,7 @@ class McpDispatcherTest {
         assertTrue(tools.contains("get_device_info"))
         assertTrue(tools.contains("touch_test"))
         assertTrue(tools.contains("take_photo"))
+        assertTrue(tools.contains("launch_app"))
     }
 
     @Test

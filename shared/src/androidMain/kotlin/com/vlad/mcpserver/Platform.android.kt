@@ -2,6 +2,7 @@ package com.vlad.mcpserver
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import java.net.Inet4Address
@@ -126,3 +127,20 @@ actual fun openSystemAccessibilitySettings() {
         )
     }
 }
+
+actual fun openOverlayPermissionSettings() {
+    if (!::appContext.isInitialized) return
+    runCatching {
+        appContext.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${appContext.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+actual fun isOverlayPermissionGranted(): Boolean =
+    ::appContext.isInitialized && Settings.canDrawOverlays(appContext)
+
+actual fun isTouchServiceEnabled(): Boolean = McpTouchAccessibilityService.instance() != null
