@@ -5,6 +5,8 @@ import com.vlad.mcpserver.mcp.McpServerHost
 import com.vlad.mcpserver.mcp.ServerEvent
 import com.vlad.mcpserver.mcp.ServerStatus
 import com.vlad.mcpserver.mcp.ToolApprovalRequest
+import com.vlad.mcpserver.mcp.ToolCallRecord
+import com.vlad.mcpserver.mcp.ToolCallOutcome
 import com.vlad.mcpserver.mcp.Transport
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +25,29 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModelTest {
+
+    @Test
+    fun photoRemainsVisibleInMemoryWhenHistoryStorageIsUnavailable() = runTest {
+        val host = FakeMcpServerHost()
+        val viewModel = viewModel(host)
+        host.emit(
+            ServerEvent.ToolCalled(
+                ToolCallRecord(
+                    clientId = "c1",
+                    toolName = "take_photo",
+                    arguments = "{}",
+                    outcome = ToolCallOutcome.SUCCESS,
+                    message = "Photo captured",
+                    timestamp = 123L
+                )
+            )
+        )
+
+        assertEquals("take_photo", viewModel.executionLogs.value.first().toolName)
+        assertEquals("SUCCESS", viewModel.executionLogs.value.first().status)
+        assertTrue(viewModel.storageError?.contains("Unable to save activity 'take_photo'") == true)
+        assertTrue(viewModel.storageError?.contains("only available in memory") == true)
+    }
 
     @Test
     fun serverStartsAndStops() = runTest {

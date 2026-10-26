@@ -207,6 +207,25 @@ class McpDispatcherTest {
     }
 
     @Test
+    fun photoResponseSurvivesHistoryCallbackFailure() = runTest {
+        val dispatcher = McpDispatcher(
+            executor = FakeExecutor(
+                ToolResult("Photo captured", imageBase64 = "jpeg", imageMimeType = "image/jpeg")
+            ),
+            onToolCall = { error("History unavailable") }
+        )
+        val session = initializedSession(dispatcher)
+        val response = dispatcher.handle(
+            session,
+            """{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"take_photo","arguments":{}}}"""
+        )!!.jsonObject
+        assertNull(response["error"])
+        val content = response["result"]!!.jsonObject["content"]!!.jsonArray
+        assertEquals("image", content.first().jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("Photo captured", content.last().jsonObject["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun pingWorks() = runTest {
         val dispatcher = dispatcher()
         val session = initializedSession(dispatcher)

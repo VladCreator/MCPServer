@@ -24,6 +24,10 @@ not implemented there yet).
   fingerprint is shown in the dashboard.
 - **SQLite** persistence for settings and command history (WAL, real timestamps,
   bounded history).
+- **Browsable activity history**: the dashboard previews four entries; **Show all**
+  opens a scrollable list of up to 500 recent activities. Storage failures appear
+  on the dashboard; affected entries remain visible in memory but are not saved.
+  History callback failures are reported in diagnostic logs without breaking tool responses.
 - **Dashboard**: server status, pending requests with remote address, connected agents,
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps

@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -201,6 +203,16 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                 clients = pendingClients,
                                 onApprove = viewModel::approveClient,
                                 onReject = viewModel::rejectClient
+                            )
+                        }
+                    }
+
+                    viewModel.storageError?.let { message ->
+                        item(key = "storage-error") {
+                            Text(
+                                text = message,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
@@ -847,7 +859,7 @@ private fun ActivityCard(
     onToggleAll: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val visible = if (showAll) logs.take(20) else logs.take(4)
+    val visible = if (showAll) logs else logs.take(4)
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -876,10 +888,24 @@ private fun ActivityCard(
                     }
                 }
             }
-            visible.forEachIndexed { index, log ->
-                ActivityRow(log)
-                if (index < visible.lastIndex) {
-                    HorizontalDivider(color = colors.outlineVariant)
+            if (showAll) {
+                Text(
+                    text = "${logs.size} recent activities · Scroll to browse history",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
+                )
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                    items(visible) { log ->
+                        ActivityRow(log)
+                        HorizontalDivider(color = colors.outlineVariant)
+                    }
+                }
+            } else {
+                visible.forEachIndexed { index, log ->
+                    ActivityRow(log)
+                    if (index < visible.lastIndex) {
+                        HorizontalDivider(color = colors.outlineVariant)
+                    }
                 }
             }
         }

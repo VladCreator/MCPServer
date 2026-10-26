@@ -220,8 +220,9 @@ class McpDispatcher(
             onToolCall(record)
         } catch (error: kotlinx.coroutines.CancellationException) {
             throw error
-        } catch (_: Throwable) {
-            // Logging must never break the tool response.
+        } catch (error: Throwable) {
+            // Preserve the tool response, but do not hide a failed history callback.
+            error.printStackTrace()
         }
 
         return JsonRpc.success(

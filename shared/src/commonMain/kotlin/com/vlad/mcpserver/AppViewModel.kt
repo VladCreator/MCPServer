@@ -14,6 +14,7 @@ import com.vlad.mcpserver.mcp.ToolCallOutcome
 import com.vlad.mcpserver.mcp.createMcpServerHost
 import com.vlad.mcpserver.mcp.newSecureToken
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -258,14 +259,17 @@ class AppViewModel(
         val storedDark = opened.getSetting("dark_mode")?.toBooleanStrictOrNull()
         val storedConfirmTools = opened.getSetting("confirm_tools")?.toBooleanStrictOrNull()
         val tokenToPersist = if (storedToken == null) bearerToken else null
-        val logs = opened.getCommandHistories()
+        val logs = opened.getCommandHistories(limit = MAX_VISIBLE_LOGS)
 
         withContext(uiDispatcher) {
             if (storedToken != null) bearerToken = storedToken
             storedSsl?.let { sslEnabled = it }
             storedDark?.let { isDarkMode = it }
             storedConfirmTools?.let { confirmSensitiveTools = it }
-            executionLogsState.value = logs
+            executionLogsState.update { current ->
+                (current + logs.filter { stored -> current.none { it.id == stored.id } })
+                    .take(MAX_VISIBLE_LOGS)
+            }
         }
 
         if (needsMigration) {
@@ -337,15 +341,13 @@ class AppViewModel(
             is ServerEvent.ToolCalled -> {
                 val record = event.record
                 val status = if (record.outcome == ToolCallOutcome.SUCCESS) "SUCCESS" else "FAILED"
-                val id = runCatching {
-                    database?.insertCommandHistory(
-                        record.clientId,
-                        record.toolName,
-                        record.arguments,
-                        status,
-                        record.message
-                    )
-                }.getOrNull() ?: 0L
+                val id = persistHistory(
+                    record.clientId,
+                    record.toolName,
+                    record.arguments,
+                    status,
+                    record.message
+                )
                 appendLog(
                     ToolExecutionLog(
                         id = id,
@@ -368,9 +370,7 @@ class AppViewModel(
         status: String,
         result: String
     ) {
-        val id = runCatching {
-            database?.insertCommandHistory(clientId, toolName, arguments, status, result)
-        }.getOrNull() ?: 0L
+        val id = persistHistory(clientId, toolName, arguments, status, result)
         appendLog(
             ToolExecutionLog(
                 id = id,
@@ -382,6 +382,29 @@ class AppViewModel(
                 result = result
             )
         )
+    }
+
+    private suspend fun persistHistory(
+        clientId: String,
+        toolName: String,
+        arguments: String,
+        status: String,
+        result: String?
+    ): Long {
+        return try {
+            val storage = database ?: error("Activity storage is unavailable")
+            storage.insertCommandHistory(clientId, toolName, arguments, status, result)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.printStackTrace()
+            withContext(uiDispatcher) {
+                storageError = "Unable to save activity '$toolName': " +
+                    "${error.message ?: error::class.simpleName}. " +
+                    "The entry is only available in memory."
+            }
+            0L
+        }
     }
 
     private fun appendLog(log: ToolExecutionLog) {
@@ -409,6 +432,6 @@ class AppViewModel(
     companion object {
         private const val HTTP_PORT = 8080
         private const val HTTPS_PORT = 8443
-        private const val MAX_VISIBLE_LOGS = 100
+        private const val MAX_VISIBLE_LOGS = 500
     }
 }
