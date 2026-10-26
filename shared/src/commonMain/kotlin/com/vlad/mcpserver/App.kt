@@ -543,10 +543,21 @@ private fun ToolApprovalCard(
             }
             requests.forEach { request ->
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(
-                        text = request.toolName,
-                        style = MaterialTheme.typography.titleSmall
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = toolIcon(request.toolName),
+                            contentDescription = null,
+                            tint = colors.onSurface,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = request.toolName,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
                     Text(
                         text = "${request.clientName} · ${request.arguments}",
                         style = MaterialTheme.typography.bodySmall,
@@ -900,9 +911,17 @@ private fun ActivityRow(log: ToolExecutionLog) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(6.dp)
-                    .background(statusColor, CircleShape)
-            )
+                    .size(26.dp)
+                    .background(statusColor.copy(alpha = 0.14f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = toolIcon(log.toolName),
+                    contentDescription = null,
+                    tint = statusColor,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
             Text(
                 text = log.toolName,
                 style = MaterialTheme.typography.bodyMedium,
