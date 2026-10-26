@@ -965,7 +965,7 @@ private fun SettingsSheet(
             }
             ActionRow(
                 title = "Touch injection",
-                subtitle = "Required for the touch_test tool.",
+                subtitle = "Required for touch, screen reading and navigation tools.",
                 action = "Open",
                 onClick = viewModel::openTouchAccessibilitySettings,
                 granted = touchServiceEnabled

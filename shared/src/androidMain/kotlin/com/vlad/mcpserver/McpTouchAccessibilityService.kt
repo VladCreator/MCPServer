@@ -10,11 +10,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Accessibility service used by the touch_test MCP tool.
+ * Accessibility service used by the touch and screen navigation MCP tools.
  *
  * The user must enable "MCP Touch Service" in Android's accessibility
- * settings. The service only exposes gesture injection; it does not read or
- * modify the accessibility tree.
+ * settings. It injects gestures, reads the active window's UI tree and takes
+ * screenshots only when an approved tool call asks for it.
  */
 class McpTouchAccessibilityService : AccessibilityService() {
 
@@ -32,10 +32,22 @@ class McpTouchAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    suspend fun tap(x: Float, y: Float): Boolean = withContext(Dispatchers.Main) {
+    suspend fun tap(x: Float, y: Float, durationMs: Long = 60L): Boolean {
         val path = Path().apply { moveTo(x, y) }
+        return dispatch(path, durationMs)
+    }
+
+    suspend fun swipe(fromX: Float, fromY: Float, toX: Float, toY: Float, durationMs: Long = 350L): Boolean {
+        val path = Path().apply {
+            moveTo(fromX, fromY)
+            lineTo(toX, toY)
+        }
+        return dispatch(path, durationMs)
+    }
+
+    private suspend fun dispatch(path: Path, durationMs: Long): Boolean = withContext(Dispatchers.Main) {
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0L, 60L))
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))
             .build()
         val result = CompletableDeferred<Boolean>()
         val callback = object : GestureResultCallback() {
@@ -50,7 +62,7 @@ class McpTouchAccessibilityService : AccessibilityService() {
         if (!dispatchGesture(gesture, callback, null)) {
             result.complete(false)
         }
-        withTimeoutOrNull(2_000L) { result.await() } ?: false
+        withTimeoutOrNull(durationMs + 2_000L) { result.await() } ?: false
     }
 
     companion object {

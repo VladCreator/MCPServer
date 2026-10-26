@@ -18,7 +18,7 @@ not implemented there yet).
 - **Hybrid authentication**: `Authorization: Bearer <token>` or manual approval from
   the dashboard (pending requests wait up to 60 seconds).
 - **Per-tool confirmation**: sensitive tools (`read_file`, `take_photo`,
-  `touch_test`, `launch_app`) pause and ask for **Approve tool / Reject** in the dashboard before
+  `touch_test`, `launch_app`, screen navigation tools) pause and ask for **Approve tool / Reject** in the dashboard before
   executing. The confirmation can be disabled in Settings.
 - **TLS/HTTPS** with a self-signed certificate generated on first use. The SHA-256
   fingerprint is shown in the dashboard.
@@ -154,8 +154,19 @@ origin (DNS-rebinding/CSRF protection) and limit request bodies to 256 KB.
 | `take_photo` | Available (foreground) | Captures a JPEG with CameraX and returns an MCP `image` content block plus the file path. The app must be in the foreground. |
 | `touch_test` | Available (accessibility) | Injects a tap at `x,y`. Requires the user to enable **MCP Touch Service** in Android accessibility settings. |
 | `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name`. From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). |
+| `get_screen_tree` | Available (accessibility) | Returns the foreground app's UI as indented text: index, class, text, description, resource id, bounds and flags. Preferred way for an AI to "see" the screen. |
+| `take_screenshot` | Available (accessibility) | Captures the screen as a JPEG (`max_dimension`, default 1280). Fallback for games, maps or canvas UIs. Fails on `FLAG_SECURE` screens. |
+| `click_element` | Available (accessibility) | Clicks or long-presses an element by `index` (from the last tree), `text`, `resource_id` or `content_desc`. |
+| `input_text` | Available (accessibility) | Sets the text of an editable field (focused field or selector via `match_text`/`index`/`resource_id`/`content_desc`); optional `submit`. |
+| `scroll` | Available (accessibility) | Scrolls `up`/`down`/`left`/`right` on the largest or selected scrollable element. |
+| `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. |
 
-Sensitive tools (`read_file`, `take_photo`, `touch_test`, `launch_app`) wait for an explicit
+Recommended navigation loop for agents: `get_screen_tree` → `click_element` /
+`input_text` / `scroll` → `get_screen_tree` again; use `take_screenshot` only when
+the tree is empty or ambiguous.
+
+Sensitive tools (`read_file`, `take_photo`, `touch_test`, `launch_app` and all
+screen navigation tools) wait for an explicit
 **Approve tool** action in the dashboard before running. The **Confirm sensitive
 tools** switch in Settings disables this gate. Tools that cannot run in the current
 state return `isError: true` with an actionable message instead of a fake success.

@@ -71,6 +71,8 @@ class McpDispatcherTest {
         assertTrue(tools.contains("touch_test"))
         assertTrue(tools.contains("take_photo"))
         assertTrue(tools.contains("launch_app"))
+        listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
+            .forEach { assertTrue(tools.contains(it), "missing $it") }
     }
 
     @Test
