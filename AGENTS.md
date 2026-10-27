@@ -1,10 +1,10 @@
-# AGENTS.md - MCPServer (Version 0.0.3)
+# AGENTS.md - Tester (Version 0.1.0)
 
 ## Project Objective
-MCPServer is an Android (Kotlin Multiplatform) application designed to act as a Model Context Protocol (MCP) server host on mobile devices. 
+Tester (repository/package `MCPServer` / `com.vlad.mcpserver`) is an Android (Kotlin Multiplatform) application designed to act as a Model Context Protocol (MCP) server host on mobile devices. 
 
 Its primary objectives are:
-1. **MCP Server Integration**: Provide a robust local MCP server service allowing external AI agents to connect, discover, and invoke capabilities on the device.
+1. **Tester Integration**: Provide a robust local Tester allowing external AI agents to connect, discover, and invoke capabilities on the device.
 2. **Interactive Capabilities for AI**: Empower connected AI agents with device tools and touch areas to:
    - Perform automated UI and functional tests.
    - Capture photos using camera integration.
@@ -27,7 +27,7 @@ Its primary objectives are:
 - **Language**: All source code, variable names, functions, classes, and code comments must be written strictly in **English**.
 
 ## Architecture & Versioning
-- **Version**: 0.0.3
+- **Version**: 0.1.0
 - **Platform**: Kotlin Multiplatform (Android primary target)
 - **UI Framework**: Jetpack Compose Multiplatform
 - **Communication Protocol**: MCP over SSE / WebSockets / HTTP for AI client connections.

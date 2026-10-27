@@ -159,7 +159,7 @@ class AndroidToolExecutor(
     private fun createNotification(arguments: JsonObject): ToolResult {
         if (!hasNotificationPermission()) {
             return ToolResult(
-                "Notification permission is not granted. Enable notifications for MCPServer in Android settings.",
+                "Notification permission is not granted. Enable notifications for Tester in Android settings.",
                 isError = true
             )
         }
@@ -204,7 +204,7 @@ class AndroidToolExecutor(
     private suspend fun takePhoto(): ToolResult {
         if (!AppVisibility.isForeground) {
             return ToolResult(
-                "Camera capture is only allowed while the MCPServer app is in the foreground. " +
+                "Camera capture is only allowed while the Tester app is in the foreground. " +
                     "Open the app and try again.",
                 isError = true
             )
@@ -377,7 +377,7 @@ class AndroidToolExecutor(
                 "No current or past process found for '$pkg' in the log buffers. Past processes are found " +
                     "through system/crash logs, which need READ_LOGS (adb shell pm grant ${context.packageName} " +
                     "android.permission.READ_LOGS) and, on Android 13+, tapping 'Allow' on the system " +
-                    "'access all device logs' dialog (shown once per MCPServer process; click_element can tap it). Retry after allowing.",
+                    "'access all device logs' dialog (shown once per Tester process; click_element can tap it). Retry after allowing.",
                 isError = true
             )
         }
@@ -497,9 +497,9 @@ class AndroidToolExecutor(
             !Settings.canDrawOverlays(context)
         ) {
             return ToolResult(
-                "Cannot launch apps while MCPServer is in the background. Grant 'Display over " +
-                    "other apps' (MCPServer Settings > Device access), enable 'MCP Touch Service' " +
-                    "in Accessibility, or open MCPServer, then try again.",
+                "Cannot launch apps while Tester is in the background. Grant 'Display over " +
+                    "other apps' (Tester Settings > Device access), enable 'MCP Touch Service' " +
+                    "in Accessibility, or open Tester, then try again.",
                 isError = true
             )
         }
@@ -532,7 +532,7 @@ class AndroidToolExecutor(
 
     private fun touchServiceMissing(): ToolResult = ToolResult(
         "This tool needs 'MCP Touch Service'. Enable it in Android Settings > Accessibility " +
-            "(or MCPServer Settings > Device access), then try again.",
+            "(or Tester Settings > Device access), then try again.",
         isError = true
     )
 
@@ -593,7 +593,7 @@ class AndroidToolExecutor(
                     text = "Captured at ${java.time.Instant.now()}" +
                         (foreground?.let { " (foreground: $it)" } ?: "") +
                         (if (settled) "" else "; UI was still changing or the expected app was not in front") +
-                        (if (foreground == context.packageName) "; WARNING: MCPServer itself is in front" else "") +
+                        (if (foreground == context.packageName) "; WARNING: Tester itself is in front" else "") +
                         ". Screenshot ${shot.width}x${shot.height} (screen " +
                         "${shot.screenWidth}x${shot.screenHeight}). Multiply image coordinates by " +
                         "${"%.3f".format(shot.screenWidth.toFloat() / shot.width)} to get screen " +

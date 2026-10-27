@@ -144,7 +144,7 @@ class McpDispatcher(
                 }
                 put(
                     "instructions",
-                    "Local $platformLabel MCP server. Use tools/list to discover the available device tools."
+                    "Local $platformLabel Tester. Use tools/list to discover the available device tools."
                 )
             }
         )
@@ -291,8 +291,8 @@ class McpDispatcher(
             "2025-03-26",
             "2024-11-05"
         )
-        const val SERVER_NAME = "MCPServer Host"
-        const val SERVER_VERSION = "0.0.3"
+        const val SERVER_NAME = "Tester"
+        const val SERVER_VERSION = "0.1.0"
         private const val MAX_LOGGED_ARGUMENTS = 2_000
         private const val MAX_LOGGED_RESULT = 2_000
     }

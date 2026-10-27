@@ -1,10 +1,10 @@
-# MCPServer
+# Tester
 
 A local [Model Context Protocol](https://modelcontextprotocol.io) server that runs on an
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.0.3** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.1.0** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -85,7 +85,7 @@ development environment.
 
 ## Run
 
-1. Open **MCPServer** and tap **Start**. The server listens on:
+1. Open **Tester** and tap **Start**. The server listens on:
    - `http://<device-ip>:8080/mcp` (Streamable HTTP)
    - `http://<device-ip>:8080/sse` (legacy SSE)
    - `ws://<device-ip>:8080/mcp` (legacy WebSocket; `/ws` is an alias)
@@ -304,6 +304,6 @@ recovered/committed.
 - `install_apk` and `screen_record` are intentionally not provided: Android requires an on-screen user confirmation (package installer / MediaProjection).
 - `take_screenshot` waits for the UI to settle (`settle_ms`, default 1500) and reports a capture timestamp and foreground package.
 - `click_element` refuses ambiguous matches: pass `nth` (0-based, same as `ui_find` `match_index`), `text_exact` or a more specific selector; candidates are listed.
-- `take_screenshot` accepts `package_name` to wait for that app and warns when MCPServer itself is in front.
+- `take_screenshot` accepts `package_name` to wait for that app and warns when Tester itself is in front.
 - Dark mode/animation changes need `adb shell pm grant com.vlad.mcpserver android.permission.WRITE_SECURE_SETTINGS`; `health_check` reports which special accesses are granted.
 - `touch_test` failures explain the likely cause (no window, transition, screen off).

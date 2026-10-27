@@ -15,7 +15,7 @@
    - **No existe Streamable HTTP** (el transporte actual de MCP): `POST /mcp` → `405`, `GET /mcp` → `400`, `DELETE /mcp` → `405`.
    - `POST /message` **no valida autenticación**: ejecuté `tools/list` y `tools/call` sin token.
    - El toggle **SSL/TLS nunca arranca**: `NullPointerException: getCertificateChain(...) must not be null` (keystore PKCS12 vacío, alias `mcpkey` inexistente).
-   - La UI muestra **"Active" y "MCP Server started successfully" aunque el bind haya fallado** (verificado con SSL).
+   - La UI muestra **"Active" y "Tester started successfully" aunque el bind haya fallado** (verificado con SSL).
    - Las herramientas son **simuladas**: `read_file` ignora la ruta, `take_photo` no usa la cámara, `touch_test` no inyecta toques, `create_notification` no notifica.
 4. **La autenticación híbrida del AGENTS.md no existe en la práctica.** El flujo "pendiente → aprobar/rechazar" solo actualiza la UI; no bloquea la conexión ni las llamadas. Un cliente no autenticado puede usar todas las herramientas.
 5. **Riesgos de seguridad P0:** token por HTTP en claro, token por defecto hardcodeado (`mcp_secret_token_2025`), sin validación de `Origin` (DNS rebinding / CSRF desde cualquier web de la LAN), token en SQLite en claro con `allowBackup=true`, y ejecución de herramientas sin aprobación.
@@ -190,7 +190,7 @@ fun toggleServer() {
     isServerRunning = !isServerRunning
     if (isServerRunning) {
         mcpServerEngine.start()                 // puede fallar silenciosamente
-        logCommand(..., "SUCCESS", "MCP Server started successfully.")
+        logCommand(..., "SUCCESS", "Tester started successfully.")
     }
     ...
 }

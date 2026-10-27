@@ -87,7 +87,7 @@ object AndroidTls {
         val now = System.currentTimeMillis()
         val notBefore = Date(now - 24L * 60L * 60L * 1000L)
         val notAfter = Date(now + VALIDITY_MILLIS)
-        val subject = X500Name("CN=MCPServer Local, O=MCPServer, OU=Android, C=MX")
+        val subject = X500Name("CN=Tester Local, O=Tester, OU=Android, C=MX")
 
         val builder = JcaX509v3CertificateBuilder(
             subject,

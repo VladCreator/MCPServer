@@ -189,7 +189,7 @@ class AndroidDeviceStateController(private val context: Context) {
                     ?: error("PowerManager is unavailable")
                 wakeLock = power.newWakeLock(
                     PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                    "MCPServer:QA"
+                    "Tester:QA"
                 ).apply { acquire(30L * 60L * 1000L) }
             }
             return "Keep awake enabled."
@@ -279,7 +279,7 @@ class AndroidDeviceStateController(private val context: Context) {
     private fun requireSystemWrite() {
         if (!Settings.System.canWrite(context)) {
             error(
-                "WRITE_SETTINGS is not granted. Enable 'Modify system settings' for MCPServer " +
+                "WRITE_SETTINGS is not granted. Enable 'Modify system settings' for Tester " +
                     "in Android settings, or run: adb shell appops set ${context.packageName} " +
                     "android:write_settings allow"
             )

@@ -48,7 +48,7 @@ expect fun openSystemAccessibilitySettings()
 
 /**
  * Opens the "Display over other apps" settings page so the user can let the
- * launch_app tool start activities while MCPServer is in the background.
+ * launch_app tool start activities while Tester is in the background.
  */
 expect fun openOverlayPermissionSettings()
 

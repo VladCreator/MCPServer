@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Lifecycle state of the embedded MCP server.
+ * Lifecycle state of the embedded Tester.
  */
 sealed interface ServerStatus {
     data object Stopped : ServerStatus

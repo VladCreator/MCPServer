@@ -97,7 +97,7 @@ actual fun newSecureToken(): String {
 }
 
 /**
- * Embedded Ktor MCP server for Android.
+ * Embedded Ktor Tester for Android.
  *
  * Transports:
  *  - Streamable HTTP: POST/GET/DELETE /mcp
@@ -259,7 +259,7 @@ private class AndroidMcpServerHost(
         }
         throw IllegalStateException(
             "Port $port is already in use (a previous server may still be closing). " +
-                "Wait a few seconds and start again, or force-stop MCPServer."
+                "Wait a few seconds and start again, or force-stop Tester."
         )
     }
 
@@ -300,7 +300,7 @@ private class AndroidMcpServerHost(
         routing {
             get("/") {
                 call.respondText(
-                    "MCPServer Host v${McpDispatcher.SERVER_VERSION}\n" +
+                    "Tester v${McpDispatcher.SERVER_VERSION}\n" +
                         "Streamable HTTP: POST/GET/DELETE /mcp\n" +
                         "SSE: GET /sse, POST /message\n" +
                         "WebSocket (legacy): /ws\n"

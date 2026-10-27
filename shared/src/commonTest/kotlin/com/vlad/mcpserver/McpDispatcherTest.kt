@@ -37,7 +37,7 @@ class McpDispatcherTest {
         assertEquals("2.0", response["jsonrpc"]!!.jsonPrimitive.content)
         assertEquals(1, response["id"]!!.jsonPrimitive.int)
         assertEquals("2025-06-18", result["protocolVersion"]!!.jsonPrimitive.content)
-        assertEquals("MCPServer Host", result["serverInfo"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+        assertEquals("Tester", result["serverInfo"]!!.jsonObject["name"]!!.jsonPrimitive.content)
         assertTrue(session.initialized)
     }
 

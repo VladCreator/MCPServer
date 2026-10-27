@@ -316,12 +316,12 @@ public final class AppViewModel extends ViewModel {
         if (zIsServerRunning) {
             mcpServerEngine.start();
             String port = getSslEnabled() ? "8443 (HTTPS/WSS)" : "8080 (HTTP/WS)";
-            logCommand("System", "StartServer", "Port: " + port, "SUCCESS", "MCP Server started successfully.");
+            logCommand("System", "StartServer", "Port: " + port, "SUCCESS", "Tester started successfully.");
         } else {
             mcpServerEngine.stop();
             this.connectedClients.setValue(CollectionsKt.emptyList());
             this.pendingClients.setValue(CollectionsKt.emptyList());
-            logCommand("System", "StopServer", "", "SUCCESS", "MCP Server stopped.");
+            logCommand("System", "StopServer", "", "SUCCESS", "Tester stopped.");
         }
     }
 

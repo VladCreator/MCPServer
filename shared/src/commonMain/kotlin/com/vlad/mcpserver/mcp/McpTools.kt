@@ -50,7 +50,7 @@ object McpTools {
 
     val getDeviceInfo: ToolDefinition = ToolDefinition(
         name = "get_device_info",
-        description = "Return basic information about the device and the MCP server.",
+        description = "Return basic information about the device and the Tester.",
         inputSchema = schema(emptyList()) { }
     )
 
@@ -88,7 +88,7 @@ object McpTools {
 
     val takePhoto: ToolDefinition = ToolDefinition(
         name = "take_photo",
-        description = "Capture a JPEG photo with the device camera. The MCPServer app must be " +
+        description = "Capture a JPEG photo with the device camera. The Tester app must be " +
             "in the foreground while the capture runs.",
         inputSchema = schema(emptyList()) {
             putJsonObject("quality") {
@@ -322,7 +322,7 @@ object McpTools {
     val getAppVersion: ToolDefinition = ToolDefinition(
         name = "get_app_version",
         description = "Return versionName, versionCode and install/update times of an installed " +
-            "app (launchable apps and MCPServer itself).",
+            "app (launchable apps and Tester itself).",
         required = listOf("package_name"),
         inputSchema = schema(listOf("package_name")) {
             putJsonObject("package_name") { put("type", "string"); put("description", "Android package name") }

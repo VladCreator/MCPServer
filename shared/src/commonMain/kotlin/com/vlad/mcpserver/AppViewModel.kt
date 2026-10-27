@@ -70,7 +70,7 @@ class AppViewModel(
 
     private var localIpAddress by mutableStateOf("127.0.0.1")
 
-    val serverName = "MCPServer Host"
+    val serverName = "Tester"
 
     private val serverHost: McpServerHost = hostFactory(
         { bearerToken },

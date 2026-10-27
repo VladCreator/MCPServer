@@ -1,6 +1,6 @@
-# Supported tools — MCPServer 0.0.3
+# Supported tools — Tester 0.1.0
 
-MCPServer exposes **22 tools** over MCP on Android (12 device tools + 10 QA-pack tools).
+Tester exposes **22 tools** over MCP on Android (12 device tools + 10 QA-pack tools).
 The iOS QA service advertises a 5-tool subset (`get_device_info`, `qa_session`,
 `audio_instruction`, `audio_state`, `get_device_state`); see
 [`IOS_QA_SERVICE.md`](IOS_QA_SERVICE.md).
@@ -63,7 +63,7 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
   has a shortcut in **Settings → Device access**. Needed by seven tools:
   `touch_test`, `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`,
   `scroll`, `global_action`.
-- **Camera**: runtime permission; `take_photo` only runs while the MCPServer app is in
+- **Camera**: runtime permission; `take_photo` only runs while the Tester app is in
   the foreground.
 - **Notifications**: runtime `POST_NOTIFICATIONS` permission.
 - **Files**: `read_file` is restricted to the app's sandbox (`files`, `cache`,

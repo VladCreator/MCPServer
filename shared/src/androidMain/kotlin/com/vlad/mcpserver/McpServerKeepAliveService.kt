@@ -45,10 +45,10 @@ class McpServerKeepAliveService : Service() {
         val manager = getSystemService(NotificationManager::class.java) ?: return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "MCP server",
+            "Tester",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Keeps the local MCP server running in the background."
+            description = "Keeps the local Tester running in the background."
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
@@ -99,7 +99,7 @@ class McpServerKeepAliveService : Service() {
             val activity = lastActivity
             val failed = activity != null && activity.status !in setOf("SUCCESS", "INFO")
             val title = if (activity == null) {
-                "MCP Server running"
+                "Tester running"
             } else {
                 "${activity.toolName}${if (failed) " · ${activity.status.lowercase()}" else ""}"
             }
@@ -117,7 +117,7 @@ class McpServerKeepAliveService : Service() {
             return builder
                 .setContentTitle(title)
                 .setContentText(text)
-                .setSubText("MCP Server")
+                .setSubText("Tester")
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)

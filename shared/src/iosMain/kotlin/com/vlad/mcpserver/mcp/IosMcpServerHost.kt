@@ -154,7 +154,7 @@ class IosMcpServerHost(
         routing {
             get("/") {
                 call.respondText(
-                    "MCPServer iOS QA service v${McpDispatcher.SERVER_VERSION}\n" +
+                    "Tester iOS QA service v${McpDispatcher.SERVER_VERSION}\n" +
                         "Streamable HTTP: POST/DELETE /mcp\n" +
                         "Status: GET /status\n"
                 )

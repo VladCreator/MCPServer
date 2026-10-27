@@ -101,7 +101,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * Minimal Material 3 dashboard for the local MCP server.
+ * Minimal Material 3 dashboard for the local Tester.
  *
  * The main column is centered and width-limited on tablets. Secondary
  * information (settings, endpoints, fingerprints) lives in bottom sheets so the
@@ -308,14 +308,14 @@ private fun AppHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "MCP Server",
+                    text = "Tester",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 StatusPill(status)
             }
             Text(
-                text = "Local device tools for AI agents",
+                text = "Tester for AI agents",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -535,7 +535,7 @@ private fun ServerCard(
 
                 else -> {
                     Text(
-                        text = "Turn this device into an MCP server",
+                        text = "Turn this device into an Tester",
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
@@ -1290,7 +1290,7 @@ private fun SettingsSheet(
                 )
                 ActionRow(
                     title = "Display over other apps",
-                    subtitle = "Lets launch_app open apps while MCPServer is in the background.",
+                    subtitle = "Lets launch_app open apps while Tester is in the background.",
                     action = "Open",
                     onClick = viewModel::openOverlaySettings,
                     granted = overlayGranted
@@ -1306,7 +1306,7 @@ private fun SettingsSheet(
 
             SheetDivider()
             Text(
-                text = "MCPServer 0.0.3 · Streamable HTTP, SSE and local tools",
+                text = "Tester 0.1.0 · Streamable HTTP, SSE and local tools",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp)
