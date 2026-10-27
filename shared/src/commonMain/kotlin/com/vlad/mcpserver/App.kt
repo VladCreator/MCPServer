@@ -118,6 +118,17 @@ fun App(viewModel: AppViewModel = viewModel()) {
 
     val clipboardManager = LocalClipboardManager.current
 
+    val isIosPlatform = getPlatform().name.contains("iOS", ignoreCase = true)
+    var touchServiceEnabled by remember { mutableStateOf(isTouchServiceEnabled()) }
+    var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted()) }
+    var writeSettingsGranted by remember { mutableStateOf(isWriteSettingsGranted()) }
+    // Re-check when returning from the system settings screens.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        touchServiceEnabled = isTouchServiceEnabled()
+        overlayGranted = isOverlayPermissionGranted()
+        writeSettingsGranted = isWriteSettingsGranted()
+    }
+
     var showSettings by remember { mutableStateOf(false) }
     var showConnection by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
@@ -154,6 +165,23 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             onTools = { showTools = true },
                             onSettings = { showSettings = true }
                         )
+                    }
+
+                    val missingAccess = buildList {
+                        if (!touchServiceEnabled) add(
+                            Triple("Touch injection", "Touch, screen reading and navigation tools", viewModel::openTouchAccessibilitySettings)
+                        )
+                        if (!overlayGranted) add(
+                            Triple("Display over other apps", "Launching apps from the background", viewModel::openOverlaySettings)
+                        )
+                        if (!writeSettingsGranted) add(
+                            Triple("Modify system settings", "Rotation and font scale in device_state", viewModel::openWriteSettings)
+                        )
+                    }
+                    if (!isIosPlatform && missingAccess.isNotEmpty()) {
+                        item(key = "missing-access") {
+                            MissingAccessCard(missingAccess)
+                        }
                     }
 
                     item(key = "overview") {
@@ -1619,6 +1647,36 @@ private fun SwitchRow(
                 disabledUncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
+    }
+}
+
+@Composable
+private fun MissingAccessCard(items: List<Triple<String, String, () -> Unit>>) {
+    val colors = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Rounded.WarningAmber,
+                    contentDescription = null,
+                    tint = colors.error,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Device access needed", style = MaterialTheme.typography.titleSmall)
+            }
+            Text(
+                text = "Grant these permissions before starting the server so AI tools work reliably.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
+            )
+            items.forEach { (title, subtitle, onOpen) ->
+                ActionRow(title = title, subtitle = subtitle, action = "Allow", onClick = onOpen)
+            }
+        }
     }
 }
 
