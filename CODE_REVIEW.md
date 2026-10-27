@@ -49,9 +49,13 @@ Implementado y verificado en un emulador Android 16 (API 37):
       la UI; el servidor ya no se marca "Active" si el bind falla.
 - [x] SQLite con WAL, timestamps reales, `last_insert_rowid`, una conexión serializada
       y poda del historial.
-- [x] Herramientas reales: `get_device_info`, `read_file` (sandbox, 64 KB) y
-      `create_notification` (permiso POST_NOTIFICATIONS), `take_photo` (CameraX) y
-      `touch_test` (AccessibilityService).
+- [x] Herramientas reales (12): `get_device_info`, `read_file`, `create_notification`,
+      `take_photo`, `touch_test`, `launch_app`, `get_screen_tree`, `take_screenshot`,
+      `click_element`, `input_text`, `scroll` y `global_action`.
+- [x] Catálogo de tools en la app (hoja **Tools**), en [`docs/TOOLS.md`](docs/TOOLS.md) y
+      con metadatos de requisitos para la UI.
+- [x] USB/ADB: tarjeta de conexión con `adb forward` y URL `localhost`; WebSocket
+      disponible en `/mcp` (alias `/ws`).
 - [x] Token aleatorio de 32 bytes (Base64 URL-safe) persistido, sin token por defecto.
 - [x] Servicio en primer plano (`dataSync`) con notificación persistente; el proceso
       queda como `fg-service` y el servidor sigue respondiendo en segundo plano.
@@ -63,7 +67,7 @@ Implementado y verificado en un emulador Android 16 (API 37):
 - [x] UI rediseñada con Material 3: tema propio oscuro/claro, tarjetas compactas,
       layout centrado con ancho máximo en tablet, bottom sheets para ajustes/conexión,
       feedback de copiado y estados vacíos ocultos.
-- [x] Tests: 37 pruebas (dispatcher, auth, ViewModel, aprobaciones), `BUILD SUCCESSFUL`;
+- [x] Tests: 39 pruebas (dispatcher, auth, ViewModel, aprobaciones), `BUILD SUCCESSFUL`;
       compilación iOS correcta.
 
 Verificado con `curl` en el emulador: initialize, tools/list, tools/call,
@@ -675,8 +679,8 @@ curl -i -X POST http://127.0.0.1:18080/mcp \
 | TLS | ❌ NPE con keystore vacío | ✅ certificado generado, SAN, fingerprint estable |
 | Estado de UI | ❌ "Active" aunque fallara | ✅ Stopped/Starting/Running/Failed + error |
 | DB | ❌ timestamps falsos, conexión por operación | ✅ WAL, timestamps reales, conexión serializada |
-| Herramientas | ❌ simuladas | ✅ 5 reales (cámara, touch, archivo, notificación, info) |
-| Tests | ⚠️ 10, sin servidor | ✅ 37, protocolo/auth/ViewModel/aprobaciones |
+| Herramientas | ❌ simuladas | ✅ 12 reales (device info, archivos, notificaciones, cámara, apps y automatización UI) |
+| Tests | ⚠️ 10, sin servidor | ✅ 39, protocolo/auth/ViewModel/aprobaciones |
 | Foreground service | ❌ | ✅ `dataSync` + notificación |
 | Cámara/touch | ❌ | ✅ CameraX (primer plano) y AccessibilityService |
 | Token en reposo | ❌ plano | ✅ AES-256-GCM + Android Keystore |

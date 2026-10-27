@@ -113,6 +113,12 @@ class AppViewModel(
     val wsUrl: String
         get() = "${if (sslEnabled) "wss" else "ws"}://$localIpAddress:$port/ws"
 
+    val usbUrl: String
+        get() = "${if (sslEnabled) "https" else "http"}://localhost:$port/mcp"
+
+    val adbForwardCommand: String
+        get() = "adb forward tcp:$port tcp:$port"
+
     private val port: Int
         get() = (serverStatus.value as? ServerStatus.Running)?.port
             ?: if (sslEnabled) HTTPS_PORT else HTTP_PORT

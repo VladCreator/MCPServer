@@ -73,6 +73,13 @@ class McpDispatcherTest {
         assertTrue(tools.contains("launch_app"))
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
+
+        assertEquals(12, tools.size)
+        assertEquals(tools.size, tools.toSet().size, "tool names must be unique")
+        assertTrue(
+            McpTools.all.filter { it.sensitive }.all { it.requirement != null },
+            "sensitive tools must declare a requirement for the in-app catalog"
+        )
     }
 
     @Test

@@ -24,10 +24,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -77,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -88,8 +91,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.vlad.mcpserver.mcp.McpTools
 import com.vlad.mcpserver.mcp.ServerStatus
 import com.vlad.mcpserver.mcp.ToolApprovalRequest
+import com.vlad.mcpserver.mcp.ToolDefinition
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -115,6 +120,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
 
     var showSettings by remember { mutableStateOf(false) }
     var showConnection by remember { mutableStateOf(false) }
+    var showTools by remember { mutableStateOf(false) }
     var showAllLogs by remember { mutableStateOf(false) }
 
     val copy: (String, String) -> Unit = { _, value ->
@@ -145,6 +151,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
                     item(key = "header") {
                         AppHeader(
                             status = status,
+                            onTools = { showTools = true },
                             onSettings = { showSettings = true }
                         )
                     }
@@ -247,12 +254,17 @@ fun App(viewModel: AppViewModel = viewModel()) {
                 onCopy = copy
             )
         }
+
+        if (showTools) {
+            ToolsSheet(onDismiss = { showTools = false })
+        }
     }
 }
 
 @Composable
 private fun AppHeader(
     status: ServerStatus,
+    onTools: () -> Unit,
     onSettings: () -> Unit
 ) {
     Row(
@@ -280,6 +292,13 @@ private fun AppHeader(
                 text = "Local device tools for AI agents",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(onClick = onTools) {
+            Icon(
+                imageVector = Icons.Rounded.Apps,
+                contentDescription = "Tools",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         IconButton(onClick = onSettings) {
@@ -992,6 +1011,92 @@ private fun ActivityRow(log: ToolExecutionLog) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun ToolsSheet(onDismiss: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val warning = LocalMcpExtraColors.current.warning
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val tools = McpTools.all
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.surface,
+        contentColor = colors.onSurface,
+        sheetMaxWidth = 640.dp
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
+            item(key = "tools-header") {
+                SheetHeader(title = "Tools", onDismiss = onDismiss)
+                Text(
+                    text = "${tools.size} tools supported. Sensitive tools ask for approval in " +
+                        "the dashboard before running.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+            items(tools, key = { it.name }) { tool ->
+                ToolRow(tool = tool, warning = warning)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolRow(tool: ToolDefinition, warning: Color) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = tool.name,
+                style = MaterialTheme.typography.titleSmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f)
+            )
+            if (tool.sensitive) {
+                Surface(
+                    color = warning.copy(alpha = 0.12f),
+                    contentColor = warning,
+                    shape = CircleShape
+                ) {
+                    Text(
+                        text = "Approval",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+        Text(
+            text = tool.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant
+        )
+        Text(
+            text = tool.requirement?.let { "Requires: $it" } ?: "No extra permissions.",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant
+        )
+    }
+    HorizontalDivider(color = colors.outlineVariant)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun SettingsSheet(
     viewModel: AppViewModel,
     status: ServerStatus,
@@ -1217,6 +1322,47 @@ private fun ConnectionSheet(
                 label = "Streamable HTTP",
                 value = viewModel.connectionUrl,
                 onCopy = { copyAndNotify("Endpoint", it) }
+            )
+            EndpointRow(
+                label = "USB / ADB (localhost)",
+                value = viewModel.usbUrl,
+                onCopy = { copyAndNotify("USB endpoint", it) }
+            )
+            Surface(
+                color = colors.surfaceVariant,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "ADB port forward",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant
+                        )
+                        Text(
+                            text = viewModel.adbForwardCommand,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = { copyAndNotify("ADB command", viewModel.adbForwardCommand) }) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = "Copy ADB command",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+            Text(
+                text = "USB: connect the device, run the ADB command on the computer, then use the localhost URL.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
             )
             EndpointRow(
                 label = "SSE (legacy)",

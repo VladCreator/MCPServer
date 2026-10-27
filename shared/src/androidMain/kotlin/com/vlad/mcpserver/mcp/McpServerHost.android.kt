@@ -304,6 +304,9 @@ private class AndroidMcpServerHost(
             post("/message") {
                 handleSseMessage(call)
             }
+            webSocket("/mcp") {
+                handleWebSocket()
+            }
             webSocket("/ws") {
                 handleWebSocket()
             }

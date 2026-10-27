@@ -12,7 +12,9 @@ not implemented there yet).
 - **MCP over Streamable HTTP** at `POST/GET/DELETE /mcp` (current MCP transport, with
   `Mcp-Session-Id` sessions).
 - **MCP over HTTP+SSE** (legacy transport) at `GET /sse` + `POST /message`.
-- **WebSocket** at `/ws` for legacy/custom clients (not the primary transport).
+- **WebSocket** at `/mcp` (and the `/ws` alias) for legacy/custom clients.
+- **USB / ADB connection**: run `adb forward tcp:8080 tcp:8080` and use
+  `http://localhost:8080/mcp` from the computer; no Wi-Fi needed.
 - **JSON-RPC 2.0** dispatcher: `initialize`, `notifications/initialized`, `ping`,
   `tools/list`, `tools/call`, batching and standard error codes.
 - **Hybrid authentication**: `Authorization: Bearer <token>` or manual approval from
@@ -32,8 +34,10 @@ not implemented there yet).
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device tools**: camera capture (CameraX), tap injection (AccessibilityService),
-  sandboxed file reads and notifications.
+- **Device tools**: 12 tools for device info, sandboxed files, notifications, camera,
+  app launching and full accessibility-driven UI automation (screen tree, screenshots,
+  clicks, text input, scrolling and global actions). See
+  [`docs/TOOLS.md`](docs/TOOLS.md).
 
 ## UI
 
@@ -46,6 +50,8 @@ so the dashboard stays readable instead of stretching across a large screen.
 | ![Dashboard](docs/screenshots/dashboard-dark.png) | ![Connection](docs/screenshots/connect.png) |
 | **Settings sheet** | **Tablet layout** |
 | ![Settings](docs/screenshots/settings.png) | ![Tablet](docs/screenshots/tablet.png) |
+| **Tools catalog** | **USB / ADB connection** |
+| ![Tools](docs/screenshots/tools.png) | ![USB](docs/screenshots/connect-usb.png) |
 
 Settings, endpoints and the TLS fingerprint live in sheets so the dashboard only shows
 what is actionable: server state, pending approvals, connected agents and recent
@@ -74,13 +80,25 @@ development environment.
 1. Open **MCPServer** and tap **Start**. The server listens on:
    - `http://<device-ip>:8080/mcp` (Streamable HTTP)
    - `http://<device-ip>:8080/sse` (legacy SSE)
-   - `ws://<device-ip>:8080/ws` (legacy WebSocket)
+   - `ws://<device-ip>:8080/mcp` (legacy WebSocket; `/ws` is an alias)
 2. Open **Settings** and copy the bearer token. It is generated on first launch and
    stored in the app's database.
 3. Configure your MCP client with the `/mcp` URL and the `Authorization: Bearer <token>`
    header. The app requests notification and camera permissions on first launch. For
-   `touch_test`, open **Settings → Touch injection → Open** and enable
+   the accessibility tools, open **Settings → Device access → Open** and enable
    **MCP Touch Service** in Android accessibility settings.
+
+### USB / ADB
+
+No Wi-Fi required. With the device connected by USB:
+
+```bash
+adb forward tcp:8080 tcp:8080
+```
+
+Then point the client at `http://localhost:8080/mcp`. The app's **Connect** sheet shows
+the URL and the exact ADB command. With TLS enabled the port is 8443
+(`adb forward tcp:8443 tcp:8443` and `https://localhost:8443/mcp`).
 
 Example client configuration (the exact schema depends on the client):
 
@@ -140,7 +158,7 @@ curl -X POST "$BASE/mcp" \
 | `GET` | `/sse` | Legacy SSE stream; emits `event: endpoint` with `/message?sessionId=...`. |
 | `GET` | `/mcp/sse` | Alias of `/sse`. |
 | `POST` | `/message?sessionId=...` | Legacy SSE request endpoint; returns `202` and pushes the response to the stream. |
-| `WS` | `/ws` | Legacy WebSocket transport. |
+| `WS` | `/mcp` | Legacy WebSocket transport (also available at `/ws`). |
 | `GET` | `/` | Human-readable server info. |
 | `GET` | `/health` | `{"status":"ok"}`. |
 | `GET` | `/status` | JSON status, port, session counts and TLS fingerprint. |
@@ -149,6 +167,10 @@ All MCP endpoints reject browser requests whose `Origin` is not a local developm
 origin (DNS-rebinding/CSRF protection) and limit request bodies to 256 KB.
 
 ## Tools
+
+The complete catalog with arguments, requirements and approval behavior is in
+[`docs/TOOLS.md`](docs/TOOLS.md). The app also shows it from the grid icon in the
+header (**Tools**).
 
 | Tool | Status | Description |
 | --- | --- | --- |
@@ -198,7 +220,7 @@ addresses, `localhost` and `127.0.0.1`:
 ./gradlew :shared:compileKotlinIosSimulatorArm64
 ```
 
-The suite (37 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
+The suite (39 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
 validation, errors/batches/notifications, bearer parsing, token storage behavior,
 tool-approval events and the ViewModel event flow. Camera, accessibility, foreground
 service and approval UI are verified manually on a device/emulator because they need

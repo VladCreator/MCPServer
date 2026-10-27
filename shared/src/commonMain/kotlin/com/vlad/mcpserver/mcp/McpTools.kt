@@ -16,7 +16,8 @@ data class ToolDefinition(
     val inputSchema: JsonObject,
     val required: List<String> = emptyList(),
     val available: Boolean = true,
-    val sensitive: Boolean = false
+    val sensitive: Boolean = false,
+    val requirement: String? = null
 )
 
 /**
@@ -64,7 +65,8 @@ object McpTools {
                 put("description", "Absolute path inside the app sandbox")
             }
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "App sandbox only; max 64 KB"
     )
 
     val createNotification: ToolDefinition = ToolDefinition(
@@ -80,7 +82,8 @@ object McpTools {
                 put("type", "string")
                 put("description", "Notification body")
             }
-        }
+        },
+        requirement = "Notification permission"
     )
 
     val takePhoto: ToolDefinition = ToolDefinition(
@@ -94,7 +97,8 @@ object McpTools {
             }
         },
         available = true,
-        sensitive = true
+        sensitive = true,
+        requirement = "Camera permission; app in foreground"
     )
 
     val touchTest: ToolDefinition = ToolDefinition(
@@ -113,7 +117,8 @@ object McpTools {
             }
         },
         available = true,
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
     )
 
     val launchApp: ToolDefinition = ToolDefinition(
@@ -127,7 +132,8 @@ object McpTools {
                 put("description", "Android package name of the app to launch")
             }
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "Foreground, overlay permission or MCP Touch Service"
     )
 
     private const val SELECTOR_HINT =
@@ -145,7 +151,8 @@ object McpTools {
                 put("description", "Maximum number of elements to return (default 300, max 1000)")
             }
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
     )
 
     val takeScreenshot: ToolDefinition = ToolDefinition(
@@ -158,7 +165,8 @@ object McpTools {
                 put("description", "Longest image side in pixels (default 1280, 320-2400)")
             }
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service; unavailable on secure screens"
     )
 
     val clickElement: ToolDefinition = ToolDefinition(
@@ -171,7 +179,8 @@ object McpTools {
                 put("description", "Long-press instead of click (default false)")
             }
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
     )
 
     val inputText: ToolDefinition = ToolDefinition(
@@ -191,7 +200,8 @@ object McpTools {
             }
             selectorProperties(textKey = "match_text", textDescription = "Match the field by its current visible text")
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
     )
 
     val scroll: ToolDefinition = ToolDefinition(
@@ -206,7 +216,8 @@ object McpTools {
             }
             selectorProperties()
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
     )
 
     val globalAction: ToolDefinition = ToolDefinition(
@@ -219,7 +230,8 @@ object McpTools {
                 putJsonArray("enum") { GLOBAL_ACTIONS.forEach { add(it) } }
             }
         },
-        sensitive = true
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
     )
 
     val all: List<ToolDefinition> = listOf(
