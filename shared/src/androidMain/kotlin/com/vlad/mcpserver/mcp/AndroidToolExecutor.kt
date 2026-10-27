@@ -293,7 +293,11 @@ class AndroidToolExecutor(
         val uptimeSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
         return ToolResult(
             "ok\ntime=${java.time.Instant.now()}\nuptime_s=$uptimeSeconds\nversion=$versionName" +
-                "\ntouch_service=${McpTouchAccessibilityService.instance() != null}"
+                "\ntouch_service=${McpTouchAccessibilityService.instance() != null}" +
+                "\nwrite_settings=${Settings.System.canWrite(context)}" +
+                "\nwrite_secure_settings=${deviceState.canWriteSecureSettings()}" +
+                "\nread_logs=${context.checkSelfPermission(android.Manifest.permission.READ_LOGS) == android.content.pm.PackageManager.PERMISSION_GRANTED}" +
+                "\noverlay=${Settings.canDrawOverlays(context)}"
         )
     }
 
@@ -366,29 +370,65 @@ class AndroidToolExecutor(
         if (pkg != null && !PACKAGE_NAME_REGEX.matches(pkg)) {
             return ToolResult("Invalid package name: $pkg", isError = true)
         }
-        val command = mutableListOf("logcat", "-d", "-v", "threadtime", "-b", if (arguments.bool("crashes")) "crash" else "main")
-        if (pkg != null) {
-            val pids = runCatching {
-                ProcessBuilder("pidof", pkg).redirectErrorStream(true).start()
-                    .inputStream.bufferedReader().readText().trim().split(Regex("\\s+")).filter { it.all(Char::isDigit) && it.isNotEmpty() }
-            }.getOrDefault(emptyList())
-            if (pids.isEmpty()) {
-                return ToolResult("No running process found for '$pkg' (logs are filtered by live PID).", isError = true)
-            }
-            command += listOf("--pid", pids.first())
+        val buffer = if (arguments.bool("crashes")) "crash" else "main"
+        val pids = pkg?.let { processIds(it) }.orEmpty()
+        if (pkg != null && pids.isEmpty()) {
+            return ToolResult(
+                "No current or past process found for '$pkg' in the log buffers. Past processes are found " +
+                    "through system/crash logs, which need READ_LOGS (adb shell pm grant ${context.packageName} " +
+                    "android.permission.READ_LOGS) and, on Android 13+, tapping 'Allow' on the system " +
+                    "'access all device logs' dialog (shown once per MCPServer process; click_element can tap it). Retry after allowing.",
+                isError = true
+            )
         }
-        command += "*:$level"
         return runCatching {
-            val process = ProcessBuilder(command).redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().readLines()
-            process.waitFor()
-            val filtered = output.filter { query == null || it.contains(query, ignoreCase = true) }.takeLast(lines)
+            val output = runLogcat(listOf("-b", buffer, "*:$level"))
+            val filtered = output
+                .filter { pids.isEmpty() || logPid(it) in pids }
+                .filter { query == null || it.contains(query, ignoreCase = true) }
+                .takeLast(lines)
+            val header = if (pkg != null) "pids for $pkg: ${pids.joinToString(", ")}\n" else ""
             if (filtered.isEmpty()) {
-                ToolResult("No log lines matched. Other apps' logs require: adb shell pm grant ${context.packageName} android.permission.READ_LOGS")
+                ToolResult(
+                    header + "No log lines matched. Other apps' logs require READ_LOGS (adb shell pm grant " +
+                        "${context.packageName} android.permission.READ_LOGS) and, on Android 13+, allowing the system log-access dialog."
+                )
             } else {
-                ToolResult(filtered.joinToString("\n").take(MAX_LOG_CHARS))
+                ToolResult((header + filtered.joinToString("\n")).take(MAX_LOG_CHARS))
             }
         }.getOrElse { ToolResult("Unable to read logs: ${it.message}", isError = true) }
+    }
+
+    private fun runLogcat(args: List<String>): List<String> {
+        val process = ProcessBuilder(listOf("logcat", "-d", "-v", "threadtime") + args)
+            .redirectErrorStream(true).start()
+        val output = process.inputStream.bufferedReader().readLines()
+        process.waitFor()
+        return output
+    }
+
+    private fun logPid(line: String): String? = LOG_PID_REGEX.find(line)?.groupValues?.get(1)
+
+    /** Live PIDs plus PIDs of earlier (e.g. crashed) processes found in system/crash logs. */
+    private fun processIds(pkg: String): Set<String> {
+        val pids = linkedSetOf<String>()
+        runCatching {
+            ProcessBuilder("pidof", pkg).redirectErrorStream(true).start()
+                .inputStream.bufferedReader().readText().trim().split(Regex("\\s+"))
+                .filter { it.isNotEmpty() && it.all(Char::isDigit) }
+        }.getOrNull()?.let(pids::addAll)
+        val quoted = Regex.escape(pkg)
+        val patterns = listOf(
+            Regex("Start proc (\\d+):$quoted[/:\\s]"),
+            Regex("Process: $quoted, PID: (\\d+)"),
+            Regex("Process $quoted \\(pid (\\d+)\\)"),
+            Regex("Killing (\\d+):$quoted[/:\\s]")
+        )
+        runCatching { runLogcat(listOf("-b", "system,crash", "*:V")) }.getOrNull()?.forEach { line ->
+            if (!line.contains(pkg)) return@forEach
+            patterns.firstNotNullOfOrNull { it.find(line) }?.let { pids += it.groupValues[1] }
+        }
+        return pids
     }
 
     private data class LaunchableApp(val label: String, val packageName: String)
@@ -464,13 +504,27 @@ class AndroidToolExecutor(
             )
         }
 
-        return withContext(Dispatchers.Main) {
-            runCatching {
-                context.startActivity(intent)
-                ToolResult("Launched $packageName.")
-            }.getOrElse { error ->
-                ToolResult("Unable to launch $packageName: ${error.message}", isError = true)
-            }
+        val failure = withContext(Dispatchers.Main) {
+            runCatching { context.startActivity(intent) }.exceptionOrNull()
+        }
+        if (failure != null) {
+            return ToolResult("Unable to launch $packageName: ${failure.message}", isError = true)
+        }
+        val waitMs = (arguments.int("wait_ms") ?: DEFAULT_LAUNCH_WAIT_MS).coerceIn(0, MAX_QA_TIMEOUT_MS).toLong()
+        val service = touchService()
+        if (waitMs == 0L || service == null) {
+            return ToolResult("Launched $packageName (not waited; call ui_wait idle with package_name before inspecting).")
+        }
+        val wait = waitForCondition(
+            service, "idle", NodeSelector(), "", waitMs, SETTLE_POLL_MS, DEFAULT_QA_QUIET_MS.toLong(), packageName
+        )
+        return if (wait.passed) {
+            ToolResult("Launched $packageName; it is in the foreground and the UI settled after ${wait.elapsedMs}ms.")
+        } else {
+            ToolResult(
+                "Launched $packageName, but after ${wait.elapsedMs}ms: ${wait.actual}. " +
+                    "It may still be starting; call ui_wait idle with package_name=$packageName."
+            )
         }
     }
 
@@ -528,7 +582,8 @@ class AndroidToolExecutor(
         var settled = true
         if (settleMs > 0) {
             settled = waitForCondition(
-                service, "idle", NodeSelector(), "", settleMs, SETTLE_POLL_MS, SETTLE_QUIET_MS
+                service, "idle", NodeSelector(), "", settleMs, SETTLE_POLL_MS, SETTLE_QUIET_MS,
+                arguments.string("package_name")
             ).passed
         }
         val foreground = service.rootInActiveWindow?.packageName
@@ -537,7 +592,8 @@ class AndroidToolExecutor(
                 ToolResult(
                     text = "Captured at ${java.time.Instant.now()}" +
                         (foreground?.let { " (foreground: $it)" } ?: "") +
-                        (if (settled) "" else "; UI was still changing") +
+                        (if (settled) "" else "; UI was still changing or the expected app was not in front") +
+                        (if (foreground == context.packageName) "; WARNING: MCPServer itself is in front" else "") +
                         ". Screenshot ${shot.width}x${shot.height} (screen " +
                         "${shot.screenWidth}x${shot.screenHeight}). Multiply image coordinates by " +
                         "${"%.3f".format(shot.screenWidth.toFloat() / shot.width)} to get screen " +
@@ -552,38 +608,51 @@ class AndroidToolExecutor(
 
     private suspend fun clickElement(arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
-        val selector = arguments.selector()
+        val selector = arguments.selector().copy(
+            textExact = arguments.bool("text_exact"),
+            className = arguments.string("class_name")
+        )
         if (selector.isEmpty) {
-            return ToolResult("Provide index, text, resource_id or content_desc.", isError = true)
+            return ToolResult("Provide index, text, resource_id, content_desc or class_name.", isError = true)
         }
         val explicitNth = arguments.int("nth")
+        var note = ""
         val node = if (selector.index != null) {
             ScreenNavigator.find(service, selector)
         } else {
+            // nth uses the same 0-based numbering as ui_find's match_index.
             val matches = ScreenNavigator.findAll(service, selector.copy(nth = 0), MAX_QA_MATCHES)
             if (matches.size > 1 && explicitNth == null) {
-                return ToolResult(
-                    "${matches.size} elements match $selector; nothing was clicked. Pass nth (0-based) " +
-                        "or a more specific selector. Candidates:\n" +
-                        matches.take(MAX_CANDIDATES).withIndex().joinToString("\n") { (i, n) ->
-                            val r = ScreenNavigator.bounds(n)
-                            "nth=$i ${describeNode(n)} bounds=[${r.left},${r.top}][${r.right},${r.bottom}]" +
-                                " clickable=${n.isClickable}"
-                        },
-                    isError = true
-                )
+                val exact = if (selector.textExact) emptyList() else matches.filter { ScreenNavigator.isExactMatch(it, selector) }
+                if (exact.size == 1) {
+                    note = " (exact match preferred over ${matches.size - 1} partial match(es); use text_exact to be explicit)"
+                    exact.single()
+                } else {
+                    return ToolResult(
+                        "${matches.size} elements match $selector; nothing was clicked. Pass nth (0-based, same as " +
+                            "ui_find match_index), text_exact=true or a more specific selector. Candidates:\n" +
+                            matches.take(MAX_CANDIDATES).withIndex().joinToString("\n") { (i, n) ->
+                                val r = ScreenNavigator.bounds(n)
+                                "nth=$i ${describeNode(n)} bounds=[${r.left},${r.top}][${r.right},${r.bottom}]" +
+                                    " clickable=${ScreenNavigator.hasClickAction(n)}"
+                            },
+                        isError = true
+                    )
+                }
+            } else {
+                matches.getOrNull(explicitNth ?: 0)
             }
-            matches.getOrNull(explicitNth ?: 0)
         } ?: return ToolResult(
             "No visible element matches $selector${explicitNth?.let { " (nth=$it)" }.orEmpty()}. Call get_screen_tree to refresh.",
             isError = true
         )
         val longPress = arguments.bool("long_press")
         val description = describeNode(node)
-        return if (ScreenNavigator.click(service, node, longPress)) {
-            ToolResult("${if (longPress) "Long-pressed" else "Clicked"} $description.")
+        val method = ScreenNavigator.click(service, node, longPress)
+        return if (method != null) {
+            ToolResult("${if (longPress) "Long-pressed" else "Clicked"} $description via $method$note.")
         } else {
-            ToolResult("Unable to click $description.", isError = true)
+            ToolResult("Unable to click $description: ${tapFailureReason(service)}", isError = true)
         }
     }
 
@@ -724,7 +793,7 @@ class AndroidToolExecutor(
             put("count", matches.size)
             put("selector", selector.toString())
             putJsonArray("matches") {
-                matches.forEachIndexed { index, node -> add(nodeJson(index, node)) }
+                matches.forEachIndexed { index, node -> add(nodeJson(selector.nth.coerceAtLeast(0) + index, node)) }
             }
         }
         return ToolResult(payload.toString())
@@ -754,7 +823,8 @@ class AndroidToolExecutor(
             expected = arguments.string("expected").orEmpty(),
             timeoutMs = timeout.toLong(),
             intervalMs = interval.toLong(),
-            quietMs = quiet.toLong()
+            quietMs = quiet.toLong(),
+            packageName = arguments.string("package_name")
         )
         val detail = "condition=$condition elapsed=${result.elapsedMs}ms actual=${result.actual}"
         return if (result.passed) {
@@ -1074,7 +1144,8 @@ class AndroidToolExecutor(
         expected: String,
         timeoutMs: Long,
         intervalMs: Long,
-        quietMs: Long
+        quietMs: Long,
+        packageName: String? = null
     ): WaitResult {
         val started = SystemClock.elapsedRealtime()
         val deadline = started + timeoutMs
@@ -1085,17 +1156,24 @@ class AndroidToolExecutor(
 
         while (SystemClock.elapsedRealtime() <= deadline) {
             if (condition == "idle") {
+                val foreground = service.rootInActiveWindow?.packageName?.toString()
                 val tree = ScreenNavigator.dumpTree(service, MAX_TREE_NODES) ?: ""
-                val hash = tree.hashCode()
                 val now = SystemClock.elapsedRealtime()
-                if (!initialized || hash != lastHash) {
+                // A missing/empty window or the wrong foreground app is a transition, not idle.
+                val ready = tree.isNotBlank() && (packageName == null || foreground == packageName)
+                val hash = if (ready) tree.hashCode() else 0
+                if (!initialized || !ready || hash != lastHash) {
                     initialized = true
                     lastHash = hash
                     changedAt = now
                 }
                 val stableFor = now - changedAt
-                actual = "stable ${stableFor}ms"
-                if (stableFor >= quietMs) {
+                actual = if (!ready) {
+                    "waiting for ${packageName ?: "a window"} (foreground: ${foreground ?: "none"})"
+                } else {
+                    "stable ${stableFor}ms (foreground: $foreground)"
+                }
+                if (ready && stableFor >= quietMs) {
                     return WaitResult(true, actual, now - started)
                 }
             } else {
@@ -1167,6 +1245,7 @@ class AndroidToolExecutor(
             node.className?.toString()?.let { put("class", it) }
             put("bounds", "[${rect.left},${rect.top}][${rect.right},${rect.bottom}]")
             put("clickable", node.isClickable)
+            put("click_action", ScreenNavigator.hasClickAction(node))
             put("enabled", node.isEnabled)
             put("checked", node.isChecked)
             put("selected", node.isSelected)
@@ -1221,7 +1300,9 @@ class AndroidToolExecutor(
         const val DEFAULT_REPEAT_INTERVAL_MS = 300
         const val MAX_REPEAT_INTERVAL_MS = 5_000
         const val MAX_LOG_CHARS = 60_000
+        val LOG_PID_REGEX = Regex("^\\S+\\s+\\S+\\s+(\\d+)\\s+\\d+\\s+[VDIWEFA]\\s")
         const val MAX_LISTED_APPS = 200
+        const val DEFAULT_LAUNCH_WAIT_MS = 8_000
         const val DEFAULT_SETTLE_MS = 1_500
         const val MAX_SETTLE_MS = 5_000
         const val SETTLE_POLL_MS = 150L

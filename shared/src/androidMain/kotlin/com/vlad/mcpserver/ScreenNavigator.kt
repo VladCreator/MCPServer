@@ -149,30 +149,54 @@ object ScreenNavigator {
 
     fun bounds(node: AccessibilityNodeInfo): Rect = Rect().also(node::getBoundsInScreen)
 
-    /** Clicks the node or its nearest clickable ancestor; falls back to a tap gesture. */
+    /** True when the node is clickable or exposes ACTION_CLICK (common in MAUI/Flutter/RN views). */
+    fun hasClickAction(node: AccessibilityNodeInfo, longPress: Boolean = false): Boolean {
+        val action = if (longPress) AccessibilityAction.ACTION_LONG_CLICK else AccessibilityAction.ACTION_CLICK
+        return (if (longPress) node.isLongClickable else node.isClickable) ||
+            node.actionList.any { it.id == action.id }
+    }
+
+    /**
+     * Clicks [node] and returns how it was done, or null on failure. Order: the node's own
+     * click action; a clickable ancestor of about the same size; a real tap on the node's
+     * center (so a non-clickable child is not "clicked" through a large container); finally
+     * any clickable ancestor.
+     */
     suspend fun click(
         service: McpTouchAccessibilityService,
         node: AccessibilityNodeInfo,
         longPress: Boolean
-    ): Boolean {
+    ): String? {
         val action = if (longPress) {
             AccessibilityNodeInfo.ACTION_LONG_CLICK
         } else {
             AccessibilityNodeInfo.ACTION_CLICK
         }
-        var target: AccessibilityNodeInfo? = node
-        while (target != null && !(if (longPress) target.isLongClickable else target.isClickable)) {
-            target = target.parent
-        }
-        if (target != null && target.performAction(action)) return true
+        if (hasClickAction(node, longPress) && node.performAction(action)) return "accessibility action"
 
+        var ancestor: AccessibilityNodeInfo? = node.parent
+        while (ancestor != null && !hasClickAction(ancestor, longPress)) {
+            ancestor = ancestor.parent
+        }
         val rect = bounds(node)
-        if (rect.isEmpty) return false
-        return service.tap(
-            rect.exactCenterX(),
-            rect.exactCenterY(),
-            durationMs = if (longPress) LONG_PRESS_MS else TAP_MS
-        )
+        val nodeArea = rect.width().toLong() * rect.height()
+        if (ancestor != null && nodeArea > 0) {
+            val parentRect = bounds(ancestor)
+            val parentArea = parentRect.width().toLong() * parentRect.height()
+            if (parentArea <= nodeArea * SAME_SIZE_FACTOR && ancestor.performAction(action)) {
+                return "clickable ancestor"
+            }
+        }
+        if (!rect.isEmpty && service.tap(
+                rect.exactCenterX(),
+                rect.exactCenterY(),
+                durationMs = if (longPress) LONG_PRESS_MS else TAP_MS
+            )
+        ) {
+            return "tap gesture at (${rect.centerX()}, ${rect.centerY()})"
+        }
+        if (ancestor != null && ancestor.performAction(action)) return "clickable ancestor (large)"
+        return null
     }
 
     /** Finds an editable node: the node itself, an editable descendant, or the focused input. */
@@ -330,7 +354,7 @@ object ScreenNavigator {
         !node.text.isNullOrBlank() ||
             !node.contentDescription.isNullOrBlank() ||
             !node.hintText.isNullOrBlank() ||
-            node.isClickable ||
+            hasClickAction(node) ||
             node.isLongClickable ||
             node.isScrollable ||
             node.isEditable ||
@@ -355,7 +379,7 @@ object ScreenNavigator {
             node.viewIdResourceName?.let { append(" id=").append(it) }
             append(" bounds=[${rect.left},${rect.top}][${rect.right},${rect.bottom}]")
             val flags = buildList {
-                if (node.isClickable) add("clickable")
+                if (node.isClickable) add("clickable") else if (hasClickAction(node)) add("click-action")
                 if (node.isLongClickable) add("long-clickable")
                 if (node.isScrollable) add("scrollable")
                 if (node.isEditable) add("editable")
@@ -401,7 +425,7 @@ object ScreenNavigator {
         return true
     }
 
-    private fun isExactMatch(node: AccessibilityNodeInfo, selector: NodeSelector): Boolean {
+    fun isExactMatch(node: AccessibilityNodeInfo, selector: NodeSelector): Boolean {
         val textOk = selector.text?.let { node.text?.toString().equals(it, ignoreCase = true) } ?: true
         val descOk = selector.contentDescription?.let {
             node.contentDescription?.toString().equals(it, ignoreCase = true)
@@ -412,6 +436,7 @@ object ScreenNavigator {
     private const val MAX_TEXT = 120
     private const val TAP_MS = 60L
     private const val LONG_PRESS_MS = 800L
+    private const val SAME_SIZE_FACTOR = 2L
     private const val SWIPE_FRACTION = 0.6f
     private const val JPEG_QUALITY = 70
 }

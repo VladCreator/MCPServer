@@ -67,6 +67,9 @@ import kotlin.time.Duration.Companion.seconds
 
 private const val SESSION_HEADER = "Mcp-Session-Id"
 private const val DEFAULT_HTTP_PORT = 8080
+private const val PORT_CHECK_ATTEMPTS = 6
+private const val PORT_CHECK_DELAY_MS = 500L
+private const val CLOSE_TIMEOUT_MS = 1_000L
 private const val DEFAULT_HTTPS_PORT = 8443
 private const val APPROVAL_TIMEOUT_MS = 60_000L
 private const val SESSION_IDLE_TIMEOUT_MS = 10 * 60_000L
@@ -184,7 +187,7 @@ private class AndroidMcpServerHost(
         reaper = null
         val current = engine
         engine = null
-        runCatching { current?.stop(0, 250) }
+        runCatching { current?.stop(0, CLOSE_TIMEOUT_MS) }
         cancelToolApprovals()
         closeAllSessions()
         scope.cancel()
@@ -201,6 +204,8 @@ private class AndroidMcpServerHost(
         } else {
             null
         }
+
+        ensurePortFree(serverPort)
 
         val server = if (secure && tls != null) {
             embeddedServer(Netty, configure = {
@@ -235,6 +240,27 @@ private class AndroidMcpServerHost(
             fingerprint = tls?.fingerprint
         )
         startReaper()
+    }
+
+    /**
+     * Binding is asynchronous in the engines, so a busy port would crash the process from a
+     * background coroutine. Check first, giving a previous instance a moment to release it.
+     */
+    private suspend fun ensurePortFree(port: Int) {
+        repeat(PORT_CHECK_ATTEMPTS) { attempt ->
+            val free = runCatching {
+                java.net.ServerSocket().use { socket ->
+                    socket.reuseAddress = true
+                    socket.bind(java.net.InetSocketAddress(port))
+                }
+            }.isSuccess
+            if (free) return
+            if (attempt < PORT_CHECK_ATTEMPTS - 1) delay(PORT_CHECK_DELAY_MS)
+        }
+        throw IllegalStateException(
+            "Port $port is already in use (a previous server may still be closing). " +
+                "Wait a few seconds and start again, or force-stop MCPServer."
+        )
     }
 
     private suspend fun stopInternal() {

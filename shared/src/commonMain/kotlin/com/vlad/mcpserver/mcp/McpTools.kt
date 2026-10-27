@@ -126,7 +126,8 @@ object McpTools {
         name = "launch_app",
         description = "Launch an installed app by package name (e.g. com.android.settings) or by " +
             "its visible name (e.g. Chrome). Provide package_name or app_name; use list_apps to " +
-            "discover apps. Only apps with a launcher entry can be opened.",
+            "discover apps. Only apps with a launcher entry can be opened. By default it waits " +
+            "until the app is in the foreground and its UI settled (needs MCP Touch Service).",
         inputSchema = schema(emptyList()) {
             putJsonObject("package_name") {
                 put("type", "string")
@@ -135,6 +136,10 @@ object McpTools {
             putJsonObject("app_name") {
                 put("type", "string")
                 put("description", "Visible app name (case-insensitive; exact match wins, otherwise must be unambiguous)")
+            }
+            putJsonObject("wait_ms") {
+                put("type", "integer")
+                put("description", "Max time to wait for the app to be in front and idle (default 8000, max 30000, 0 disables)")
             }
         },
         sensitive = true,
@@ -157,7 +162,8 @@ object McpTools {
     val healthCheck: ToolDefinition = ToolDefinition(
         name = "health_check",
         description = "Lightweight server health probe: returns server time, uptime, app version " +
-            "and whether the MCP Touch Service is connected. Call it to verify the connection " +
+            "Touch Service state and granted special access (write settings, secure settings, " +
+            "logs, overlay). Call it to verify the connection " +
             "before a sequence of actions, and retry the transport if it fails.",
         inputSchema = schema(emptyList()) {},
         requirement = "None"
@@ -196,6 +202,10 @@ object McpTools {
                 put("type", "integer")
                 put("description", "Max time to wait for the UI to stop changing before capture (default 1500, 0 disables)")
             }
+            putJsonObject("package_name") {
+                put("type", "string")
+                put("description", "Also wait until this app is in the foreground (use right after launching an app)")
+            }
         },
         sensitive = true,
         requirement = "MCP Touch Service; unavailable on secure screens"
@@ -205,12 +215,15 @@ object McpTools {
         name = "click_element",
         description = "Click (or long-press) a UI element." + SELECTOR_HINT +
             " If several elements match and neither index nor nth is given, nothing is clicked " +
-            "and the candidates are listed so you can choose.",
+            "and the candidates are listed (unless exactly one matches the text exactly). Elements " +
+            "without a click action are tapped at their center.",
         inputSchema = schema(emptyList()) {
             selectorProperties()
+            putJsonObject("text_exact") { put("type", "boolean"); put("description", "Require the whole text to match (default false: partial)") }
+            putJsonObject("class_name") { put("type", "string"); put("description", "Simple or full class name") }
             putJsonObject("nth") {
                 put("type", "integer")
-                put("description", "0-based position among the matches (disambiguates multiple matches)")
+                put("description", "0-based position among the matches; same numbering as ui_find match_index")
             }
             putJsonObject("long_press") {
                 put("type", "boolean")
@@ -323,7 +336,7 @@ object McpTools {
             "Set crashes=true to read the crash buffer (use for crash logs). Reading other apps' " +
             "logs needs: adb shell pm grant com.vlad.mcpserver android.permission.READ_LOGS",
         inputSchema = schema(emptyList()) {
-            putJsonObject("package_name") { put("type", "string"); put("description", "Only lines from this app's running process") }
+            putJsonObject("package_name") { put("type", "string"); put("description", "Only lines from this app's processes, including earlier (crashed) ones still in the log buffer") }
             putJsonObject("level") { put("type", "string"); put("description", "Minimum level: V, D, I, W, E (default I)") }
             putJsonObject("query") { put("type", "string"); put("description", "Only lines containing this text") }
             putJsonObject("lines") { put("type", "integer"); put("description", "Max lines returned (default 200, max 1000)") }
@@ -357,10 +370,11 @@ object McpTools {
     val uiFind: ToolDefinition = ToolDefinition(
         name = "ui_find",
         description = "Find all visible UI elements matching a selector. Returns count and JSON matches with text, " +
-            "content description, resource id, class, bounds and flags. Use instead of pulling the whole tree.",
+            "content description, resource id, class, bounds and flags. match_index is the value to pass as nth to " +
+            "click_element (it stays absolute when nth is given here). Use instead of pulling the whole tree.",
         inputSchema = schema(emptyList()) {
             qaSelectorProperties()
-            putJsonObject("text_exact") { put("type", "boolean"); put("description", "Require exact text (default false)") }
+            putJsonObject("nth") { put("type", "integer"); put("description", "Skip this many leading matches") }
             putJsonObject("include_invisible") { put("type", "boolean"); put("description", "Include invisible nodes (default false)") }
             putJsonObject("limit") { put("type", "integer"); put("description", "Max matches (default 20, max 100)") }
         },
@@ -370,6 +384,7 @@ object McpTools {
     val uiWait: ToolDefinition = ToolDefinition(
         name = "ui_wait",
         description = "Wait until a UI condition is met: visible, absent, text or idle (tree stops changing). " +
+            "After launching an app, pass package_name so idle also waits for that app to be in front. " +
             "Prefer this over polling get_screen_tree in a loop.",
         required = listOf("condition"),
         inputSchema = schema(listOf("condition")) {
@@ -381,6 +396,7 @@ object McpTools {
             putJsonObject("timeout_ms") { put("type", "integer"); put("description", "Default 5000, max 30000") }
             putJsonObject("interval_ms") { put("type", "integer"); put("description", "Poll interval, default 250") }
             putJsonObject("quiet_ms") { put("type", "integer"); put("description", "Idle: quiet period, default 700") }
+            putJsonObject("package_name") { put("type", "string"); put("description", "Idle: require this app in the foreground") }
         },
         requirement = "MCP Touch Service enabled"
     )
@@ -556,6 +572,7 @@ object McpTools {
         putJsonObject("resource_id") { put("type", "string"); put("description", "View id, full or suffix") }
         putJsonObject("content_desc") { put("type", "string"); put("description", "Content description (partial)") }
         putJsonObject("class_name") { put("type", "string"); put("description", "Simple or full class name") }
+        putJsonObject("text_exact") { put("type", "boolean"); put("description", "Require exact text (default false)") }
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.selectorProperties(

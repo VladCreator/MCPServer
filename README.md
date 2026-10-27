@@ -190,19 +190,19 @@ icon in the header (**Tools**).
 | `touch_test` | Available (accessibility) | Injects a tap at `x,y`. Requires the user to enable **MCP Touch Service** in Android accessibility settings. |
 | `swipe` | Touch Service | Swipe by direction/coordinates with `duration_ms` (speed), `distance`, `count`, `interval_ms`. |
 | `get_app_version` | Available | versionName/versionCode/install times of an installed app. |
-| `get_logs` | Touch-free, sensitive | Filtered logcat (`package_name`, `level`, `query`, `crashes`). Other apps' logs need `adb shell pm grant com.vlad.mcpserver android.permission.READ_LOGS`. |
+| `get_logs` | Touch-free, sensitive | Filtered logcat (`package_name`, `level`, `query`, `crashes`). Includes earlier (crashed) processes of the package. Other apps' logs need `adb shell pm grant com.vlad.mcpserver android.permission.READ_LOGS` plus tapping **Allow** on Android's one-time log-access dialog. |
 | `list_apps` | Available | Lists launchable apps (name + package), optional `query` filter. |
 | `health_check` | Available | Cheap probe: server time, uptime, version, Touch Service state. Use it to verify the connection and retry the transport on failure. |
-| `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name` or visible `app_name` (ambiguous names return candidates). From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). |
+| `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name` or visible `app_name` (ambiguous names return candidates). From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). Waits until the app is in the foreground and its UI settled (`wait_ms`, default 8000, 0 disables). |
 | `get_screen_tree` | Available (accessibility) | Returns the foreground app's UI as indented text: index, class, text, description, resource id, bounds and flags. Preferred way for an AI to "see" the screen. |
 | `take_screenshot` | Available (accessibility) | Captures the screen as a JPEG (`max_dimension`, default 1280). Fallback for games, maps or canvas UIs. Fails on `FLAG_SECURE` screens. |
-| `click_element` | Available (accessibility) | Clicks or long-presses an element by `index` (from the last tree), `text`, `resource_id` or `content_desc`. |
+| `click_element` | Available (accessibility) | Clicks or long-presses an element by `index` (from the last tree), `text`, `resource_id`, `content_desc` or `class_name`; `text_exact` avoids partial matches (an exact match wins among several partial ones). Elements without a click action (e.g. MAUI) are tapped at their center. |
 | `input_text` | Available (accessibility) | Sets the text of an editable field (focused field or selector via `match_text`/`index`/`resource_id`/`content_desc`); optional `submit`. |
 | `scroll` | Available (accessibility) | Scrolls `up`/`down`/`left`/`right` on the largest or selected scrollable element. |
 | `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. |
 | `qa_session` | Available (QA pack) | Begin/step/status/end a QA case and write JSON/Markdown reports with device snapshot. |
-| `ui_find` | Available (QA pack) | Find all matching elements with flags/bounds; returns JSON count and matches. |
-| `ui_wait` | Available (QA pack) | Wait for visible/absent/text/idle with timeout; reduces polling. |
+| `ui_find` | Available (QA pack) | Find all matching elements with flags/bounds; returns JSON count and matches; `match_index` equals the `nth` used by `click_element`. |
+| `ui_wait` | Available (QA pack) | Wait for visible/absent/text/idle with timeout; `idle` with `package_name` also waits for that app to be in front (no false positive during launch). |
 | `ui_assert` | Available (QA pack) | Assert visible/absent/text/count; failure returns screenshot + tree excerpt. |
 | `ui_gesture` | Available (QA pack) | tap, double_tap, multi_tap, long_press, swipe, drag, pinch; selector or coordinates. |
 | `audio_instruction` | Available (QA pack) | TTS/audio instructions for the tester, stop, volume; English by default. |
@@ -303,5 +303,7 @@ recovered/committed.
 - `global_action` accepts `count`/`interval_ms` (e.g. Back x2 repeated reliably).
 - `install_apk` and `screen_record` are intentionally not provided: Android requires an on-screen user confirmation (package installer / MediaProjection).
 - `take_screenshot` waits for the UI to settle (`settle_ms`, default 1500) and reports a capture timestamp and foreground package.
-- `click_element` refuses ambiguous matches: pass `nth` (0-based) or a more specific selector; candidates are listed.
+- `click_element` refuses ambiguous matches: pass `nth` (0-based, same as `ui_find` `match_index`), `text_exact` or a more specific selector; candidates are listed.
+- `take_screenshot` accepts `package_name` to wait for that app and warns when MCPServer itself is in front.
+- Dark mode/animation changes need `adb shell pm grant com.vlad.mcpserver android.permission.WRITE_SECURE_SETTINGS`; `health_check` reports which special accesses are granted.
 - `touch_test` failures explain the likely cause (no window, transition, screen off).

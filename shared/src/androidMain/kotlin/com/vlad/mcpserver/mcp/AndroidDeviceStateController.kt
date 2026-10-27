@@ -136,6 +136,7 @@ class AndroidDeviceStateController(private val context: Context) {
             "auto" -> "auto"
             else -> error("dark_mode must be on, off or auto")
         }
+        requireSecureWrite()
         val ok = Settings.Secure.putString(context.contentResolver, "ui_night_mode", mode)
         if (!ok) error("The system rejected the dark mode change.")
         val readback = secureNightMode() ?: "unset"
@@ -153,6 +154,7 @@ class AndroidDeviceStateController(private val context: Context) {
 
     fun setAnimations(enabled: Boolean): String {
         val scale = if (enabled) 1.0f else 0.0f
+        requireSecureWrite()
         Settings.Global.putFloat(
             context.contentResolver,
             Settings.Global.ANIMATOR_DURATION_SCALE,
@@ -223,10 +225,12 @@ class AndroidDeviceStateController(private val context: Context) {
         }.onSuccess { results += "font_scale" }.onFailure { results += "font failed: ${it.message}" }
         snapshot.nightMode?.let { mode ->
             runCatching {
+                requireSecureWrite()
                 Settings.Secure.putString(context.contentResolver, "ui_night_mode", mode)
             }.onSuccess { results += "dark_mode" }.onFailure { results += "dark mode failed: ${it.message}" }
         }
         runCatching {
+            requireSecureWrite()
             Settings.Global.putFloat(
                 context.contentResolver,
                 Settings.Global.ANIMATOR_DURATION_SCALE,
@@ -247,13 +251,29 @@ class AndroidDeviceStateController(private val context: Context) {
             .onSuccess { results += "volume" }.onFailure { results += "volume failed: ${it.message}" }
         runCatching { setKeepAwake(snapshot.keepAwake) }
             .onSuccess { results += "keep_awake" }.onFailure { results += "wake lock failed: ${it.message}" }
-        saved = null
-        return "Restored: ${results.joinToString(", ")}."
+        val failed = results.any { it.contains("failed") }
+        // Keep the snapshot when something failed so restore can be retried after granting access.
+        if (!failed) saved = null
+        return "Restored: ${results.joinToString(", ")}." +
+            if (failed) " Snapshot kept; fix the failures and call device_state action=restore again." else ""
     }
 
     fun release() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+    }
+
+    fun canWriteSecureSettings(): Boolean =
+        context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    private fun requireSecureWrite() {
+        if (!canWriteSecureSettings()) {
+            error(
+                "WRITE_SECURE_SETTINGS is not granted (needed for dark mode and animations). Run once: " +
+                    "adb shell pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS"
+            )
+        }
     }
 
     private fun requireSystemWrite() {
