@@ -1,6 +1,6 @@
 # Supported tools — MCPServer 0.0.2
 
-MCPServer exposes **12 tools** over MCP. All are available in this version.
+MCPServer exposes **22 tools** over MCP (12 device tools + 10 QA-pack tools). All are available in this version.
 
 In DeepSeek Harness the names are namespaced as
 `mcp__<serverName>__<toolName>`. With `serverName: android`:
@@ -30,18 +30,29 @@ requirements of each tool.
 | `input_text` | `text` (string, required, max 5000 chars); optional `submit`; optional `index`, `match_text`, `resource_id`, `content_desc` | **MCP Touch Service** enabled; target must be editable | Yes | Text describing the field and whether submit was pressed. |
 | `scroll` | `direction` (`up`, `down`, `left`, `right`, required); optional `index`, `text`, `resource_id`, `content_desc` | **MCP Touch Service** enabled | Yes | Text with the scrolling method used. |
 | `global_action` | `action`: `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen` (required) | **MCP Touch Service** enabled | Yes | Text confirming the action. |
+| `qa_session` | `action`: `begin`, `step`, `status`, `end`; `test_case`, `title`, `expected`, `actual`, `status`, `result`, `notes` | App sandbox for reports | No | Session text; end writes JSON + Markdown. |
+| `ui_find` | Selector: `text`, `text_exact`, `resource_id`, `content_desc`, `class_name`, `index`; `include_invisible`, `limit` | **MCP Touch Service** enabled | No | JSON: count + matches with bounds/flags. |
+| `ui_wait` | `condition`: `visible`, `absent`, `text`, `idle`; selector; `timeout_ms`, `interval_ms`, `quiet_ms` | **MCP Touch Service** enabled | No | WAIT OK/TIMEOUT with elapsed. |
+| `ui_assert` | `condition`: `visible`, `absent`, `text`, `count`; selector; `expected`, `timeout_ms`, `max_dimension` | **MCP Touch Service** enabled | No | PASS/FAIL; failure includes screenshot + tree excerpt. |
+| `ui_gesture` | `type`: `tap`, `double_tap`, `multi_tap`, `long_press`, `swipe`, `drag`, `pinch`; coordinates or selector; `count`, `interval_ms`, `duration_ms`, `direction`, `radius` | **MCP Touch Service** enabled | Yes | Text confirming the gesture. |
+| `audio_instruction` | `action`: `speak`, `play`, `stop`, `set_volume`; `text`, `path`, `language`, `rate`, `volume`, `loop`, `wait` | Device TTS/audio; path inside sandbox | Yes | Text; TTS defaults to en-US. |
+| `audio_state` | none | — | No | Volume, music active, TTS/player state. |
+| `get_device_state` | none | — | No | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
+| `device_state` | `action`: `set`, `restore`; `rotation`, `dark_mode`, `font_scale`, `animations`, `volume`, `keep_awake` | `WRITE_SETTINGS`/`WRITE_SECURE_SETTINGS` for some fields | Yes | Applied/restored fields or actionable error. |
+| `ui_diff` | `action`: `save_baseline`, `compare`; `name`, `threshold`, `max_dimension` | **MCP Touch Service**; baseline in app sandbox | No | Diff percentage + PASS/FAIL; failure image. |
 
 ## Approval behavior
 
 Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
-`get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll` and
-`global_action` (10 of 12).
+`get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
+`global_action`, `ui_gesture`, `audio_instruction` and `device_state` (13 of 22).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
 must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 
-`get_device_info` and `create_notification` run without an extra approval.
+`get_device_info`, `create_notification`, `qa_session`, `ui_find`, `ui_wait`,
+`ui_assert`, `audio_state`, `get_device_state` and `ui_diff` run without an extra approval.
 
 ## Requirements
 
@@ -54,6 +65,13 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 - **Notifications**: runtime `POST_NOTIFICATIONS` permission.
 - **Files**: `read_file` is restricted to the app's sandbox (`files`, `cache`,
   external files). It is not a general-purpose file browser.
+- **TTS/audio**: `audio_instruction` uses the device TTS/audio; no extra permission. Audio
+  paths must be inside the app sandbox.
+- **Device state**: `device_state` needs `WRITE_SETTINGS` for rotation/font and
+  `WRITE_SECURE_SETTINGS` for dark mode/animations. On Android, the reliable dark-mode
+  path is `adb shell cmd uimode night yes|no`; the app's secure-setting write may need a
+  configuration change before the UI follows.
+- **Visual baselines**: `ui_diff` stores JPEG baselines under `files/qa/baselines`.
 - **Launch app**: `package_name` must match
   `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$` and the app must have a
   launcher activity.

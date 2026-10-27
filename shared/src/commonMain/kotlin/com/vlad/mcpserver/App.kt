@@ -1232,10 +1232,12 @@ private fun SettingsSheet(
             SectionLabel("Device access")
             var touchServiceEnabled by remember { mutableStateOf(isTouchServiceEnabled()) }
             var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted()) }
+            var writeSettingsGranted by remember { mutableStateOf(isWriteSettingsGranted()) }
             // Re-check when returning from the system settings screens.
             LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                 touchServiceEnabled = isTouchServiceEnabled()
                 overlayGranted = isOverlayPermissionGranted()
+                writeSettingsGranted = isWriteSettingsGranted()
             }
             ActionRow(
                 title = "Touch injection",
@@ -1250,6 +1252,13 @@ private fun SettingsSheet(
                 action = "Open",
                 onClick = viewModel::openOverlaySettings,
                 granted = overlayGranted
+            )
+            ActionRow(
+                title = "Modify system settings",
+                subtitle = "Needed by device_state for rotation and font scale.",
+                action = "Open",
+                onClick = viewModel::openWriteSettings,
+                granted = writeSettingsGranted
             )
 
             SheetDivider()

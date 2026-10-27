@@ -34,7 +34,7 @@ not implemented there yet).
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device tools**: 12 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 22 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
@@ -169,8 +169,9 @@ origin (DNS-rebinding/CSRF protection) and limit request bodies to 256 KB.
 ## Tools
 
 The complete catalog with arguments, requirements and approval behavior is in
-[`docs/TOOLS.md`](docs/TOOLS.md). The app also shows it from the grid icon in the
-header (**Tools**).
+[`docs/TOOLS.md`](docs/TOOLS.md); the QA workflow is in
+[`docs/QA_PACK.md`](docs/QA_PACK.md). The app also shows the catalog from the grid
+icon in the header (**Tools**).
 
 | Tool | Status | Description |
 | --- | --- | --- |
@@ -186,13 +187,23 @@ header (**Tools**).
 | `input_text` | Available (accessibility) | Sets the text of an editable field (focused field or selector via `match_text`/`index`/`resource_id`/`content_desc`); optional `submit`. |
 | `scroll` | Available (accessibility) | Scrolls `up`/`down`/`left`/`right` on the largest or selected scrollable element. |
 | `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. |
+| `qa_session` | Available (QA pack) | Begin/step/status/end a QA case and write JSON/Markdown reports with device snapshot. |
+| `ui_find` | Available (QA pack) | Find all matching elements with flags/bounds; returns JSON count and matches. |
+| `ui_wait` | Available (QA pack) | Wait for visible/absent/text/idle with timeout; reduces polling. |
+| `ui_assert` | Available (QA pack) | Assert visible/absent/text/count; failure returns screenshot + tree excerpt. |
+| `ui_gesture` | Available (QA pack) | tap, double_tap, multi_tap, long_press, swipe, drag, pinch; selector or coordinates. |
+| `audio_instruction` | Available (QA pack) | TTS/audio instructions for the tester, stop, volume; English by default. |
+| `audio_state` | Available (QA pack) | Volume, music active, TTS speaking, QA player playing. |
+| `get_device_state` | Available (QA pack) | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
+| `device_state` | Available (QA pack) | Set/restore rotation, dark mode, font scale, animations, volume, keep-awake. |
+| `ui_diff` | Available (QA pack) | Save visual baseline / compare current screen with diff percentage. |
 
 Recommended navigation loop for agents: `get_screen_tree` → `click_element` /
 `input_text` / `scroll` → `get_screen_tree` again; use `take_screenshot` only when
 the tree is empty or ambiguous.
 
-Sensitive tools (`read_file`, `take_photo`, `touch_test`, `launch_app` and all
-screen navigation tools) wait for an explicit
+Sensitive tools (`read_file`, `take_photo`, `touch_test`, `launch_app`, all
+screen navigation tools, `ui_gesture`, `audio_instruction` and `device_state`) wait for an explicit
 **Approve tool** action in the dashboard before running. The **Confirm sensitive
 tools** switch in Settings disables this gate. Tools that cannot run in the current
 state return `isError: true` with an actionable message instead of a fake success.

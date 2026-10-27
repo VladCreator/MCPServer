@@ -143,4 +143,19 @@ actual fun openOverlayPermissionSettings() {
 actual fun isOverlayPermissionGranted(): Boolean =
     ::appContext.isInitialized && Settings.canDrawOverlays(appContext)
 
+actual fun openWriteSettingsPermission() {
+    if (!::appContext.isInitialized) return
+    runCatching {
+        appContext.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Uri.parse("package:${appContext.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+actual fun isWriteSettingsGranted(): Boolean =
+    ::appContext.isInitialized && Settings.System.canWrite(appContext)
+
 actual fun isTouchServiceEnabled(): Boolean = McpTouchAccessibilityService.instance() != null

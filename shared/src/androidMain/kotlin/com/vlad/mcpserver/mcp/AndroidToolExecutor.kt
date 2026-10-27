@@ -3,25 +3,41 @@ package com.vlad.mcpserver.mcp
 import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.app.Notification
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import com.vlad.mcpserver.McpTouchAccessibilityService
 import com.vlad.mcpserver.NodeSelector
 import com.vlad.mcpserver.ScreenNavigator
+import com.vlad.mcpserver.Screenshot
 import com.vlad.mcpserver.AppVisibility
 import com.vlad.mcpserver.CameraCapture
 import com.vlad.mcpserver.getLocalIpAddress
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Android implementation of the device tools.
@@ -35,6 +51,10 @@ class AndroidToolExecutor(
     private val consent: suspend (clientId: String, toolName: String, arguments: JsonObject) -> Boolean =
         { _, _, _ -> true }
 ) : ToolExecutor {
+
+    private val audio = AndroidAudioController(context)
+    private val deviceState = AndroidDeviceStateController(context)
+    private val qa = QaSessionManager(context)
 
     override suspend fun execute(
         clientId: String,
@@ -57,6 +77,16 @@ class AndroidToolExecutor(
                 "input_text" -> inputText(arguments)
                 "scroll" -> scroll(arguments)
                 "global_action" -> globalAction(arguments)
+                "qa_session" -> qaSession(arguments)
+                "ui_find" -> uiFind(arguments)
+                "ui_wait" -> uiWait(arguments)
+                "ui_assert" -> uiAssert(arguments)
+                "ui_gesture" -> uiGesture(arguments)
+                "audio_instruction" -> audioInstruction(arguments)
+                "audio_state" -> audio.state()
+                "get_device_state" -> ToolResult(deviceState.readText())
+                "device_state" -> setDeviceState(arguments)
+                "ui_diff" -> uiDiff(arguments)
                 else -> ToolResult("Tool '$toolName' is not available.", isError = true)
             }
         }
@@ -318,7 +348,7 @@ class AndroidToolExecutor(
         val service = touchService() ?: return touchServiceMissing()
         val maxDimension = (arguments.int("max_dimension") ?: DEFAULT_SCREENSHOT_DIMENSION)
             .coerceIn(MIN_SCREENSHOT_DIMENSION, MAX_SCREENSHOT_DIMENSION)
-        return ScreenNavigator.takeScreenshot(service, maxDimension).fold(
+        return captureScreenshot(service, maxDimension).fold(
             onSuccess = { shot ->
                 ToolResult(
                     text = "Screenshot ${shot.width}x${shot.height} (screen " +
@@ -433,6 +463,529 @@ class AndroidToolExecutor(
         }
     }
 
+
+    private fun qaSession(arguments: JsonObject): ToolResult {
+        val action = arguments.string("action")?.lowercase()
+            ?: return ToolResult("Missing required argument: action", isError = true)
+        return when (action) {
+            "begin" -> {
+                val testCase = arguments.string("test_case")
+                    ?: return ToolResult("Missing required argument: test_case", isError = true)
+                val platform = arguments.string("platform") ?: "android"
+                val device = deviceState.snapshot()
+                qa.begin(testCase, platform, device, arguments.string("notes").orEmpty())
+            }
+            "step" -> qa.step(
+                title = arguments.string("title").orEmpty(),
+                expected = arguments.string("expected").orEmpty(),
+                actual = arguments.string("actual").orEmpty(),
+                status = arguments.string("status").orEmpty(),
+                notes = arguments.string("notes").orEmpty()
+            )
+            "status" -> qa.status()
+            "end" -> {
+                val restore = deviceState.restore()
+                val notes = listOfNotNull(
+                    arguments.string("notes"),
+                    "Device restore: $restore"
+                ).joinToString("\n")
+                val report = qa.end(arguments.string("result").orEmpty(), notes)
+                if (report.isError) report else ToolResult("${report.text}\n$restore")
+            }
+            else -> ToolResult("action must be begin, step, status or end.", isError = true)
+        }
+    }
+
+    private suspend fun uiFind(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val selector = qaSelector(arguments)
+        if (selector.isEmpty) {
+            return ToolResult(
+                "Provide at least one selector: text, resource_id, content_desc, class_name or index.",
+                isError = true
+            )
+        }
+        val limit = (arguments.int("limit") ?: DEFAULT_QA_MATCHES).coerceIn(1, MAX_QA_MATCHES)
+        val matches = ScreenNavigator.findAll(service, selector, limit)
+        val payload = buildJsonObject {
+            put("count", matches.size)
+            put("selector", selector.toString())
+            putJsonArray("matches") {
+                matches.forEachIndexed { index, node -> add(nodeJson(index, node)) }
+            }
+        }
+        return ToolResult(payload.toString())
+    }
+
+    private suspend fun uiWait(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val condition = arguments.string("condition")?.lowercase()
+            ?: return ToolResult("Missing required argument: condition", isError = true)
+        if (condition !in setOf("visible", "absent", "text", "idle")) {
+            return ToolResult("condition must be visible, absent, text or idle.", isError = true)
+        }
+        val selector = qaSelector(arguments)
+        if (condition != "idle" && selector.isEmpty) {
+            return ToolResult("Provide a selector for condition '$condition'.", isError = true)
+        }
+        val timeout = (arguments.int("timeout_ms") ?: DEFAULT_QA_TIMEOUT_MS)
+            .coerceIn(MIN_QA_TIMEOUT_MS, MAX_QA_TIMEOUT_MS)
+        val interval = (arguments.int("interval_ms") ?: DEFAULT_QA_INTERVAL_MS)
+            .coerceIn(MIN_QA_INTERVAL_MS, 2_000)
+        val quiet = (arguments.int("quiet_ms") ?: DEFAULT_QA_QUIET_MS)
+            .coerceIn(200, 5_000)
+        val result = waitForCondition(
+            service = service,
+            condition = condition,
+            selector = selector,
+            expected = arguments.string("expected").orEmpty(),
+            timeoutMs = timeout.toLong(),
+            intervalMs = interval.toLong(),
+            quietMs = quiet.toLong()
+        )
+        val detail = "condition=$condition elapsed=${result.elapsedMs}ms actual=${result.actual}"
+        return if (result.passed) {
+            ToolResult("WAIT OK: $detail")
+        } else {
+            ToolResult("WAIT TIMEOUT: $detail", isError = true)
+        }
+    }
+
+    private suspend fun uiAssert(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val condition = arguments.string("condition")?.lowercase()
+            ?: return ToolResult("Missing required argument: condition", isError = true)
+        if (condition !in setOf("visible", "absent", "text", "count")) {
+            return ToolResult("condition must be visible, absent, text or count.", isError = true)
+        }
+        var selector = qaSelector(arguments)
+        val expected = arguments.string("expected").orEmpty()
+        if (condition == "text" && selector.isEmpty && expected.isNotBlank()) {
+            selector = selector.copy(text = expected)
+        }
+        if (selector.isEmpty) {
+            return ToolResult("Provide a selector for condition '$condition'.", isError = true)
+        }
+        if (condition == "count" && expected.toIntOrNull() == null) {
+            return ToolResult("condition=count requires an integer expected.", isError = true)
+        }
+        if (condition == "text" && expected.isBlank() && selector.text == null) {
+            return ToolResult("condition=text requires expected or a text selector.", isError = true)
+        }
+        val timeout = (arguments.int("timeout_ms") ?: DEFAULT_QA_TIMEOUT_MS)
+            .coerceIn(MIN_QA_TIMEOUT_MS, MAX_QA_TIMEOUT_MS)
+        val result = waitForCondition(
+            service = service,
+            condition = condition,
+            selector = selector,
+            expected = expected,
+            timeoutMs = timeout.toLong(),
+            intervalMs = DEFAULT_QA_INTERVAL_MS.toLong(),
+            quietMs = DEFAULT_QA_QUIET_MS.toLong()
+        )
+        if (result.passed) {
+            return ToolResult(
+                "ASSERTION PASSED: condition=$condition expected=${expected.ifBlank { selector.toString() }} " +
+                    "actual=${result.actual} elapsed=${result.elapsedMs}ms"
+            )
+        }
+
+        val maxDimension = (arguments.int("max_dimension") ?: DEFAULT_ASSERT_SCREENSHOT_DIMENSION)
+            .coerceIn(MIN_SCREENSHOT_DIMENSION, MAX_SCREENSHOT_DIMENSION)
+        val shot = captureScreenshot(service, maxDimension).getOrNull()
+        val tree = ScreenNavigator.dumpTree(service, ASSERT_TREE_NODES)?.take(ASSERT_TREE_CHARS)
+        val text = buildString {
+            appendLine("ASSERTION FAILED: condition=$condition expected=${expected.ifBlank { selector.toString() }}")
+            appendLine("actual=${result.actual} elapsed=${result.elapsedMs}ms")
+            if (tree != null) {
+                appendLine("--- tree excerpt ---")
+                append(tree)
+            }
+        }.trimEnd()
+        return ToolResult(
+            text = text,
+            isError = true,
+            imageBase64 = shot?.let { java.util.Base64.getEncoder().encodeToString(it.jpegBytes) },
+            imageMimeType = if (shot != null) "image/jpeg" else null
+        )
+    }
+
+    private suspend fun uiGesture(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val type = arguments.string("type")?.lowercase()
+            ?: return ToolResult("Missing required argument: type", isError = true)
+        val selector = qaSelector(arguments)
+        val node = if (!selector.isEmpty) ScreenNavigator.find(service, selector) else null
+        val rect = node?.let { ScreenNavigator.bounds(it) }
+        var x = arguments.float("x") ?: rect?.exactCenterX()
+        var y = arguments.float("y") ?: rect?.exactCenterY()
+        if (x == null || y == null) {
+            return ToolResult(
+                "Provide x and y coordinates, or a selector that matches a visible element.",
+                isError = true
+            )
+        }
+        val metrics = context.resources.displayMetrics
+        if (x < 0f || y < 0f || x >= metrics.widthPixels || y >= metrics.heightPixels) {
+            return ToolResult(
+                "Coordinates are outside the screen (${metrics.widthPixels}x${metrics.heightPixels}).",
+                isError = true
+            )
+        }
+        val duration = (arguments.int("duration_ms") ?: if (type == "tap") 50 else 350)
+            .coerceIn(20, 5_000)
+            .toLong()
+        val dispatched = when (type) {
+            "tap" -> service.tap(x, y, duration)
+            "double_tap" -> service.multiTap(x, y, count = 2, intervalMs = 120L, durationMs = duration)
+            "multi_tap" -> {
+                val count = (arguments.int("count") ?: 3).coerceIn(2, 10)
+                val interval = (arguments.int("interval_ms") ?: 120).coerceIn(30, 1_000)
+                service.multiTap(x, y, count, interval.toLong(), duration)
+            }
+            "long_press" -> service.tap(x, y, maxOf(duration, 800L))
+            "swipe", "drag" -> {
+                val toX = arguments.float("to_x")
+                val toY = arguments.float("to_y")
+                if (toX == null || toY == null) {
+                    return ToolResult("$type requires to_x and to_y.", isError = true)
+                }
+                if (toX < 0f || toY < 0f || toX >= metrics.widthPixels || toY >= metrics.heightPixels) {
+                    return ToolResult("Destination coordinates are outside the screen.", isError = true)
+                }
+                service.swipe(x, y, toX, toY, duration)
+            }
+            "pinch" -> {
+                val radius = (arguments.float("radius") ?: 220f).coerceIn(40f, 600f)
+                val direction = arguments.string("direction")?.lowercase() ?: "out"
+                val start = if (direction == "in") radius else 80f
+                val end = if (direction == "in") 80f else radius
+                service.pinch(x, y, start, end, duration)
+            }
+            else -> return ToolResult(
+                "type must be tap, double_tap, multi_tap, long_press, swipe, drag or pinch.",
+                isError = true
+            )
+        }
+        return if (dispatched) {
+            ToolResult(
+                "Gesture '$type' dispatched at (${x.toInt()}, ${y.toInt()})" +
+                    if (type == "swipe" || type == "drag") {
+                        " to (${arguments.float("to_x")?.toInt()}, ${arguments.float("to_y")?.toInt()})"
+                    } else {
+                        ""
+                    } + "."
+            )
+        } else {
+            ToolResult("The system rejected the gesture.", isError = true)
+        }
+    }
+
+    private suspend fun audioInstruction(arguments: JsonObject): ToolResult {
+        val action = arguments.string("action")?.lowercase()
+            ?: return ToolResult("Missing required argument: action", isError = true)
+        return when (action) {
+            "speak" -> audio.speak(
+                text = arguments.string("text").orEmpty(),
+                language = arguments.string("language") ?: "en-US",
+                rate = arguments.float("rate") ?: 1.0f,
+                volumePercent = arguments.int("volume") ?: 100,
+                wait = arguments.bool("wait")
+            )
+            "play" -> audio.play(
+                path = arguments.string("path").orEmpty(),
+                volumePercent = arguments.int("volume") ?: 100,
+                loop = arguments.bool("loop")
+            )
+            "stop" -> audio.stop()
+            "set_volume" -> {
+                val volume = arguments.int("volume")
+                    ?: return ToolResult("set_volume requires volume (0-100).", isError = true)
+                audio.setVolume(volume)
+            }
+            else -> ToolResult("action must be speak, play, stop or set_volume.", isError = true)
+        }
+    }
+
+    private fun setDeviceState(arguments: JsonObject): ToolResult {
+        val action = arguments.string("action")?.lowercase()
+            ?: return ToolResult("Missing required argument: action", isError = true)
+        if (action == "restore") return ToolResult(deviceState.restore())
+        if (action != "set") {
+            return ToolResult("action must be set or restore.", isError = true)
+        }
+        if (!deviceState.hasSnapshot()) deviceState.snapshot()
+        val applied = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+
+        arguments.string("rotation")?.let { value ->
+            runCatching { deviceState.setRotation(value) }
+                .onSuccess { applied += it }
+                .onFailure { failed += "rotation: ${it.message}" }
+        }
+        arguments.string("dark_mode")?.let { value ->
+            runCatching { deviceState.setDarkMode(value) }
+                .onSuccess { applied += it }
+                .onFailure { failed += "dark_mode: ${it.message}" }
+        }
+        arguments.float("font_scale")?.let { value ->
+            runCatching { deviceState.setFontScale(value) }
+                .onSuccess { applied += it }
+                .onFailure { failed += "font_scale: ${it.message}" }
+        }
+        arguments.optionalBool("animations")?.let { value ->
+            runCatching { deviceState.setAnimations(value) }
+                .onSuccess { applied += it }
+                .onFailure { failed += "animations: ${it.message}" }
+        }
+        arguments.int("volume")?.let { value ->
+            runCatching { deviceState.setVolume(value) }
+                .onSuccess { applied += it }
+                .onFailure { failed += "volume: ${it.message}" }
+        }
+        arguments.optionalBool("keep_awake")?.let { value ->
+            runCatching { deviceState.setKeepAwake(value) }
+                .onSuccess { applied += it }
+                .onFailure { failed += "keep_awake: ${it.message}" }
+        }
+
+        if (applied.isEmpty() && failed.isEmpty()) {
+            return ToolResult(
+                "Provide at least one field: rotation, dark_mode, font_scale, animations, volume or keep_awake.",
+                isError = true
+            )
+        }
+        val text = buildString {
+            if (applied.isNotEmpty()) appendLine("Applied: ${applied.joinToString(" ")}")
+            if (failed.isNotEmpty()) append("Failed: ${failed.joinToString("; ")}")
+        }.trimEnd()
+        return ToolResult(text, isError = failed.isNotEmpty())
+    }
+
+    private suspend fun uiDiff(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val action = arguments.string("action")?.lowercase()
+            ?: return ToolResult("Missing required argument: action", isError = true)
+        val rawName = arguments.string("name")
+            ?: return ToolResult("Missing required argument: name", isError = true)
+        if (!BASELINE_NAME_REGEX.matches(rawName)) {
+            return ToolResult("name must be 1-64 chars: letters, digits, _ or -.", isError = true)
+        }
+        val maxDimension = (arguments.int("max_dimension") ?: DEFAULT_SCREENSHOT_DIMENSION)
+            .coerceIn(MIN_SCREENSHOT_DIMENSION, MAX_SCREENSHOT_DIMENSION)
+        val directory = File(context.filesDir, "qa/baselines").apply { mkdirs() }
+        val baselineFile = File(directory, "$rawName.jpg")
+
+        return when (action) {
+            "save_baseline" -> {
+                val shot = captureScreenshot(service, maxDimension).getOrElse {
+                    return ToolResult("Screenshot failed: ${it.message}", isError = true)
+                }
+                runCatching { baselineFile.writeBytes(shot.jpegBytes) }.getOrElse {
+                    return ToolResult("Unable to save baseline: ${it.message}", isError = true)
+                }
+                ToolResult(
+                    "Baseline '$rawName' saved (${shot.width}x${shot.height}, ${shot.jpegBytes.size} bytes): " +
+                        baselineFile.path
+                )
+            }
+            "compare" -> {
+                if (!baselineFile.isFile) {
+                    return ToolResult(
+                        "Baseline '$rawName' not found. Call ui_diff with action=save_baseline first.",
+                        isError = true
+                    )
+                }
+                val baseline = BitmapFactory.decodeFile(baselineFile.path)
+                    ?: return ToolResult("Unable to decode baseline '$rawName'.", isError = true)
+                val shot = captureScreenshot(service, maxDimension).getOrElse {
+                    baseline.recycle()
+                    return ToolResult("Screenshot failed: ${it.message}", isError = true)
+                }
+                val current = BitmapFactory.decodeByteArray(shot.jpegBytes, 0, shot.jpegBytes.size)
+                    ?: run {
+                        baseline.recycle()
+                        return ToolResult("Unable to decode the current screenshot.", isError = true)
+                    }
+                val difference = runCatching { compareBitmaps(baseline, current) }.getOrElse {
+                    baseline.recycle()
+                    current.recycle()
+                    return ToolResult("Diff failed: ${it.message}", isError = true)
+                }
+                baseline.recycle()
+                current.recycle()
+                val threshold = (arguments.float("threshold") ?: 1.0f).coerceIn(0f, 100f)
+                val passed = difference <= threshold
+                val text = "Visual diff '$rawName': ${"%.2f".format(difference)}% " +
+                    "(threshold ${"%.2f".format(threshold)}%) -> ${if (passed) "PASS" else "FAIL"}. " +
+                    "Baseline: ${baselineFile.path}"
+                ToolResult(
+                    text = text,
+                    isError = !passed,
+                    imageBase64 = if (passed) null else {
+                        java.util.Base64.getEncoder().encodeToString(shot.jpegBytes)
+                    },
+                    imageMimeType = if (passed) null else "image/jpeg"
+                )
+            }
+            else -> ToolResult("action must be save_baseline or compare.", isError = true)
+        }
+    }
+
+    private suspend fun captureScreenshot(
+        service: McpTouchAccessibilityService,
+        maxDimension: Int
+    ): Result<Screenshot> {
+        var last: Result<Screenshot>? = null
+        repeat(3) {
+            val result = ScreenNavigator.takeScreenshot(service, maxDimension)
+            if (result.isSuccess) return result
+            last = result
+            val message = result.exceptionOrNull()?.message.orEmpty()
+            if (!message.contains("too quickly", ignoreCase = true)) return result
+            delay(1_000L)
+        }
+        return last ?: Result.failure(IllegalStateException("Screenshot failed"))
+    }
+
+    private data class WaitResult(
+        val passed: Boolean,
+        val actual: String,
+        val elapsedMs: Long
+    )
+
+    private suspend fun waitForCondition(
+        service: McpTouchAccessibilityService,
+        condition: String,
+        selector: NodeSelector,
+        expected: String,
+        timeoutMs: Long,
+        intervalMs: Long,
+        quietMs: Long
+    ): WaitResult {
+        val started = SystemClock.elapsedRealtime()
+        val deadline = started + timeoutMs
+        var actual = "not evaluated"
+        var lastHash = 0
+        var changedAt = started
+        var initialized = false
+
+        while (SystemClock.elapsedRealtime() <= deadline) {
+            if (condition == "idle") {
+                val tree = ScreenNavigator.dumpTree(service, MAX_TREE_NODES) ?: ""
+                val hash = tree.hashCode()
+                val now = SystemClock.elapsedRealtime()
+                if (!initialized || hash != lastHash) {
+                    initialized = true
+                    lastHash = hash
+                    changedAt = now
+                }
+                val stableFor = now - changedAt
+                actual = "stable ${stableFor}ms"
+                if (stableFor >= quietMs) {
+                    return WaitResult(true, actual, now - started)
+                }
+            } else {
+                val matches = ScreenNavigator.findAll(service, selector, MAX_QA_MATCHES)
+                actual = when (condition) {
+                    "visible" -> "matches=${matches.size}"
+                    "absent" -> "matches=${matches.size}"
+                    "text" -> "matches=${matches.size}"
+                    "count" -> "count=${matches.size}"
+                    else -> "matches=${matches.size}"
+                }
+                val passed = when (condition) {
+                    "visible" -> matches.isNotEmpty()
+                    "absent" -> matches.isEmpty()
+                    "text" -> matches.isNotEmpty()
+                    "count" -> expected.toIntOrNull() == matches.size
+                    else -> false
+                }
+                if (passed) {
+                    return WaitResult(true, actual, SystemClock.elapsedRealtime() - started)
+                }
+            }
+            delay(intervalMs)
+        }
+        return WaitResult(false, actual, SystemClock.elapsedRealtime() - started)
+    }
+
+    private fun compareBitmaps(baseline: Bitmap, current: Bitmap): Float {
+        val width = min(baseline.width, current.width)
+        val height = min(baseline.height, current.height)
+        if (width <= 0 || height <= 0) return 100f
+        val scaledCurrent = if (baseline.width == current.width && baseline.height == current.height) {
+            current
+        } else {
+            Bitmap.createScaledBitmap(current, width, height, true)
+        }
+        val baselinePixels = IntArray(width * height)
+        val currentPixels = IntArray(width * height)
+        baseline.getPixels(baselinePixels, 0, width, 0, 0, width, height)
+        scaledCurrent.getPixels(currentPixels, 0, width, 0, 0, width, height)
+        var different = 0L
+        var total = 0L
+        for (index in baselinePixels.indices) {
+            val a = baselinePixels[index]
+            val b = currentPixels[index]
+            val dr = abs((a shr 16 and 0xFF) - (b shr 16 and 0xFF))
+            val dg = abs((a shr 8 and 0xFF) - (b shr 8 and 0xFF))
+            val db = abs((a and 0xFF) - (b and 0xFF))
+            if (dr + dg + db > DIFF_COLOR_DELTA) different++
+            total++
+        }
+        if (scaledCurrent !== current) scaledCurrent.recycle()
+        return if (total == 0L) 0f else different * 100f / total
+    }
+
+    private fun nodeJson(index: Int, node: android.view.accessibility.AccessibilityNodeInfo): JsonObject {
+        val rect = ScreenNavigator.bounds(node)
+        return buildJsonObject {
+            put("match_index", index)
+            if (node.isPassword) {
+                put("text", "<password>")
+            } else {
+                node.text?.takeIf { it.isNotBlank() }?.let { put("text", it.toString().take(200)) }
+            }
+            node.contentDescription?.takeIf { it.isNotBlank() }?.let {
+                put("content_desc", it.toString().take(200))
+            }
+            node.viewIdResourceName?.let { put("resource_id", it) }
+            node.className?.toString()?.let { put("class", it) }
+            put("bounds", "[${rect.left},${rect.top}][${rect.right},${rect.bottom}]")
+            put("clickable", node.isClickable)
+            put("enabled", node.isEnabled)
+            put("checked", node.isChecked)
+            put("selected", node.isSelected)
+            put("editable", node.isEditable)
+            put("scrollable", node.isScrollable)
+        }
+    }
+
+    private fun qaSelector(arguments: JsonObject): NodeSelector = NodeSelector(
+        index = arguments.int("index"),
+        text = arguments.string("text"),
+        resourceId = arguments.string("resource_id"),
+        contentDescription = arguments.string("content_desc"),
+        textExact = arguments.bool("text_exact"),
+        className = arguments.string("class_name"),
+        nth = arguments.int("nth") ?: 0,
+        includeInvisible = arguments.bool("include_invisible")
+    )
+
+    private fun JsonObject.optionalBool(key: String): Boolean? {
+        val value = (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() ?: return null
+        return when (value) {
+            "true", "1", "yes" -> true
+            "false", "0", "no" -> false
+            else -> null
+        }
+    }
+
+    private fun JsonObject.float(key: String): Float? =
+        (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.toFloatOrNull()
+
+
     private fun hasNotificationPermission(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
         return context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
@@ -448,6 +1001,19 @@ class AndroidToolExecutor(
         const val MIN_SCREENSHOT_DIMENSION = 320
         const val MAX_SCREENSHOT_DIMENSION = 2400
         const val MAX_INPUT_CHARS = 5000
+        const val DEFAULT_QA_MATCHES = 20
+        const val MAX_QA_MATCHES = 100
+        const val DEFAULT_QA_TIMEOUT_MS = 5_000
+        const val MIN_QA_TIMEOUT_MS = 250
+        const val MAX_QA_TIMEOUT_MS = 30_000
+        const val DEFAULT_QA_INTERVAL_MS = 250
+        const val MIN_QA_INTERVAL_MS = 100
+        const val DEFAULT_QA_QUIET_MS = 700
+        const val DEFAULT_ASSERT_SCREENSHOT_DIMENSION = 900
+        const val ASSERT_TREE_NODES = 80
+        const val ASSERT_TREE_CHARS = 4_000
+        const val DIFF_COLOR_DELTA = 24
+        val BASELINE_NAME_REGEX = Regex("^[A-Za-z0-9_-]{1,64}$")
         val PACKAGE_NAME_REGEX = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
     }
 }

@@ -49,9 +49,11 @@ Implementado y verificado en un emulador Android 16 (API 37):
       la UI; el servidor ya no se marca "Active" si el bind falla.
 - [x] SQLite con WAL, timestamps reales, `last_insert_rowid`, una conexión serializada
       y poda del historial.
-- [x] Herramientas reales (12): `get_device_info`, `read_file`, `create_notification`,
+- [x] Herramientas reales (22): `get_device_info`, `read_file`, `create_notification`,
       `take_photo`, `touch_test`, `launch_app`, `get_screen_tree`, `take_screenshot`,
-      `click_element`, `input_text`, `scroll` y `global_action`.
+      `click_element`, `input_text`, `scroll`, `global_action` y el QA pack
+      (`qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `ui_gesture`,
+      `audio_instruction`, `audio_state`, `get_device_state`, `device_state`, `ui_diff`).
 - [x] Catálogo de tools en la app (hoja **Tools**), en [`docs/TOOLS.md`](docs/TOOLS.md) y
       con metadatos de requisitos para la UI.
 - [x] USB/ADB: tarjeta de conexión con `adb forward` y URL `localhost`; WebSocket
@@ -679,7 +681,7 @@ curl -i -X POST http://127.0.0.1:18080/mcp \
 | TLS | ❌ NPE con keystore vacío | ✅ certificado generado, SAN, fingerprint estable |
 | Estado de UI | ❌ "Active" aunque fallara | ✅ Stopped/Starting/Running/Failed + error |
 | DB | ❌ timestamps falsos, conexión por operación | ✅ WAL, timestamps reales, conexión serializada |
-| Herramientas | ❌ simuladas | ✅ 12 reales (device info, archivos, notificaciones, cámara, apps y automatización UI) |
+| Herramientas | ❌ simuladas | ✅ 22 reales (device info, archivos, notificaciones, cámara, apps, automatización UI y QA pack) |
 | Tests | ⚠️ 10, sin servidor | ✅ 39, protocolo/auth/ViewModel/aprobaciones |
 | Foreground service | ❌ | ✅ `dataSync` + notificación |
 | Cámara/touch | ❌ | ✅ CameraX (primer plano) y AccessibilityService |

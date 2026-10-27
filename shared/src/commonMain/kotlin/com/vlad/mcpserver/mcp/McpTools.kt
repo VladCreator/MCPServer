@@ -234,6 +234,176 @@ object McpTools {
         requirement = "MCP Touch Service enabled"
     )
 
+
+    val qaSession: ToolDefinition = ToolDefinition(
+        name = "qa_session",
+        description = "QA test session: begin, record a step, check status or end and write a JSON/Markdown report. " +
+            "Use begin before a QA case, step for each action/assertion, and end to produce evidence.",
+        required = listOf("action"),
+        inputSchema = schema(listOf("action")) {
+            putJsonObject("action") {
+                put("type", "string")
+                putJsonArray("enum") { add("begin"); add("step"); add("status"); add("end") }
+            }
+            putJsonObject("test_case") { put("type", "string"); put("description", "Test case name/ID for begin") }
+            putJsonObject("title") { put("type", "string"); put("description", "Step title") }
+            putJsonObject("expected") { put("type", "string"); put("description", "Expected result") }
+            putJsonObject("actual") { put("type", "string"); put("description", "Observed result") }
+            putJsonObject("status") { put("type", "string"); putJsonArray("enum") { add("pass"); add("fail"); add("blocked"); add("info") } }
+            putJsonObject("result") { put("type", "string"); put("description", "Final result for end, e.g. PASS/FAIL/BLOCKED") }
+            putJsonObject("notes") { put("type", "string") }
+        },
+        requirement = "App sandbox for reports"
+    )
+
+    val uiFind: ToolDefinition = ToolDefinition(
+        name = "ui_find",
+        description = "Find all visible UI elements matching a selector. Returns count and JSON matches with text, " +
+            "content description, resource id, class, bounds and flags. Use instead of pulling the whole tree.",
+        inputSchema = schema(emptyList()) {
+            qaSelectorProperties()
+            putJsonObject("text_exact") { put("type", "boolean"); put("description", "Require exact text (default false)") }
+            putJsonObject("include_invisible") { put("type", "boolean"); put("description", "Include invisible nodes (default false)") }
+            putJsonObject("limit") { put("type", "integer"); put("description", "Max matches (default 20, max 100)") }
+        },
+        requirement = "MCP Touch Service enabled"
+    )
+
+    val uiWait: ToolDefinition = ToolDefinition(
+        name = "ui_wait",
+        description = "Wait until a UI condition is met: visible, absent, text or idle (tree stops changing). " +
+            "Prefer this over polling get_screen_tree in a loop.",
+        required = listOf("condition"),
+        inputSchema = schema(listOf("condition")) {
+            putJsonObject("condition") {
+                put("type", "string")
+                putJsonArray("enum") { add("visible"); add("absent"); add("text"); add("idle") }
+            }
+            qaSelectorProperties()
+            putJsonObject("timeout_ms") { put("type", "integer"); put("description", "Default 5000, max 30000") }
+            putJsonObject("interval_ms") { put("type", "integer"); put("description", "Poll interval, default 250") }
+            putJsonObject("quiet_ms") { put("type", "integer"); put("description", "Idle: quiet period, default 700") }
+        },
+        requirement = "MCP Touch Service enabled"
+    )
+
+    val uiAssert: ToolDefinition = ToolDefinition(
+        name = "ui_assert",
+        description = "Assert a UI condition with a timeout: visible, absent, text or count. On failure returns " +
+            "expected/actual, a screenshot and a tree excerpt.",
+        required = listOf("condition"),
+        inputSchema = schema(listOf("condition")) {
+            putJsonObject("condition") {
+                put("type", "string")
+                putJsonArray("enum") { add("visible"); add("absent"); add("text"); add("count") }
+            }
+            qaSelectorProperties()
+            putJsonObject("expected") { put("type", "string"); put("description", "Expected text or count") }
+            putJsonObject("timeout_ms") { put("type", "integer"); put("description", "Default 5000, max 30000") }
+            putJsonObject("max_dimension") { put("type", "integer"); put("description", "Failure screenshot size, default 900") }
+        },
+        requirement = "MCP Touch Service enabled"
+    )
+
+    val uiGesture: ToolDefinition = ToolDefinition(
+        name = "ui_gesture",
+        description = "Dispatch a real gesture: tap, double_tap, multi_tap, long_press, swipe, drag or pinch. " +
+            "Target coordinates (x/y) or a selector; use multi_tap for double-submit/rapid-tap QA.",
+        required = listOf("type"),
+        inputSchema = schema(listOf("type")) {
+            putJsonObject("type") {
+                put("type", "string")
+                putJsonArray("enum") {
+                    add("tap"); add("double_tap"); add("multi_tap"); add("long_press")
+                    add("swipe"); add("drag"); add("pinch")
+                }
+            }
+            qaSelectorProperties()
+            putJsonObject("x") { put("type", "number") }
+            putJsonObject("y") { put("type", "number") }
+            putJsonObject("to_x") { put("type", "number") }
+            putJsonObject("to_y") { put("type", "number") }
+            putJsonObject("count") { put("type", "integer"); put("description", "multi_tap count, 2-10") }
+            putJsonObject("interval_ms") { put("type", "integer"); put("description", "multi_tap interval, default 120") }
+            putJsonObject("duration_ms") { put("type", "integer"); put("description", "Gesture duration, default 50 (tap) / 350 (swipe)") }
+            putJsonObject("direction") { put("type", "string"); putJsonArray("enum") { add("in"); add("out") } }
+            putJsonObject("radius") { put("type", "number"); put("description", "Pinch end radius, default 220") }
+        },
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
+    )
+
+    val audioInstruction: ToolDefinition = ToolDefinition(
+        name = "audio_instruction",
+        description = "Play QA instructions for the tester: speak text with the device TTS (English by default), " +
+            "play an audio file, stop audio or set media volume.",
+        required = listOf("action"),
+        inputSchema = schema(listOf("action")) {
+            putJsonObject("action") {
+                put("type", "string")
+                putJsonArray("enum") { add("speak"); add("play"); add("stop"); add("set_volume") }
+            }
+            putJsonObject("text") { put("type", "string"); put("description", "Text to speak") }
+            putJsonObject("path") { put("type", "string"); put("description", "Audio file inside the app sandbox") }
+            putJsonObject("language") { put("type", "string"); put("description", "BCP-47, default en-US") }
+            putJsonObject("rate") { put("type", "number"); put("description", "Speech rate 0.5-2.0, default 1.0") }
+            putJsonObject("volume") { put("type", "integer"); put("description", "0-100 for set_volume or playback") }
+            putJsonObject("loop") { put("type", "boolean") }
+            putJsonObject("wait") { put("type", "boolean"); put("description", "Wait for speech/file to finish") }
+        },
+        sensitive = true,
+        requirement = "Device TTS/audio; no extra permission"
+    )
+
+    val audioState: ToolDefinition = ToolDefinition(
+        name = "audio_state",
+        description = "Read media volume, whether music is active, whether TTS is speaking and whether the QA " +
+            "audio player is playing.",
+        inputSchema = schema(emptyList()) { }
+    )
+
+    val getDeviceState: ToolDefinition = ToolDefinition(
+        name = "get_device_state",
+        description = "Read QA-relevant device state: Android version, model, locale, dark mode, rotation, font " +
+            "scale, media volume, screen on, accessibility and foreground package.",
+        inputSchema = schema(emptyList()) { }
+    )
+
+    val deviceState: ToolDefinition = ToolDefinition(
+        name = "device_state",
+        description = "Change or restore QA environment: rotation/auto-rotate, dark mode, font scale, animation " +
+            "scales, media volume and keep-awake. Some fields need WRITE_SETTINGS/WRITE_SECURE_SETTINGS.",
+        required = listOf("action"),
+        inputSchema = schema(listOf("action")) {
+            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add("set"); add("restore") } }
+            putJsonObject("rotation") {
+                put("type", "string")
+                putJsonArray("enum") { add("auto"); add("portrait"); add("landscape"); add("reverse_portrait"); add("reverse_landscape") }
+            }
+            putJsonObject("dark_mode") { put("type", "string"); putJsonArray("enum") { add("on"); add("off"); add("auto") } }
+            putJsonObject("font_scale") { put("type", "number"); put("description", "0.85-2.0") }
+            putJsonObject("animations") { put("type", "boolean"); put("description", "Enable/disable system animation scales") }
+            putJsonObject("volume") { put("type", "integer"); put("description", "0-100 media volume") }
+            putJsonObject("keep_awake") { put("type", "boolean") }
+        },
+        sensitive = true,
+        requirement = "WRITE_SETTINGS/WRITE_SECURE_SETTINGS for rotation/dark/animations; volume/keep-awake otherwise"
+    )
+
+    val uiDiff: ToolDefinition = ToolDefinition(
+        name = "ui_diff",
+        description = "Save a visual baseline or compare the current screen with it. Returns a diff percentage; " +
+            "use it for dark/light and rotation regressions.",
+        required = listOf("action", "name"),
+        inputSchema = schema(listOf("action", "name")) {
+            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add("save_baseline"); add("compare") } }
+            putJsonObject("name") { put("type", "string"); put("description", "Baseline name, alphanumeric/_/-") }
+            putJsonObject("threshold") { put("type", "number"); put("description", "Max diff percent for PASS, default 1.0") }
+            putJsonObject("max_dimension") { put("type", "integer"); put("description", "Capture size, default 1280") }
+        },
+        requirement = "MCP Touch Service; baseline stored in the app sandbox"
+    )
+
     val all: List<ToolDefinition> = listOf(
         getDeviceInfo,
         readFile,
@@ -246,7 +416,17 @@ object McpTools {
         clickElement,
         inputText,
         scroll,
-        globalAction
+        globalAction,
+        qaSession,
+        uiFind,
+        uiWait,
+        uiAssert,
+        uiGesture,
+        audioInstruction,
+        audioState,
+        getDeviceState,
+        deviceState,
+        uiDiff
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
@@ -254,6 +434,14 @@ object McpTools {
     fun find(name: String): ToolDefinition? = available().firstOrNull { it.name == name }
 
     fun isSensitive(name: String): Boolean = all.firstOrNull { it.name == name }?.sensitive == true
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.qaSelectorProperties() {
+        putJsonObject("index") { put("type", "integer"); put("description", "Index from the last get_screen_tree") }
+        putJsonObject("text") { put("type", "string"); put("description", "Visible text (partial, case-insensitive)") }
+        putJsonObject("resource_id") { put("type", "string"); put("description", "View id, full or suffix") }
+        putJsonObject("content_desc") { put("type", "string"); put("description", "Content description (partial)") }
+        putJsonObject("class_name") { put("type", "string"); put("description", "Simple or full class name") }
+    }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.selectorProperties(
         textKey: String = "text",

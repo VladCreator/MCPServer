@@ -49,4 +49,8 @@ actual fun openOverlayPermissionSettings() = Unit
 
 actual fun isOverlayPermissionGranted(): Boolean = false
 
+actual fun openWriteSettingsPermission() = Unit
+
+actual fun isWriteSettingsGranted(): Boolean = false
+
 actual fun isTouchServiceEnabled(): Boolean = false

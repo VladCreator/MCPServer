@@ -45,10 +45,57 @@ class McpTouchAccessibilityService : AccessibilityService() {
         return dispatch(path, durationMs)
     }
 
-    private suspend fun dispatch(path: Path, durationMs: Long): Boolean = withContext(Dispatchers.Main) {
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))
-            .build()
+    /** Dispatches [count] taps at the same point, separated by [intervalMs]. */
+    suspend fun multiTap(
+        x: Float,
+        y: Float,
+        count: Int,
+        intervalMs: Long = 120L,
+        durationMs: Long = 45L
+    ): Boolean {
+        val safeCount = count.coerceIn(2, 10)
+        val safeInterval = intervalMs.coerceIn(30L, 1_000L)
+        val path = Path().apply { moveTo(x, y) }
+        val strokes = (0 until safeCount).map { index ->
+            GestureDescription.StrokeDescription(path, index * safeInterval, durationMs)
+        }
+        return dispatchStrokes(strokes, (safeCount - 1) * safeInterval + durationMs)
+    }
+
+    /** Two-finger pinch; [endRadius] smaller than [startRadius] pinches in. */
+    suspend fun pinch(
+        centerX: Float,
+        centerY: Float,
+        startRadius: Float,
+        endRadius: Float,
+        durationMs: Long = 350L
+    ): Boolean {
+        val left = Path().apply {
+            moveTo(centerX - startRadius, centerY)
+            lineTo(centerX - endRadius, centerY)
+        }
+        val right = Path().apply {
+            moveTo(centerX + startRadius, centerY)
+            lineTo(centerX + endRadius, centerY)
+        }
+        val strokes = listOf(
+            GestureDescription.StrokeDescription(left, 0L, durationMs),
+            GestureDescription.StrokeDescription(right, 0L, durationMs)
+        )
+        return dispatchStrokes(strokes, durationMs)
+    }
+
+    private suspend fun dispatch(path: Path, durationMs: Long): Boolean =
+        dispatchStrokes(listOf(GestureDescription.StrokeDescription(path, 0L, durationMs)), durationMs)
+
+    private suspend fun dispatchStrokes(
+        strokes: List<GestureDescription.StrokeDescription>,
+        durationMs: Long
+    ): Boolean = withContext(Dispatchers.Main) {
+        if (strokes.isEmpty()) return@withContext false
+        val builder = GestureDescription.Builder()
+        strokes.forEach(builder::addStroke)
+        val gesture = builder.build()
         val result = CompletableDeferred<Boolean>()
         val callback = object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {

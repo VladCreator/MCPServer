@@ -23,16 +23,25 @@ data class NodeSelector(
     val index: Int? = null,
     val text: String? = null,
     val resourceId: String? = null,
-    val contentDescription: String? = null
+    val contentDescription: String? = null,
+    val textExact: Boolean = false,
+    val className: String? = null,
+    val nth: Int = 0,
+    val includeInvisible: Boolean = false,
+    val requireEnabled: Boolean? = null,
+    val requireClickable: Boolean? = null
 ) {
     val isEmpty: Boolean
-        get() = index == null && text == null && resourceId == null && contentDescription == null
+        get() = index == null && text == null && resourceId == null && contentDescription == null &&
+            className == null
 
     override fun toString(): String = listOfNotNull(
         index?.let { "index=$it" },
-        text?.let { "text=\"$it\"" },
+        text?.let { if (textExact) "text_exact=\"$it\"" else "text=\"$it\"" },
         resourceId?.let { "resource_id=$it" },
-        contentDescription?.let { "content_desc=\"$it\"" }
+        contentDescription?.let { "content_desc=\"$it\"" },
+        className?.let { "class_name=$it" },
+        if (nth > 0) "nth=$nth" else null
     ).joinToString(", ")
 }
 
@@ -101,14 +110,41 @@ object ScreenNavigator {
         val root = service.rootInActiveWindow ?: return null
         val candidates = mutableListOf<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo) {
-            if (!node.isVisibleToUser) return
+            if (!selector.includeInvisible && !node.isVisibleToUser) return
             if (matches(node, selector)) candidates += node
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let(::visit)
             }
         }
         visit(root)
+        if (selector.nth > 0) return candidates.getOrNull(selector.nth)
         return candidates.firstOrNull { isExactMatch(it, selector) } ?: candidates.firstOrNull()
+    }
+
+    /**
+     * Returns every visible node matching [selector], in traversal order.
+     * [NodeSelector.nth] skips that many leading matches; [limit] caps the result.
+     */
+    fun findAll(
+        service: AccessibilityService,
+        selector: NodeSelector,
+        limit: Int = 50
+    ): List<AccessibilityNodeInfo> {
+        selector.index?.let { index ->
+            val node = lastNodes.getOrNull(index) ?: return emptyList()
+            return if (node.refresh() && (selector.includeInvisible || node.isVisibleToUser)) listOf(node) else emptyList()
+        }
+        val root = service.rootInActiveWindow ?: return emptyList()
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        fun visit(node: AccessibilityNodeInfo) {
+            if (!selector.includeInvisible && !node.isVisibleToUser) return
+            if (matches(node, selector)) candidates += node
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let(::visit)
+            }
+        }
+        visit(root)
+        return candidates.drop(selector.nth.coerceAtLeast(0)).take(limit.coerceIn(1, 100))
     }
 
     fun bounds(node: AccessibilityNodeInfo): Rect = Rect().also(node::getBoundsInScreen)
@@ -343,11 +379,25 @@ object ScreenNavigator {
             if (name != id && !name.endsWith(":id/$id")) return false
         }
         selector.text?.let { text ->
-            if (node.text?.contains(text, ignoreCase = true) != true) return false
+            val actual = node.text?.toString()
+            val ok = if (selector.textExact) {
+                actual.equals(text, ignoreCase = true)
+            } else {
+                actual?.contains(text, ignoreCase = true) == true
+            }
+            if (!ok) return false
         }
         selector.contentDescription?.let { desc ->
             if (node.contentDescription?.contains(desc, ignoreCase = true) != true) return false
         }
+        selector.className?.let { name ->
+            val actual = node.className?.toString() ?: return false
+            if (!actual.equals(name, ignoreCase = true) &&
+                !actual.substringAfterLast('.').equals(name, ignoreCase = true)
+            ) return false
+        }
+        selector.requireEnabled?.let { if (node.isEnabled != it) return false }
+        selector.requireClickable?.let { if (node.isClickable != it) return false }
         return true
     }
 

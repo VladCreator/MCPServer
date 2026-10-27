@@ -49,5 +49,11 @@ expect fun openOverlayPermissionSettings()
 /** Whether the "Display over other apps" permission is granted. */
 expect fun isOverlayPermissionGranted(): Boolean
 
+/** Opens the special "Modify system settings" access page for WRITE_SETTINGS. */
+expect fun openWriteSettingsPermission()
+
+/** Whether the app can write Settings.System (rotation, font scale). */
+expect fun isWriteSettingsGranted(): Boolean
+
 /** Whether the MCP Touch accessibility service is enabled and connected. */
 expect fun isTouchServiceEnabled(): Boolean

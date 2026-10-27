@@ -222,6 +222,10 @@ class AppViewModel(
         openOverlayPermissionSettings()
     }
 
+    fun openWriteSettings() {
+        openWriteSettingsPermission()
+    }
+
     /**
      * Approves a pending session. The transport that is waiting for the
      * decision resumes and emits [ServerEvent.Authorized].
