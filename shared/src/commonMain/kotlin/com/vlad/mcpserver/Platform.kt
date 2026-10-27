@@ -33,6 +33,12 @@ expect fun startServerForegroundService(port: Int, secure: Boolean)
  */
 expect fun stopServerForegroundService()
 
+/**
+ * Shows the latest activity in the running server notification. On Android 16+
+ * it is posted as a Live Update, so it appears as a status bar chip (capsule).
+ */
+expect fun updateServerActivity(toolName: String, status: String, timestamp: Long)
+
 
 /**
  * Opens the system accessibility settings so the user can enable the touch

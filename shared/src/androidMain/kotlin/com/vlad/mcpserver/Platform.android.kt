@@ -118,6 +118,11 @@ actual fun stopServerForegroundService() {
 }
 
 
+actual fun updateServerActivity(toolName: String, status: String, timestamp: Long) {
+    if (!::appContext.isInitialized) return
+    runCatching { McpServerKeepAliveService.updateActivity(appContext, toolName, status, timestamp) }
+}
+
 actual fun openSystemAccessibilitySettings() {
     if (!::appContext.isInitialized) return
     runCatching {

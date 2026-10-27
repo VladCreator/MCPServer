@@ -419,6 +419,7 @@ class AppViewModel(
 
     private fun appendLog(log: ToolExecutionLog) {
         executionLogsState.update { logs -> (listOf(log) + logs).take(MAX_VISIBLE_LOGS) }
+        updateServerActivity(log.toolName, log.status, log.timestamp)
     }
 
     override fun onCleared() {

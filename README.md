@@ -60,6 +60,11 @@ Settings, endpoints and the TLS fingerprint live in sheets so the dashboard only
 what is actionable: server state, pending approvals, connected agents and recent
 activity.
 
+While the server runs, its notification is an Android 16 **Live Update** (promoted
+ongoing notification): the status bar shows a capsule chip with the last activity
+received (tool name or auth event), and the expanded notification shows its time and
+the endpoint. Users can turn it off in the app's notification settings.
+
 ## Requirements
 
 - macOS/Linux with JDK 21+ (the project was built with JDK 25).

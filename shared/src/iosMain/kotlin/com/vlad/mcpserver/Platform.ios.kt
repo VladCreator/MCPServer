@@ -42,6 +42,8 @@ actual fun startServerForegroundService(port: Int, secure: Boolean) = Unit
 
 actual fun stopServerForegroundService() = Unit
 
+actual fun updateServerActivity(toolName: String, status: String, timestamp: Long) = Unit
+
 
 actual fun openSystemAccessibilitySettings() = Unit
 
