@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.0.2** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.0.3** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 

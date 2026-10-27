@@ -1,4 +1,4 @@
-# AGENTS.md - MCPServer (Version 0.0.2)
+# AGENTS.md - MCPServer (Version 0.0.3)
 
 ## Project Objective
 MCPServer is an Android (Kotlin Multiplatform) application designed to act as a Model Context Protocol (MCP) server host on mobile devices. 
@@ -27,7 +27,7 @@ Its primary objectives are:
 - **Language**: All source code, variable names, functions, classes, and code comments must be written strictly in **English**.
 
 ## Architecture & Versioning
-- **Version**: 0.0.2
+- **Version**: 0.0.3
 - **Platform**: Kotlin Multiplatform (Android primary target)
 - **UI Framework**: Jetpack Compose Multiplatform
 - **Communication Protocol**: MCP over SSE / WebSockets / HTTP for AI client connections.

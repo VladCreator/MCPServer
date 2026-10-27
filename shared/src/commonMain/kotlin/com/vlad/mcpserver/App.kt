@@ -1306,7 +1306,7 @@ private fun SettingsSheet(
 
             SheetDivider()
             Text(
-                text = "MCPServer 0.0.2 · Streamable HTTP, SSE and local tools",
+                text = "MCPServer 0.0.3 · Streamable HTTP, SSE and local tools",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp)

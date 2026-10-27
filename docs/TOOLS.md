@@ -1,4 +1,4 @@
-# Supported tools — MCPServer 0.0.2
+# Supported tools — MCPServer 0.0.3
 
 MCPServer exposes **22 tools** over MCP on Android (12 device tools + 10 QA-pack tools).
 The iOS QA service advertises a 5-tool subset (`get_device_info`, `qa_session`,
