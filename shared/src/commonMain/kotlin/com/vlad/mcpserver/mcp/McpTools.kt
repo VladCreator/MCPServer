@@ -104,7 +104,8 @@ object McpTools {
     val touchTest: ToolDefinition = ToolDefinition(
         name = "touch_test",
         description = "Inject a tap at the given screen coordinates. Requires the user to enable " +
-            "the MCP Touch Service in Android accessibility settings.",
+            "the MCP Touch Service in Android accessibility settings. On failure the error " +
+            "explains why (no window, transition in progress, secure window...).",
         required = listOf("x", "y"),
         inputSchema = schema(listOf("x", "y")) {
             putJsonObject("x") {
@@ -123,17 +124,43 @@ object McpTools {
 
     val launchApp: ToolDefinition = ToolDefinition(
         name = "launch_app",
-        description = "Launch an installed app by its package name (e.g. com.android.settings). " +
-            "Only apps with a launcher entry can be opened.",
-        required = listOf("package_name"),
-        inputSchema = schema(listOf("package_name")) {
+        description = "Launch an installed app by package name (e.g. com.android.settings) or by " +
+            "its visible name (e.g. Chrome). Provide package_name or app_name; use list_apps to " +
+            "discover apps. Only apps with a launcher entry can be opened.",
+        inputSchema = schema(emptyList()) {
             putJsonObject("package_name") {
                 put("type", "string")
                 put("description", "Android package name of the app to launch")
             }
+            putJsonObject("app_name") {
+                put("type", "string")
+                put("description", "Visible app name (case-insensitive; exact match wins, otherwise must be unambiguous)")
+            }
         },
         sensitive = true,
         requirement = "Foreground, overlay permission or MCP Touch Service"
+    )
+
+    val listApps: ToolDefinition = ToolDefinition(
+        name = "list_apps",
+        description = "List installed apps that have a launcher entry (visible name and package " +
+            "name), optionally filtered by a case-insensitive query.",
+        inputSchema = schema(emptyList()) {
+            putJsonObject("query") {
+                put("type", "string")
+                put("description", "Optional filter matched against the app name or package name")
+            }
+        },
+        requirement = "None"
+    )
+
+    val healthCheck: ToolDefinition = ToolDefinition(
+        name = "health_check",
+        description = "Lightweight server health probe: returns server time, uptime, app version " +
+            "and whether the MCP Touch Service is connected. Call it to verify the connection " +
+            "before a sequence of actions, and retry the transport if it fails.",
+        inputSchema = schema(emptyList()) {},
+        requirement = "None"
     )
 
     private const val SELECTOR_HINT =
@@ -157,12 +184,17 @@ object McpTools {
 
     val takeScreenshot: ToolDefinition = ToolDefinition(
         name = "take_screenshot",
-        description = "Capture the current screen as a JPEG image. Use when get_screen_tree is " +
-            "empty or not enough (games, maps, canvas). Requires MCP Touch Service.",
+        description = "Capture the current screen as a JPEG image, after waiting for the UI to " +
+            "settle. The result text includes the capture timestamp and foreground package. Use " +
+            "when get_screen_tree is empty or not enough (games, maps, canvas). Requires MCP Touch Service.",
         inputSchema = schema(emptyList()) {
             putJsonObject("max_dimension") {
                 put("type", "integer")
                 put("description", "Longest image side in pixels (default 1280, 320-2400)")
+            }
+            putJsonObject("settle_ms") {
+                put("type", "integer")
+                put("description", "Max time to wait for the UI to stop changing before capture (default 1500, 0 disables)")
             }
         },
         sensitive = true,
@@ -171,9 +203,15 @@ object McpTools {
 
     val clickElement: ToolDefinition = ToolDefinition(
         name = "click_element",
-        description = "Click (or long-press) a UI element." + SELECTOR_HINT,
+        description = "Click (or long-press) a UI element." + SELECTOR_HINT +
+            " If several elements match and neither index nor nth is given, nothing is clicked " +
+            "and the candidates are listed so you can choose.",
         inputSchema = schema(emptyList()) {
             selectorProperties()
+            putJsonObject("nth") {
+                put("type", "integer")
+                put("description", "0-based position among the matches (disambiguates multiple matches)")
+            }
             putJsonObject("long_press") {
                 put("type", "boolean")
                 put("description", "Long-press instead of click (default false)")
@@ -411,6 +449,8 @@ object McpTools {
         takePhoto,
         touchTest,
         launchApp,
+        listApps,
+        healthCheck,
         getScreenTree,
         takeScreenshot,
         clickElement,

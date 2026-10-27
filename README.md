@@ -183,7 +183,9 @@ icon in the header (**Tools**).
 | `create_notification` | Available | Posts a system notification. Requires the notification permission. |
 | `take_photo` | Available (foreground) | Captures a JPEG with CameraX and returns an MCP `image` content block plus the file path. The app must be in the foreground. |
 | `touch_test` | Available (accessibility) | Injects a tap at `x,y`. Requires the user to enable **MCP Touch Service** in Android accessibility settings. |
-| `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name`. From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). |
+| `list_apps` | Available | Lists launchable apps (name + package), optional `query` filter. |
+| `health_check` | Available | Cheap probe: server time, uptime, version, Touch Service state. Use it to verify the connection and retry the transport on failure. |
+| `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name` or visible `app_name` (ambiguous names return candidates). From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). |
 | `get_screen_tree` | Available (accessibility) | Returns the foreground app's UI as indented text: index, class, text, description, resource id, bounds and flags. Preferred way for an AI to "see" the screen. |
 | `take_screenshot` | Available (accessibility) | Captures the screen as a JPEG (`max_dimension`, default 1280). Fallback for games, maps or canvas UIs. Fails on `FLAG_SECURE` screens. |
 | `click_element` | Available (accessibility) | Clicks or long-presses an element by `index` (from the last tree), `text`, `resource_id` or `content_desc`. |
@@ -287,3 +289,9 @@ with a five-tool, localhost-only QA service.
 `recovery/` contains a forensic copy of an older Apply Changes overlay and its
 decompiled classes. It is not part of the app and can be deleted once the source is
 recovered/committed.
+
+### Reliability notes
+
+- `take_screenshot` waits for the UI to settle (`settle_ms`, default 1500) and reports a capture timestamp and foreground package.
+- `click_element` refuses ambiguous matches: pass `nth` (0-based) or a more specific selector; candidates are listed.
+- `touch_test` failures explain the likely cause (no window, transition, screen off).

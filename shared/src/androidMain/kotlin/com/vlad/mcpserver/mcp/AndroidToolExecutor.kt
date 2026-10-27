@@ -55,6 +55,7 @@ class AndroidToolExecutor(
     private val audio = AndroidAudioController(context)
     private val deviceState = AndroidDeviceStateController(context)
     private val qa = QaSessionManager(context)
+    private val startedAt = SystemClock.elapsedRealtime()
 
     override suspend fun execute(
         clientId: String,
@@ -71,6 +72,8 @@ class AndroidToolExecutor(
                 "touch_test" -> tap(arguments)
                 "take_photo" -> takePhoto()
                 "launch_app" -> launchApp(arguments)
+                "list_apps" -> listApps(arguments)
+                "health_check" -> healthCheck()
                 "get_screen_tree" -> screenTree(arguments)
                 "take_screenshot" -> screenshot(arguments)
                 "click_element" -> clickElement(arguments)
@@ -255,14 +258,90 @@ class AndroidToolExecutor(
         return if (dispatched) {
             ToolResult("Tap dispatched at (${x.toInt()}, ${y.toInt()}).")
         } else {
-            ToolResult("The system rejected the gesture.", isError = true)
+            ToolResult("Tap at (${x.toInt()}, ${y.toInt()}) was not performed: ${tapFailureReason(service)}", isError = true)
         }
     }
 
+    private fun tapFailureReason(service: McpTouchAccessibilityService): String {
+        val windows = service.windows
+        val active = windows.firstOrNull { it.isActive }
+        val root = service.rootInActiveWindow
+        val reasons = buildList {
+            if (windows.isEmpty()) add("no window is available (screen off, locked or a transition is in progress)")
+            else if (active == null) add("no window currently has input focus (transition in progress or system dialog)")
+            if (root == null) add("the active window content is unavailable (secure or still loading)")
+            if (!context.getSystemService(android.os.PowerManager::class.java).isInteractive) {
+                add("the screen is off")
+            }
+        }
+        val detail = if (reasons.isEmpty()) {
+            "the system cancelled the gesture (window changed during the tap, or the target is covered by a secure window)"
+        } else {
+            reasons.joinToString("; ")
+        }
+        val pkg = root?.packageName?.let { " Foreground package: $it." }.orEmpty()
+        return "$detail.$pkg Retry after the UI settles (ui_wait idle)."
+    }
+
+    private fun healthCheck(): ToolResult {
+        val versionName = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "unknown"
+        val uptimeSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
+        return ToolResult(
+            "ok\ntime=${java.time.Instant.now()}\nuptime_s=$uptimeSeconds\nversion=$versionName" +
+                "\ntouch_service=${McpTouchAccessibilityService.instance() != null}"
+        )
+    }
+
+    private data class LaunchableApp(val label: String, val packageName: String)
+
+    private fun launchableApps(): List<LaunchableApp> {
+        val pm = context.packageManager
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return pm.queryIntentActivities(intent, 0)
+            .map { LaunchableApp(it.loadLabel(pm).toString(), it.activityInfo.packageName) }
+            .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+    }
+
+    private fun listApps(arguments: JsonObject): ToolResult {
+        val query = arguments.string("query")
+        val apps = launchableApps().filter {
+            query == null || it.label.contains(query, ignoreCase = true) ||
+                it.packageName.contains(query, ignoreCase = true)
+        }
+        if (apps.isEmpty()) return ToolResult("No launchable apps found.")
+        return ToolResult(
+            "${apps.size} app(s):\n" + apps.take(MAX_LISTED_APPS).joinToString("\n") { "${it.label} — ${it.packageName}" } +
+                if (apps.size > MAX_LISTED_APPS) "\n... use query to narrow down" else ""
+        )
+    }
+
     private suspend fun launchApp(arguments: JsonObject): ToolResult {
-        val packageName = (arguments["package_name"] as? JsonPrimitive)?.contentOrNull?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: return ToolResult("Missing required argument: package_name", isError = true)
+        val requestedPackage = arguments.string("package_name")
+        val appName = arguments.string("app_name")
+        val packageName = when {
+            requestedPackage != null -> requestedPackage
+            appName != null -> {
+                val apps = launchableApps()
+                val exact = apps.filter { it.label.equals(appName, ignoreCase = true) }
+                val matches = exact.ifEmpty { apps.filter { it.label.contains(appName, ignoreCase = true) } }
+                when {
+                    matches.isEmpty() -> return ToolResult(
+                        "No launchable app named '$appName'. Use list_apps to see installed apps.",
+                        isError = true
+                    )
+                    matches.size > 1 -> return ToolResult(
+                        "App name '$appName' is ambiguous; use package_name. Candidates:\n" +
+                            matches.take(MAX_LISTED_APPS).joinToString("\n") { "${it.label} — ${it.packageName}" },
+                        isError = true
+                    )
+                    else -> matches.single().packageName
+                }
+            }
+            else -> return ToolResult("Provide package_name or app_name.", isError = true)
+        }
         if (!PACKAGE_NAME_REGEX.matches(packageName)) {
             return ToolResult("Invalid package name: $packageName", isError = true)
         }
@@ -348,10 +427,21 @@ class AndroidToolExecutor(
         val service = touchService() ?: return touchServiceMissing()
         val maxDimension = (arguments.int("max_dimension") ?: DEFAULT_SCREENSHOT_DIMENSION)
             .coerceIn(MIN_SCREENSHOT_DIMENSION, MAX_SCREENSHOT_DIMENSION)
+        val settleMs = (arguments.int("settle_ms") ?: DEFAULT_SETTLE_MS).coerceIn(0, MAX_SETTLE_MS).toLong()
+        var settled = true
+        if (settleMs > 0) {
+            settled = waitForCondition(
+                service, "idle", NodeSelector(), "", settleMs, SETTLE_POLL_MS, SETTLE_QUIET_MS
+            ).passed
+        }
+        val foreground = service.rootInActiveWindow?.packageName
         return captureScreenshot(service, maxDimension).fold(
             onSuccess = { shot ->
                 ToolResult(
-                    text = "Screenshot ${shot.width}x${shot.height} (screen " +
+                    text = "Captured at ${java.time.Instant.now()}" +
+                        (foreground?.let { " (foreground: $it)" } ?: "") +
+                        (if (settled) "" else "; UI was still changing") +
+                        ". Screenshot ${shot.width}x${shot.height} (screen " +
                         "${shot.screenWidth}x${shot.screenHeight}). Multiply image coordinates by " +
                         "${"%.3f".format(shot.screenWidth.toFloat() / shot.width)} to get screen " +
                         "coordinates for touch_test.",
@@ -369,11 +459,28 @@ class AndroidToolExecutor(
         if (selector.isEmpty) {
             return ToolResult("Provide index, text, resource_id or content_desc.", isError = true)
         }
-        val node = ScreenNavigator.find(service, selector)
-            ?: return ToolResult(
-                "No visible element matches $selector. Call get_screen_tree to refresh.",
-                isError = true
-            )
+        val explicitNth = arguments.int("nth")
+        val node = if (selector.index != null) {
+            ScreenNavigator.find(service, selector)
+        } else {
+            val matches = ScreenNavigator.findAll(service, selector.copy(nth = 0), MAX_QA_MATCHES)
+            if (matches.size > 1 && explicitNth == null) {
+                return ToolResult(
+                    "${matches.size} elements match $selector; nothing was clicked. Pass nth (0-based) " +
+                        "or a more specific selector. Candidates:\n" +
+                        matches.take(MAX_CANDIDATES).withIndex().joinToString("\n") { (i, n) ->
+                            val r = ScreenNavigator.bounds(n)
+                            "nth=$i ${describeNode(n)} bounds=[${r.left},${r.top}][${r.right},${r.bottom}]" +
+                                " clickable=${n.isClickable}"
+                        },
+                    isError = true
+                )
+            }
+            matches.getOrNull(explicitNth ?: 0)
+        } ?: return ToolResult(
+            "No visible element matches $selector${explicitNth?.let { " (nth=$it)" }.orEmpty()}. Call get_screen_tree to refresh.",
+            isError = true
+        )
         val longPress = arguments.bool("long_press")
         val description = describeNode(node)
         return if (ScreenNavigator.click(service, node, longPress)) {
@@ -1003,6 +1110,12 @@ class AndroidToolExecutor(
         const val MAX_INPUT_CHARS = 5000
         const val DEFAULT_QA_MATCHES = 20
         const val MAX_QA_MATCHES = 100
+        const val MAX_CANDIDATES = 15
+        const val MAX_LISTED_APPS = 200
+        const val DEFAULT_SETTLE_MS = 1_500
+        const val MAX_SETTLE_MS = 5_000
+        const val SETTLE_POLL_MS = 150L
+        const val SETTLE_QUIET_MS = 400L
         const val DEFAULT_QA_TIMEOUT_MS = 5_000
         const val MIN_QA_TIMEOUT_MS = 250
         const val MAX_QA_TIMEOUT_MS = 30_000
