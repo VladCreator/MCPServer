@@ -23,6 +23,16 @@ import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.SwipeVertical
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Rule
+import androidx.compose.material.icons.rounded.Compare
+import androidx.compose.material.icons.rounded.Gesture
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -47,6 +57,16 @@ fun toolIcon(name: String): ImageVector = when (name) {
     "input_text" -> Icons.Rounded.Keyboard
     "scroll" -> Icons.Rounded.SwipeVertical
     "global_action" -> Icons.Rounded.Navigation
+    "ui_find" -> Icons.Rounded.Search
+    "ui_wait" -> Icons.Rounded.Timer
+    "ui_assert" -> Icons.Rounded.Rule
+    "ui_diff" -> Icons.Rounded.Compare
+    "ui_gesture" -> Icons.Rounded.Gesture
+    "qa_session" -> Icons.Rounded.Checklist
+    "device_state" -> Icons.Rounded.Tune
+    "get_device_state" -> Icons.Rounded.Settings
+    "audio_instruction" -> Icons.Rounded.RecordVoiceOver
+    "audio_state" -> Icons.Rounded.GraphicEq
     "AuthSuccess" -> Icons.Rounded.VerifiedUser
     "AuthPending" -> Icons.Rounded.HourglassTop
     "ManualReject" -> Icons.Rounded.Block

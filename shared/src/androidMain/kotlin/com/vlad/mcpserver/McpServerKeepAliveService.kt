@@ -108,8 +108,13 @@ class McpServerKeepAliveService : Service() {
                 if (it.length > CHIP_MAX_CHARS) it.take(CHIP_MAX_CHARS - 1) + "…" else it
             } ?: "MCP live"
 
-            return Notification.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_notify_sync)
+            val builder = Notification.Builder(context, CHANNEL_ID)
+            if (activity == null) {
+                builder.setSmallIcon(android.R.drawable.stat_notify_sync)
+            } else {
+                builder.setSmallIcon(ToolIconBitmap.icon(activity.toolName))
+            }
+            return builder
                 .setContentTitle(title)
                 .setContentText(text)
                 .setSubText("MCP Server")
