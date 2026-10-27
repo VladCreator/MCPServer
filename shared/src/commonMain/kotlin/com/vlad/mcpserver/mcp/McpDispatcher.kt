@@ -24,7 +24,8 @@ import kotlinx.serialization.json.putJsonObject
 class McpDispatcher(
     private val tools: List<ToolDefinition> = McpTools.available(),
     private val executor: ToolExecutor,
-    private val onToolCall: suspend (ToolCallRecord) -> Unit = { }
+    private val onToolCall: suspend (ToolCallRecord) -> Unit = { },
+    private val platformLabel: String = "Android"
 ) {
 
     suspend fun handle(session: McpSession, payload: String): JsonElement? {
@@ -143,7 +144,7 @@ class McpDispatcher(
                 }
                 put(
                     "instructions",
-                    "Local Android MCP server. Use tools/list to discover the available device tools."
+                    "Local $platformLabel MCP server. Use tools/list to discover the available device tools."
                 )
             }
         )

@@ -9,7 +9,7 @@ actual fun createMcpServerHost(
     getToken: () -> String,
     isSslEnabled: () -> Boolean,
     shouldConfirmTools: () -> Boolean
-): McpServerHost = UnsupportedMcpServerHost()
+): McpServerHost = IosMcpServerHost(getToken, shouldConfirmTools)
 
 /**
  * iOS has no server implementation yet. This fallback keeps the shared

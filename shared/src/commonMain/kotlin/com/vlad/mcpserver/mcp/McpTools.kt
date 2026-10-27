@@ -50,7 +50,7 @@ object McpTools {
 
     val getDeviceInfo: ToolDefinition = ToolDefinition(
         name = "get_device_info",
-        description = "Return basic information about the Android device and the MCP server.",
+        description = "Return basic information about the device and the MCP server.",
         inputSchema = schema(emptyList()) { }
     )
 
@@ -430,6 +430,18 @@ object McpTools {
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
+
+    /**
+     * iOS is an embedded QA service, not a cross-app automation host. Only the
+     * tools that make sense for the host app are advertised.
+     */
+    fun iosAvailable(): List<ToolDefinition> = listOf(
+        getDeviceInfo,
+        qaSession,
+        audioInstruction,
+        audioState,
+        getDeviceState
+    ).filter { it.available }
 
     fun find(name: String): ToolDefinition? = available().firstOrNull { it.name == name }
 
