@@ -11,6 +11,9 @@ import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Swipe
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.PhoneAndroid
@@ -33,6 +36,9 @@ fun toolIcon(name: String): ImageVector = when (name) {
     "take_photo" -> Icons.Rounded.PhotoCamera
     "touch_test" -> Icons.Rounded.TouchApp
     "launch_app" -> Icons.Rounded.RocketLaunch
+    "swipe" -> Icons.Rounded.Swipe
+    "get_app_version" -> Icons.Rounded.Info
+    "get_logs" -> Icons.Rounded.BugReport
     "list_apps" -> Icons.Rounded.Apps
     "health_check" -> Icons.Rounded.HealthAndSafety
     "get_screen_tree" -> Icons.Rounded.AccountTree

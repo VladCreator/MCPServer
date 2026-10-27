@@ -183,6 +183,9 @@ icon in the header (**Tools**).
 | `create_notification` | Available | Posts a system notification. Requires the notification permission. |
 | `take_photo` | Available (foreground) | Captures a JPEG with CameraX and returns an MCP `image` content block plus the file path. The app must be in the foreground. |
 | `touch_test` | Available (accessibility) | Injects a tap at `x,y`. Requires the user to enable **MCP Touch Service** in Android accessibility settings. |
+| `swipe` | Touch Service | Swipe by direction/coordinates with `duration_ms` (speed), `distance`, `count`, `interval_ms`. |
+| `get_app_version` | Available | versionName/versionCode/install times of an installed app. |
+| `get_logs` | Touch-free, sensitive | Filtered logcat (`package_name`, `level`, `query`, `crashes`). Other apps' logs need `adb shell pm grant com.vlad.mcpserver android.permission.READ_LOGS`. |
 | `list_apps` | Available | Lists launchable apps (name + package), optional `query` filter. |
 | `health_check` | Available | Cheap probe: server time, uptime, version, Touch Service state. Use it to verify the connection and retry the transport on failure. |
 | `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name` or visible `app_name` (ambiguous names return candidates). From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). |
@@ -292,6 +295,8 @@ recovered/committed.
 
 ### Reliability notes
 
+- `global_action` accepts `count`/`interval_ms` (e.g. Back x2 repeated reliably).
+- `install_apk` and `screen_record` are intentionally not provided: Android requires an on-screen user confirmation (package installer / MediaProjection).
 - `take_screenshot` waits for the UI to settle (`settle_ms`, default 1500) and reports a capture timestamp and foreground package.
 - `click_element` refuses ambiguous matches: pass `nth` (0-based) or a more specific selector; candidates are listed.
 - `touch_test` failures explain the likely cause (no window, transition, screen off).

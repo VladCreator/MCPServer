@@ -73,6 +73,9 @@ class AndroidToolExecutor(
                 "take_photo" -> takePhoto()
                 "launch_app" -> launchApp(arguments)
                 "list_apps" -> listApps(arguments)
+                "swipe" -> swipe(arguments)
+                "get_app_version" -> appVersion(arguments)
+                "get_logs" -> logs(arguments)
                 "health_check" -> healthCheck()
                 "get_screen_tree" -> screenTree(arguments)
                 "take_screenshot" -> screenshot(arguments)
@@ -292,6 +295,100 @@ class AndroidToolExecutor(
             "ok\ntime=${java.time.Instant.now()}\nuptime_s=$uptimeSeconds\nversion=$versionName" +
                 "\ntouch_service=${McpTouchAccessibilityService.instance() != null}"
         )
+    }
+
+    private suspend fun swipe(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val metrics = context.resources.displayMetrics
+        val w = metrics.widthPixels.toFloat()
+        val h = metrics.heightPixels.toFloat()
+        val direction = arguments.string("direction")?.lowercase()
+        val fromX = arguments.float("from_x")
+        val fromY = arguments.float("from_y")
+        val toX = arguments.float("to_x")
+        val toY = arguments.float("to_y")
+        val (x1, y1, x2, y2) = if (direction != null) {
+            if (direction !in McpTools.SCROLL_DIRECTIONS) {
+                return ToolResult("direction must be one of ${McpTools.SCROLL_DIRECTIONS}.", isError = true)
+            }
+            val d = (arguments.float("distance") ?: 0.6f).coerceIn(0.1f, 0.9f)
+            val cx = fromX ?: (w / 2)
+            val cy = fromY ?: (h / 2)
+            when (direction) {
+                "up" -> listOf(cx, cy + h * d / 2, cx, cy - h * d / 2)
+                "down" -> listOf(cx, cy - h * d / 2, cx, cy + h * d / 2)
+                "left" -> listOf(cx + w * d / 2, cy, cx - w * d / 2, cy)
+                else -> listOf(cx - w * d / 2, cy, cx + w * d / 2, cy)
+            }
+        } else if (fromX != null && fromY != null && toX != null && toY != null) {
+            listOf(fromX, fromY, toX, toY)
+        } else {
+            return ToolResult("Provide direction or from_x, from_y, to_x, to_y.", isError = true)
+        }
+        if (listOf(x1, x2).any { it < 0f || it >= w } || listOf(y1, y2).any { it < 0f || it >= h }) {
+            return ToolResult("Swipe points are outside the screen (${w.toInt()}x${h.toInt()}).", isError = true)
+        }
+        val duration = (arguments.int("duration_ms") ?: 300).coerceIn(50, 5_000).toLong()
+        val count = (arguments.int("count") ?: 1).coerceIn(1, MAX_REPEAT)
+        val interval = (arguments.int("interval_ms") ?: DEFAULT_REPEAT_INTERVAL_MS).coerceIn(0, MAX_REPEAT_INTERVAL_MS).toLong()
+        var done = 0
+        repeat(count) { i ->
+            if (!service.swipe(x1, y1, x2, y2, duration)) {
+                return ToolResult(
+                    "Swipe ${i + 1}/$count was not performed ($done done): ${tapFailureReason(service)}",
+                    isError = true
+                )
+            }
+            done++
+            if (i < count - 1) delay(interval)
+        }
+        return ToolResult("Swiped (${x1.toInt()},${y1.toInt()}) -> (${x2.toInt()},${y2.toInt()}) in ${duration}ms x$done.")
+    }
+
+    private fun appVersion(arguments: JsonObject): ToolResult {
+        val pkg = arguments.string("package_name")
+            ?: return ToolResult("Missing required argument: package_name", isError = true)
+        if (!PACKAGE_NAME_REGEX.matches(pkg)) return ToolResult("Invalid package name: $pkg", isError = true)
+        val info = runCatching { context.packageManager.getPackageInfo(pkg, 0) }.getOrNull()
+            ?: return ToolResult("App '$pkg' is not installed or not visible.", isError = true)
+        return ToolResult(
+            "package=$pkg\nversionName=${info.versionName}\nversionCode=${info.longVersionCode}" +
+                "\nfirstInstall=${java.time.Instant.ofEpochMilli(info.firstInstallTime)}" +
+                "\nlastUpdate=${java.time.Instant.ofEpochMilli(info.lastUpdateTime)}"
+        )
+    }
+
+    private fun logs(arguments: JsonObject): ToolResult {
+        val lines = (arguments.int("lines") ?: 200).coerceIn(1, 1000)
+        val level = arguments.string("level")?.uppercase()?.take(1)?.takeIf { it in "VDIWEF" } ?: "I"
+        val query = arguments.string("query")
+        val pkg = arguments.string("package_name")
+        if (pkg != null && !PACKAGE_NAME_REGEX.matches(pkg)) {
+            return ToolResult("Invalid package name: $pkg", isError = true)
+        }
+        val command = mutableListOf("logcat", "-d", "-v", "threadtime", "-b", if (arguments.bool("crashes")) "crash" else "main")
+        if (pkg != null) {
+            val pids = runCatching {
+                ProcessBuilder("pidof", pkg).redirectErrorStream(true).start()
+                    .inputStream.bufferedReader().readText().trim().split(Regex("\\s+")).filter { it.all(Char::isDigit) && it.isNotEmpty() }
+            }.getOrDefault(emptyList())
+            if (pids.isEmpty()) {
+                return ToolResult("No running process found for '$pkg' (logs are filtered by live PID).", isError = true)
+            }
+            command += listOf("--pid", pids.first())
+        }
+        command += "*:$level"
+        return runCatching {
+            val process = ProcessBuilder(command).redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readLines()
+            process.waitFor()
+            val filtered = output.filter { query == null || it.contains(query, ignoreCase = true) }.takeLast(lines)
+            if (filtered.isEmpty()) {
+                ToolResult("No log lines matched. Other apps' logs require: adb shell pm grant ${context.packageName} android.permission.READ_LOGS")
+            } else {
+                ToolResult(filtered.joinToString("\n").take(MAX_LOG_CHARS))
+            }
+        }.getOrElse { ToolResult("Unable to read logs: ${it.message}", isError = true) }
     }
 
     private data class LaunchableApp(val label: String, val packageName: String)
@@ -548,7 +645,7 @@ class AndroidToolExecutor(
         return ToolResult("Scrolled $direction using $method.")
     }
 
-    private fun globalAction(arguments: JsonObject): ToolResult {
+    private suspend fun globalAction(arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val name = arguments.string("action")?.lowercase()
         val action = when (name) {
@@ -563,11 +660,20 @@ class AndroidToolExecutor(
                 isError = true
             )
         }
-        return if (service.performGlobalAction(action)) {
-            ToolResult("Performed global action '$name'.")
-        } else {
-            ToolResult("The system rejected global action '$name'.", isError = true)
+        val count = (arguments.int("count") ?: 1).coerceIn(1, MAX_REPEAT)
+        val interval = (arguments.int("interval_ms") ?: DEFAULT_REPEAT_INTERVAL_MS).coerceIn(0, MAX_REPEAT_INTERVAL_MS).toLong()
+        var done = 0
+        repeat(count) { i ->
+            if (!service.performGlobalAction(action)) {
+                return ToolResult(
+                    "The system rejected global action '$name' on attempt ${i + 1}/$count ($done done).",
+                    isError = true
+                )
+            }
+            done++
+            if (i < count - 1) delay(interval)
         }
+        return ToolResult("Performed global action '$name' x$done.")
     }
 
 
@@ -1111,6 +1217,10 @@ class AndroidToolExecutor(
         const val DEFAULT_QA_MATCHES = 20
         const val MAX_QA_MATCHES = 100
         const val MAX_CANDIDATES = 15
+        const val MAX_REPEAT = 50
+        const val DEFAULT_REPEAT_INTERVAL_MS = 300
+        const val MAX_REPEAT_INTERVAL_MS = 5_000
+        const val MAX_LOG_CHARS = 60_000
         const val MAX_LISTED_APPS = 200
         const val DEFAULT_SETTLE_MS = 1_500
         const val MAX_SETTLE_MS = 5_000

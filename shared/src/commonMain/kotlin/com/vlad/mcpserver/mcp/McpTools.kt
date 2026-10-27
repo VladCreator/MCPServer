@@ -260,18 +260,78 @@ object McpTools {
 
     val globalAction: ToolDefinition = ToolDefinition(
         name = "global_action",
-        description = "Perform a system navigation action. Requires MCP Touch Service.",
+        description = "Perform a system navigation action (back, home...), optionally repeated with a pause. Requires MCP Touch Service.",
         required = listOf("action"),
         inputSchema = schema(listOf("action")) {
             putJsonObject("action") {
                 put("type", "string")
                 putJsonArray("enum") { GLOBAL_ACTIONS.forEach { add(it) } }
             }
+            putJsonObject("count") {
+                put("type", "integer")
+                put("description", "Repeat the action this many times (1-50, default 1), e.g. back x2")
+            }
+            putJsonObject("interval_ms") {
+                put("type", "integer")
+                put("description", "Pause between repetitions in ms (default 300, max 5000)")
+            }
         },
         sensitive = true,
         requirement = "MCP Touch Service enabled"
     )
 
+
+    val swipe: ToolDefinition = ToolDefinition(
+        name = "swipe",
+        description = "Swipe across the screen by direction (finger movement: up, down, left, " +
+            "right) or between explicit coordinates. Control speed with duration_ms and length " +
+            "with distance (fraction of the screen, 0.1-0.9). Optionally repeat with count. " +
+            "Requires MCP Touch Service.",
+        inputSchema = schema(emptyList()) {
+            putJsonObject("direction") {
+                put("type", "string")
+                putJsonArray("enum") { SCROLL_DIRECTIONS.forEach { add(it) } }
+                put("description", "Direction the finger moves")
+            }
+            putJsonObject("from_x") { put("type", "integer") }
+            putJsonObject("from_y") { put("type", "integer") }
+            putJsonObject("to_x") { put("type", "integer") }
+            putJsonObject("to_y") { put("type", "integer") }
+            putJsonObject("distance") { put("type", "number"); put("description", "Fraction of the screen (default 0.6)") }
+            putJsonObject("duration_ms") { put("type", "integer"); put("description", "Gesture duration; smaller is faster (default 300, 50-5000)") }
+            putJsonObject("count") { put("type", "integer"); put("description", "Repeat 1-50 times (default 1)") }
+            putJsonObject("interval_ms") { put("type", "integer"); put("description", "Pause between repetitions (default 300)") }
+        },
+        sensitive = true,
+        requirement = "MCP Touch Service enabled"
+    )
+
+    val getAppVersion: ToolDefinition = ToolDefinition(
+        name = "get_app_version",
+        description = "Return versionName, versionCode and install/update times of an installed " +
+            "app (launchable apps and MCPServer itself).",
+        required = listOf("package_name"),
+        inputSchema = schema(listOf("package_name")) {
+            putJsonObject("package_name") { put("type", "string"); put("description", "Android package name") }
+        },
+        requirement = "None"
+    )
+
+    val getLogs: ToolDefinition = ToolDefinition(
+        name = "get_logs",
+        description = "Read recent logcat lines, optionally for one package and minimum level. " +
+            "Set crashes=true to read the crash buffer (use for crash logs). Reading other apps' " +
+            "logs needs: adb shell pm grant com.vlad.mcpserver android.permission.READ_LOGS",
+        inputSchema = schema(emptyList()) {
+            putJsonObject("package_name") { put("type", "string"); put("description", "Only lines from this app's running process") }
+            putJsonObject("level") { put("type", "string"); put("description", "Minimum level: V, D, I, W, E (default I)") }
+            putJsonObject("query") { put("type", "string"); put("description", "Only lines containing this text") }
+            putJsonObject("lines") { put("type", "integer"); put("description", "Max lines returned (default 200, max 1000)") }
+            putJsonObject("crashes") { put("type", "boolean"); put("description", "Read the crash buffer instead of main") }
+        },
+        sensitive = true,
+        requirement = "READ_LOGS granted via adb for other apps' logs"
+    )
 
     val qaSession: ToolDefinition = ToolDefinition(
         name = "qa_session",
@@ -457,6 +517,9 @@ object McpTools {
         inputText,
         scroll,
         globalAction,
+        swipe,
+        getAppVersion,
+        getLogs,
         qaSession,
         uiFind,
         uiWait,
