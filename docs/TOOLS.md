@@ -1,6 +1,9 @@
 # Supported tools — MCPServer 0.0.2
 
-MCPServer exposes **22 tools** over MCP (12 device tools + 10 QA-pack tools). All are available in this version.
+MCPServer exposes **22 tools** over MCP on Android (12 device tools + 10 QA-pack tools).
+The iOS QA service advertises a 5-tool subset (`get_device_info`, `qa_session`,
+`audio_instruction`, `audio_state`, `get_device_state`); see
+[`IOS_QA_SERVICE.md`](IOS_QA_SERVICE.md).
 
 In DeepSeek Harness the names are namespaced as
 `mcp__<serverName>__<toolName>`. With `serverName: android`:

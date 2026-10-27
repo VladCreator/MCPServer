@@ -10,7 +10,6 @@ import platform.UIKit.UIAccessibilityIsVoiceOverRunning
 import platform.UIKit.UIScreen
 import platform.UIKit.UIDevice
 import platform.UIKit.UIUserInterfaceStyle
-import platform.UIKit.UIDeviceOrientation
 
 /**
  * Reads the state a QA engineer needs to record on iOS. There is no
@@ -34,7 +33,7 @@ class IosDeviceStateReader {
             appendLine("App: ${NSBundle.mainBundle.bundleIdentifier ?: "unknown"} $appVersion")
             appendLine("Locale: ${NSLocale.currentLocale.localeIdentifier()}")
             appendLine("Dark mode: ${darkModeName(style)}")
-            appendLine("Orientation: ${orientationName(device.orientation)}")
+            appendLine("Orientation: ${device.orientation.toString().removePrefix("UIDeviceOrientation")}")
             appendLine("Display: $bounds @ ${scale}x")
             appendLine("Output volume: ~${(audio.outputVolume * 100).toInt()}%")
             appendLine("Other audio playing: ${audio.isOtherAudioPlaying()}")
@@ -50,11 +49,4 @@ class IosDeviceStateReader {
         else -> "unknown"
     }
 
-    private fun orientationName(orientation: UIDeviceOrientation): String = when (orientation) {
-        UIDeviceOrientation.UIDeviceOrientationPortrait -> "portrait"
-        UIDeviceOrientation.UIDeviceOrientationPortraitUpsideDown -> "reverse_portrait"
-        UIDeviceOrientation.UIDeviceOrientationLandscapeLeft -> "landscape_left"
-        UIDeviceOrientation.UIDeviceOrientationLandscapeRight -> "landscape_right"
-        else -> "unknown"
-    }
 }

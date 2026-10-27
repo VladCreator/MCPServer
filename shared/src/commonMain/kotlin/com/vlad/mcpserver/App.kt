@@ -1015,7 +1015,11 @@ private fun ToolsSheet(onDismiss: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val warning = LocalMcpExtraColors.current.warning
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val tools = McpTools.all
+    val tools = if (getPlatform().name.contains("iOS", ignoreCase = true)) {
+        McpTools.iosAvailable()
+    } else {
+        McpTools.all
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1104,6 +1108,7 @@ private fun SettingsSheet(
     onCopy: (String, String) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val isIos = getPlatform().name.contains("iOS", ignoreCase = true)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var tokenVisible by remember { mutableStateOf(false) }
     var copiedLabel by remember { mutableStateOf<String?>(null) }
@@ -1214,13 +1219,15 @@ private fun SettingsSheet(
                 checked = viewModel.confirmSensitiveTools,
                 onCheckedChange = viewModel::updateConfirmSensitiveTools
             )
-            SwitchRow(
-                title = "HTTPS / TLS",
-                subtitle = "Requires restarting the server.",
-                checked = viewModel.sslEnabled,
-                onCheckedChange = viewModel::updateSslEnabled,
-                enabled = status !is ServerStatus.Running && status !is ServerStatus.Starting
-            )
+            if (!isIos) {
+                SwitchRow(
+                    title = "HTTPS / TLS",
+                    subtitle = "Requires restarting the server.",
+                    checked = viewModel.sslEnabled,
+                    onCheckedChange = viewModel::updateSslEnabled,
+                    enabled = status !is ServerStatus.Running && status !is ServerStatus.Starting
+                )
+            }
             SwitchRow(
                 title = "Dark theme",
                 subtitle = "Use the deep obsidian palette.",
@@ -1228,38 +1235,48 @@ private fun SettingsSheet(
                 onCheckedChange = viewModel::updateDarkMode
             )
 
-            SheetDivider()
-            SectionLabel("Device access")
-            var touchServiceEnabled by remember { mutableStateOf(isTouchServiceEnabled()) }
-            var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted()) }
-            var writeSettingsGranted by remember { mutableStateOf(isWriteSettingsGranted()) }
-            // Re-check when returning from the system settings screens.
-            LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                touchServiceEnabled = isTouchServiceEnabled()
-                overlayGranted = isOverlayPermissionGranted()
-                writeSettingsGranted = isWriteSettingsGranted()
+            if (isIos) {
+                SheetDivider()
+                Text(
+                    text = "iOS QA service: it runs while the app is in the foreground. " +
+                        "UI interaction is handled by XCUITest; use iproxy for a physical device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
+                )
+            } else {
+                SheetDivider()
+                SectionLabel("Device access")
+                var touchServiceEnabled by remember { mutableStateOf(isTouchServiceEnabled()) }
+                var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted()) }
+                var writeSettingsGranted by remember { mutableStateOf(isWriteSettingsGranted()) }
+                // Re-check when returning from the system settings screens.
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                    touchServiceEnabled = isTouchServiceEnabled()
+                    overlayGranted = isOverlayPermissionGranted()
+                    writeSettingsGranted = isWriteSettingsGranted()
+                }
+                ActionRow(
+                    title = "Touch injection",
+                    subtitle = "Required for touch, screen reading and navigation tools.",
+                    action = "Open",
+                    onClick = viewModel::openTouchAccessibilitySettings,
+                    granted = touchServiceEnabled
+                )
+                ActionRow(
+                    title = "Display over other apps",
+                    subtitle = "Lets launch_app open apps while MCPServer is in the background.",
+                    action = "Open",
+                    onClick = viewModel::openOverlaySettings,
+                    granted = overlayGranted
+                )
+                ActionRow(
+                    title = "Modify system settings",
+                    subtitle = "Needed by device_state for rotation and font scale.",
+                    action = "Open",
+                    onClick = viewModel::openWriteSettings,
+                    granted = writeSettingsGranted
+                )
             }
-            ActionRow(
-                title = "Touch injection",
-                subtitle = "Required for touch, screen reading and navigation tools.",
-                action = "Open",
-                onClick = viewModel::openTouchAccessibilitySettings,
-                granted = touchServiceEnabled
-            )
-            ActionRow(
-                title = "Display over other apps",
-                subtitle = "Lets launch_app open apps while MCPServer is in the background.",
-                action = "Open",
-                onClick = viewModel::openOverlaySettings,
-                granted = overlayGranted
-            )
-            ActionRow(
-                title = "Modify system settings",
-                subtitle = "Needed by device_state for rotation and font scale.",
-                action = "Open",
-                onClick = viewModel::openWriteSettings,
-                granted = writeSettingsGranted
-            )
 
             SheetDivider()
             Text(
@@ -1281,6 +1298,7 @@ private fun ConnectionSheet(
     onCopy: (String, String) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val isIos = getPlatform().name.contains("iOS", ignoreCase = true)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showWebSocket by remember { mutableStateOf(false) }
     var showFingerprint by remember { mutableStateOf(false) }
@@ -1333,7 +1351,7 @@ private fun ConnectionSheet(
                 onCopy = { copyAndNotify("Endpoint", it) }
             )
             EndpointRow(
-                label = "USB / ADB (localhost)",
+                label = if (isIos) "USB / iproxy (localhost)" else "USB / ADB (localhost)",
                 value = viewModel.usbUrl,
                 onCopy = { copyAndNotify("USB endpoint", it) }
             )
@@ -1348,49 +1366,62 @@ private fun ConnectionSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "ADB port forward",
+                            text = if (isIos) "iproxy (physical device)" else "ADB port forward",
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.onSurfaceVariant
                         )
                         Text(
-                            text = viewModel.adbForwardCommand,
+                            text = if (isIos) "iproxy 8080 8080" else viewModel.adbForwardCommand,
                             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    IconButton(onClick = { copyAndNotify("ADB command", viewModel.adbForwardCommand) }) {
+                    IconButton(
+                        onClick = {
+                            copyAndNotify(
+                                if (isIos) "iproxy command" else "ADB command",
+                                if (isIos) "iproxy 8080 8080" else viewModel.adbForwardCommand
+                            )
+                        }
+                    ) {
                         Icon(
                             imageVector = Icons.Rounded.ContentCopy,
-                            contentDescription = "Copy ADB command",
+                            contentDescription = if (isIos) "Copy iproxy command" else "Copy ADB command",
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
             Text(
-                text = "USB: connect the device, run the ADB command on the computer, then use the localhost URL.",
+                text = if (isIos) {
+                    "Simulator: localhost works directly. Physical device: connect by USB, run iproxy, then use the localhost URL. The app must stay in the foreground."
+                } else {
+                    "USB: connect the device, run the ADB command on the computer, then use the localhost URL."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant
             )
-            EndpointRow(
-                label = "SSE (legacy)",
-                value = viewModel.sseUrl,
-                onCopy = { copyAndNotify("SSE endpoint", it) }
-            )
-
-            TextButton(onClick = { showWebSocket = !showWebSocket }) {
-                Text(
-                    text = if (showWebSocket) "Hide legacy WebSocket" else "Show legacy WebSocket",
-                    style = MaterialTheme.typography.labelMedium
-                )
-            }
-            if (showWebSocket) {
+            if (!isIos) {
                 EndpointRow(
-                    label = "WebSocket (legacy)",
-                    value = viewModel.wsUrl,
-                    onCopy = { copyAndNotify("WebSocket endpoint", it) }
+                    label = "SSE (legacy)",
+                    value = viewModel.sseUrl,
+                    onCopy = { copyAndNotify("SSE endpoint", it) }
                 )
+
+                TextButton(onClick = { showWebSocket = !showWebSocket }) {
+                    Text(
+                        text = if (showWebSocket) "Hide legacy WebSocket" else "Show legacy WebSocket",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                if (showWebSocket) {
+                    EndpointRow(
+                        label = "WebSocket (legacy)",
+                        value = viewModel.wsUrl,
+                        onCopy = { copyAndNotify("WebSocket endpoint", it) }
+                    )
+                }
             }
 
             HorizontalDivider(color = colors.outlineVariant)

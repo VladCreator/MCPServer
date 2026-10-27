@@ -17,6 +17,8 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import io.ktor.network.selector.SelectorManager
+import io.ktor.network.sockets.aSocket
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -112,6 +114,12 @@ class IosMcpServerHost(
     }
 
     private suspend fun startInternal() {
+        if (!isPortAvailable()) {
+            statusState.value = ServerStatus.Failed(
+                "Port $HTTP_PORT is already in use. Stop the other server and try again."
+            )
+            return
+        }
         val qaExecutor = IosQaToolExecutor { clientId, toolName, arguments ->
             requestToolApproval(clientId, toolName, arguments)
         }
@@ -127,6 +135,19 @@ class IosMcpServerHost(
         server.start(wait = false)
         engine = server
         statusState.value = ServerStatus.Running(port = HTTP_PORT, secure = false, fingerprint = null)
+    }
+
+    private suspend fun isPortAvailable(): Boolean {
+        val selector = SelectorManager(Dispatchers.Default)
+        return try {
+            val socket = aSocket(selector).tcp().bind("127.0.0.1", HTTP_PORT)
+            socket.close()
+            true
+        } catch (_: Throwable) {
+            false
+        } finally {
+            selector.close()
+        }
     }
 
     private fun Application.configureModule() {
