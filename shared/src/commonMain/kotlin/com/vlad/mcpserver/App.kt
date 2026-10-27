@@ -178,18 +178,13 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             Triple("Modify system settings", "Rotation and font scale in device_state", viewModel::openWriteSettings)
                         )
                     }
-                    if (!isIosPlatform && missingAccess.isNotEmpty()) {
-                        item(key = "missing-access") {
-                            MissingAccessCard(missingAccess)
-                        }
-                    }
-
                     item(key = "overview") {
                         // Width is resolved here because BoxWithConstraints cannot live inside
                         // FlowRow children that use fillMaxRowHeight (intrinsic measurement).
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                             val hasAgents = connectedClients.isNotEmpty()
-                            val sideBySide = hasAgents &&
+                            val hasMissing = !isIosPlatform && missingAccess.isNotEmpty()
+                            val sideBySide = (hasAgents || hasMissing) &&
                                 maxWidth >= OVERVIEW_CARD_MIN_WIDTH * 2 + OVERVIEW_GAP
                             val serverCardWidth = if (sideBySide) (maxWidth - OVERVIEW_GAP) / 2 else maxWidth
                             val compactServer = serverCardWidth < COMPACT_SERVER_CARD_WIDTH
@@ -213,6 +208,9 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                     compact = compactServer,
                                     modifier = cardModifier
                                 )
+                                if (hasMissing) {
+                                    MissingAccessCard(missingAccess, modifier = cardModifier)
+                                }
                                 if (hasAgents) {
                                     ConnectedAgentsCard(
                                         clients = connectedClients,
@@ -1651,10 +1649,13 @@ private fun SwitchRow(
 }
 
 @Composable
-private fun MissingAccessCard(items: List<Triple<String, String, () -> Unit>>) {
+private fun MissingAccessCard(
+    items: List<Triple<String, String, () -> Unit>>,
+    modifier: Modifier = Modifier.fillMaxWidth()
+) {
     val colors = MaterialTheme.colorScheme
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
