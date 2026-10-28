@@ -16,7 +16,6 @@ import platform.UIKit.UIButton
 import platform.UIKit.UIControlStateNormal
 import platform.UIKit.UIImage
 import platform.UIKit.UIImageJPEGRepresentation
-import platform.UIKit.UIImageView
 import platform.UIKit.UILabel
 import platform.UIKit.UISwitch
 import platform.UIKit.UITextField
@@ -25,6 +24,30 @@ import platform.UIKit.UIWindow
 import platform.UIKit.UIGraphicsImageRenderer
 import platform.UIKit.UIAccessibilityIdentificationProtocol
 import platform.UIKit.accessibilityLabel
+import platform.UIKit.accessibilityElementAtIndex
+import platform.UIKit.accessibilityElementCount
+import platform.UIKit.accessibilityElements
+import platform.UIKit.accessibilityFrame
+import platform.UIKit.accessibilityTraits
+import platform.UIKit.accessibilityValue
+import platform.UIKit.isAccessibilityElement
+import platform.UIKit.UIAccessibilityTraitAdjustable
+import platform.UIKit.UIAccessibilityTraitButton
+import platform.UIKit.UIAccessibilityTraitHeader
+import platform.UIKit.UIAccessibilityTraitImage
+import platform.UIKit.UIAccessibilityTraitLink
+import platform.UIKit.UIAccessibilityTraitNotEnabled
+import platform.UIKit.UIAccessibilityTraitSearchField
+import platform.UIKit.UIAccessibilityTraitSelected
+import platform.UIKit.UIAccessibilityTraitStaticText
+import platform.UIKit.UIControl
+import platform.CoreGraphics.CGRect
+import platform.Foundation.NSNotFound
+import platform.darwin.NSObject
+import platform.objc.class_getName
+import platform.objc.object_getClass
+import kotlinx.cinterop.CValue
+import kotlinx.cinterop.toKString
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -67,49 +90,139 @@ object IosQaLog {
 @OptIn(ExperimentalForeignApi::class)
 class IosWhiteBox {
 
-    fun screenTree(maxNodes: Int): ToolResult {
-        val window = keyWindow() ?: return ToolResult(
+    /**
+     * Walks the key window on the main thread. UIKit containers without content
+     * are collapsed; accessibility elements are included so Compose and SwiftUI
+     * content (which lives inside a single host view) is visible too.
+     */
+    suspend fun screenTree(maxNodes: Int): ToolResult = withContext(Dispatchers.Main) {
+        val window = keyWindow() ?: return@withContext ToolResult(
             "No key window is available for the Tester app.",
             isError = true
         )
         val limit = maxNodes.coerceIn(1, 1_000)
         val out = StringBuilder()
         var count = 0
+        var truncated = false
+        val visited = mutableSetOf<NSObject>()
         val bounds = window.bounds.useContents { "${size.width.toInt()}x${size.height.toInt()}" }
         out.appendLine("Own app view tree (iOS white-box)")
-        out.appendLine("Window: $bounds")
-        fun visit(view: UIView, depth: Int) {
-            if (count >= limit || view.isHidden()) return
+        out.appendLine("Window: $bounds (points)")
+
+        fun emit(depth: Int, line: String): Boolean {
+            if (count >= limit) {
+                truncated = true
+                return false
+            }
             count += 1
-            val frame = view.frame.useContents {
-                "[${origin.x.toInt()},${origin.y.toInt()}][${(origin.x + size.width).toInt()},${(origin.y + size.height).toInt()}]"
-            }
-            val label = when (view) {
-                is UILabel -> view.text
-                is UIButton -> view.titleForState(UIControlStateNormal)
-                is UITextField -> view.text
-                is UISwitch -> if (view.isOn()) "on" else "off"
-                is UIImageView -> view.accessibilityLabel()
-                else -> null
-            }
-            val desc = view.accessibilityLabel()
-            val id = (view as? UIAccessibilityIdentificationProtocol)?.accessibilityIdentifier()
-            val classLabel = view.toString().substringBefore('@').substringAfterLast('.')
-            out.append("  ".repeat(depth))
-            out.append(classLabel)
-            label?.takeIf { it.isNotBlank() }?.let { out.append(" \"").append(it.take(120)).append('"') }
-            desc?.takeIf { it.isNotBlank() && it != label }?.let { out.append(" desc=\"").append(it.take(120)).append('"') }
-            id?.takeIf { it.isNotBlank() }?.let { out.append(" id=").append(it) }
-            out.append(" bounds=").append(frame)
-            if (!view.isUserInteractionEnabled()) out.append(" disabled")
-            out.appendLine()
-            view.subviews.forEach { child ->
-                if (child is UIView) visit(child, depth + 1)
-            }
+            out.append("  ".repeat(depth)).appendLine(line)
+            return true
         }
-        visit(window, 0)
-        if (count == 0) out.appendLine("(no UIKit subviews; Compose/SwiftUI may expose a single host view)")
-        return ToolResult(out.toString().trimEnd())
+
+        fun visitElement(element: NSObject, depth: Int) {
+            if (count >= limit || !visited.add(element)) return
+            val children = accessibilityChildren(element)
+            var childDepth = depth
+            if (element.isAccessibilityElement() || describesContent(element)) {
+                if (!emit(depth, describeElement(element))) return
+                childDepth = depth + 1
+            }
+            children.forEach { visitElement(it, childDepth) }
+        }
+
+        fun visitView(view: UIView, depth: Int) {
+            if (count >= limit || view.isHidden() || view.alpha <= 0.01) return
+            val content = viewContent(view)
+            var childDepth = depth
+            if (content != null || view is UIControl || view == window) {
+                val frame = rectText(view.convertRect(view.bounds, toView = null))
+                val line = buildString {
+                    append(className(view))
+                    content?.let { append(it) }
+                    append(" bounds=").append(frame)
+                    if (!view.isUserInteractionEnabled()) append(" disabled")
+                }
+                if (!emit(depth, line)) return
+                childDepth = depth + 1
+            }
+            accessibilityChildren(view).forEach { visitElement(it, childDepth) }
+            view.subviews.forEach { child -> if (child is UIView) visitView(child, childDepth) }
+        }
+
+        visitView(window, 0)
+        if (truncated) out.appendLine("… truncated at $limit nodes (raise max_nodes)")
+        if (count <= 1) {
+            out.appendLine("(no visible content; if this is Compose, accessibility may not be ready yet)")
+        }
+        ToolResult(out.toString().trimEnd())
+    }
+
+    private fun viewContent(view: UIView): String? {
+        val text = when (view) {
+            is UILabel -> view.text
+            is UIButton -> view.titleForState(UIControlStateNormal)
+            is UITextField -> view.text
+            is UISwitch -> if (view.isOn()) "on" else "off"
+            else -> null
+        }
+        val desc = view.accessibilityLabel()
+        val id = (view as? UIAccessibilityIdentificationProtocol)?.accessibilityIdentifier()
+        if (text.isNullOrBlank() && desc.isNullOrBlank() && id.isNullOrBlank()) return null
+        return buildString {
+            text?.takeIf { it.isNotBlank() }?.let { append(" \"").append(it.take(120)).append('"') }
+            desc?.takeIf { it.isNotBlank() && it != text }?.let { append(" desc=\"").append(it.take(120)).append('"') }
+            id?.takeIf { it.isNotBlank() }?.let { append(" id=").append(it) }
+        }
+    }
+
+    private fun describesContent(element: NSObject): Boolean =
+        !element.accessibilityLabel().isNullOrBlank() ||
+            !element.accessibilityValue().isNullOrBlank() ||
+            !(element as? UIAccessibilityIdentificationProtocol)?.accessibilityIdentifier().isNullOrBlank()
+
+    private fun describeElement(element: NSObject): String = buildString {
+        val traits = element.accessibilityTraits()
+        append(roleOf(traits))
+        element.accessibilityLabel()?.takeIf { it.isNotBlank() }?.let {
+            append(" \"").append(it.take(120)).append('"')
+        }
+        element.accessibilityValue()?.takeIf { it.isNotBlank() }?.let {
+            append(" value=\"").append(it.take(120)).append('"')
+        }
+        (element as? UIAccessibilityIdentificationProtocol)?.accessibilityIdentifier()
+            ?.takeIf { it.isNotBlank() }?.let { append(" id=").append(it) }
+        append(" bounds=").append(rectText(element.accessibilityFrame()))
+        if (traits and UIAccessibilityTraitSelected != 0uL) append(" selected")
+        if (traits and UIAccessibilityTraitNotEnabled != 0uL) append(" disabled")
+    }
+
+    private fun roleOf(traits: ULong): String = when {
+        traits and UIAccessibilityTraitButton != 0uL -> "Button"
+        traits and UIAccessibilityTraitLink != 0uL -> "Link"
+        traits and UIAccessibilityTraitHeader != 0uL -> "Header"
+        traits and UIAccessibilityTraitSearchField != 0uL -> "SearchField"
+        traits and UIAccessibilityTraitImage != 0uL -> "Image"
+        traits and UIAccessibilityTraitAdjustable != 0uL -> "Adjustable"
+        traits and UIAccessibilityTraitStaticText != 0uL -> "Text"
+        else -> "Element"
+    }
+
+    private fun accessibilityChildren(element: NSObject): List<NSObject> {
+        element.accessibilityElements()?.let { list ->
+            return list.mapNotNull { it as? NSObject }
+        }
+        val total = element.accessibilityElementCount()
+        if (total <= 0L || total == NSNotFound) return emptyList()
+        return (0 until minOf(total, 1_000L)).mapNotNull {
+            element.accessibilityElementAtIndex(it) as? NSObject
+        }
+    }
+
+    private fun className(target: NSObject): String =
+        object_getClass(target)?.let { class_getName(it)?.toKString() }?.substringAfterLast('.') ?: "UIView"
+
+    private fun rectText(rect: CValue<CGRect>): String = rect.useContents {
+        "[${origin.x.toInt()},${origin.y.toInt()}][${(origin.x + size.width).toInt()},${(origin.y + size.height).toInt()}]"
     }
 
     suspend fun screenshot(maxDimension: Int): ToolResult = withContext(Dispatchers.Main) {

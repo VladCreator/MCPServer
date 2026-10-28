@@ -16,10 +16,10 @@ apps. Real UI interaction remains in XCUITest on the Mac.
 | `get_device_state` | Same QA state snapshot used for evidence. |
 | `health_check` | Platform, app/server version, foreground state, camera permission, Documents path. |
 | `read_file` | Read UTF-8 text inside the Tester sandbox (max 64 KB). |
-| `create_notification` | Post a local notification after user permission. |
+| `create_notification` | Post a local notification after user permission; shown as a banner even while Tester is in the foreground. |
 | `take_photo` | Capture a JPEG with the device camera; simulator has no camera. |
 | `get_app_version` | Version/build/install dates for Tester (other app bundles are not readable). |
-| `get_screen_tree` | Own-app UIKit view tree (white-box; Compose/SwiftUI may expose a host view only). |
+| `get_screen_tree` | Own-app tree (white-box): UIKit views with content plus accessibility elements, so Compose/SwiftUI content appears with role, label, value, id and screen bounds. Empty containers are collapsed. |
 | `take_screenshot` | Own-app JPEG screenshot of the Tester window. |
 | `get_logs` | In-memory Tester QA log (tool calls); other app logs need the host. |
 | `qa_session` | `begin` / `step` / `status` / `end`; JSON + Markdown report in the app container. |

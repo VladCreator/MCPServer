@@ -295,7 +295,7 @@ with a five-tool, localhost-only QA service.
 - The app does not advertise itself over mDNS/Bonjour or show a QR code yet.
 - Self-signed TLS requires client trust; for production, use a proper certificate or
   pin the fingerprint.
-- The iOS QA service runs only while the app is in the foreground and exposes 10 tools.
+- The iOS QA service runs only while the app is in the foreground and exposes 13 tools.
   For cross-app simulator screenshots, configure the separate
   [Mac-side screenshot MCP bridge](docs/IOS_SIMULATOR.md).
   Physical-device XCUITest, `iproxy`, the host gateway and Keychain token storage are

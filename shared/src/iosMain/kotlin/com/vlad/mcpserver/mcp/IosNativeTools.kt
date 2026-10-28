@@ -47,8 +47,14 @@ import platform.UIKit.UIApplication
 import platform.UserNotifications.UNAuthorizationOptionAlert
 import platform.UserNotifications.UNAuthorizationOptionSound
 import platform.UserNotifications.UNMutableNotificationContent
+import platform.UserNotifications.UNNotification
+import platform.UserNotifications.UNNotificationPresentationOptionBanner
+import platform.UserNotifications.UNNotificationPresentationOptionList
+import platform.UserNotifications.UNNotificationPresentationOptionSound
+import platform.UserNotifications.UNNotificationPresentationOptions
 import platform.UserNotifications.UNNotificationRequest
 import platform.UserNotifications.UNUserNotificationCenter
+import platform.UserNotifications.UNUserNotificationCenterDelegateProtocol
 import platform.darwin.NSObject
 
 @OptIn(ExperimentalForeignApi::class)
@@ -133,12 +139,36 @@ class IosAppInfo {
         NSDateFormatter().apply { dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX" }.stringFromDate(date)
 }
 
+/**
+ * iOS hides notifications while the app is in the foreground unless a delegate
+ * opts in. Tester is usually foreground while serving, so always present them.
+ */
+private class ForegroundNotificationDelegate : NSObject(), UNUserNotificationCenterDelegateProtocol {
+    override fun userNotificationCenter(
+        center: UNUserNotificationCenter,
+        willPresentNotification: UNNotification,
+        withCompletionHandler: (UNNotificationPresentationOptions) -> Unit
+    ) {
+        withCompletionHandler(
+            UNNotificationPresentationOptionBanner or
+                UNNotificationPresentationOptionList or
+                UNNotificationPresentationOptionSound
+        )
+    }
+}
+
+// The notification center keeps only a weak reference to its delegate.
+private val foregroundNotificationDelegate = ForegroundNotificationDelegate()
+
 @OptIn(ExperimentalForeignApi::class)
 class IosNotificationController {
 
     suspend fun post(title: String, message: String): ToolResult {
         if (title.isBlank()) return ToolResult("Missing required argument: title", isError = true)
         val center = UNUserNotificationCenter.currentNotificationCenter()
+        withContext(Dispatchers.Main) {
+            if (center.delegate == null) center.delegate = foregroundNotificationDelegate
+        }
         val granted = CompletableDeferred<Boolean>()
         center.requestAuthorizationWithOptions(
             UNAuthorizationOptionAlert or UNAuthorizationOptionSound

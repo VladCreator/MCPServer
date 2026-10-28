@@ -4,7 +4,9 @@
 import importlib.util
 import json
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("gateway", Path(__file__).with_name("qa_gateway_mcp.py"))
@@ -12,7 +14,7 @@ gateway = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gateway)
 
 
-class FakeBackend:
+class FakeBackend(gateway.ReconnectMixin):
     def __init__(self):
         self.name = "ios"
         self.platform = "ios"
@@ -91,6 +93,131 @@ class GatewayTests(unittest.TestCase):
         })
         self.assertTrue(result["result"]["isError"])
         self.assertIn("Unknown backend", result["result"]["content"][0]["text"])
+
+
+class FlakyBackend(FakeBackend):
+    """Offline until `online` is set; raises SessionLost once when `expire` is set."""
+
+    def __init__(self):
+        super().__init__()
+        self.connected = False
+        self.online = False
+        self.expire = False
+        self.connects = 0
+
+    def connect(self):
+        self.connects += 1
+        self.connected = self.online
+        self.error = None if self.online else "ios: unreachable"
+        return self.connected
+
+    def call(self, tool, arguments):
+        if not self.connected:
+            raise gateway.BackendError(self.error)
+        if self.expire:
+            self.expire = False
+            raise gateway.SessionLost("ios: session expired")
+        return super().call(tool, arguments)
+
+
+class ReconnectTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.backend = FlakyBackend()
+        self.gateway = gateway.Gateway([self.backend], self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_offline_backend_reconnects_on_next_call(self):
+        self.assertNotIn("ios__get_device_state", [tool["name"] for tool in self.gateway.tools()])
+        with self.assertRaises(gateway.BackendError):
+            self.gateway.call("ios__get_device_state", {})
+        self.backend.online = True
+        result = self.gateway.call("ios__get_device_state", {})
+        self.assertFalse(result["isError"])
+        self.assertEqual([{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}],
+                         self.gateway.drain_notifications())
+        self.assertIn("ios__get_device_state", [tool["name"] for tool in self.gateway.tools()])
+
+    def test_session_lost_reconnects_and_retries_once(self):
+        self.backend.online = True
+        self.gateway.call("ios__get_device_state", {})
+        connects = self.backend.connects
+        self.backend.expire = True
+        result = self.gateway.call("ios__get_device_state", {})
+        self.assertFalse(result["isError"])
+        self.assertEqual(connects + 1, self.backend.connects)
+        self.assertEqual(2, len(self.backend.calls))
+
+    def test_reconnect_attempts_are_rate_limited_for_listing(self):
+        self.gateway.tools()
+        self.gateway.tools()
+        self.assertEqual(1, self.backend.connects)
+
+
+class FakeMcpServer(BaseHTTPRequestHandler):
+    """Minimal Streamable HTTP MCP server; `restart()` forgets all sessions."""
+
+    sessions = set()
+    counter = 0
+
+    def log_message(self, *args):
+        pass
+
+    def do_DELETE(self):
+        self.send_response(204)
+        self.end_headers()
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        session = self.headers.get("Mcp-Session-Id")
+        if body.get("method") == "initialize":
+            FakeMcpServer.counter += 1
+            session = f"s{FakeMcpServer.counter}"
+            FakeMcpServer.sessions.add(session)
+            reply = {"jsonrpc": "2.0", "id": body["id"], "result": {"protocolVersion": "2025-06-18"}}
+        elif session not in FakeMcpServer.sessions:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Session not found")
+            return
+        elif "id" not in body:
+            self.send_response(202)
+            self.end_headers()
+            return
+        elif body["method"] == "tools/list":
+            reply = {"jsonrpc": "2.0", "id": body["id"], "result": {"tools": [{"name": "ping_tool"}]}}
+        else:
+            reply = {"jsonrpc": "2.0", "id": body["id"],
+                     "result": {"content": [{"type": "text", "text": session}], "isError": False}}
+        data = json.dumps(reply).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Mcp-Session-Id", session)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+class HttpReconnectTests(unittest.TestCase):
+    def setUp(self):
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeMcpServer)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{self.server.server_address[1]}/mcp"
+        self.temp = tempfile.TemporaryDirectory()
+        self.gateway = gateway.Gateway([gateway.HttpBackend("android", "android", url, timeout=5)], self.temp.name)
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temp.cleanup()
+
+    def test_backend_restart_is_transparent(self):
+        first = self.gateway.call("android__ping_tool", {})["content"][0]["text"]
+        FakeMcpServer.sessions.clear()
+        second = self.gateway.call("android__ping_tool", {})["content"][0]["text"]
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":

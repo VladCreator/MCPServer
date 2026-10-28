@@ -17,8 +17,28 @@ PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
 GATEWAY_VERSION = "0.1.5"
 
 
+RECONNECT_INTERVAL_S = 2.0
+
+
 class BackendError(Exception):
     pass
+
+
+class SessionLost(BackendError):
+    """The backend no longer knows our session (restart/expiry); the call was not executed."""
+
+
+class ReconnectMixin:
+    last_attempt = 0.0
+
+    def ensure_connected(self, force=False):
+        if self.connected:
+            return True
+        now = time.monotonic()
+        if not force and now - self.last_attempt < RECONNECT_INTERVAL_S:
+            return False
+        self.last_attempt = now
+        return self.connect()
 
 
 def iso_now():
@@ -30,7 +50,7 @@ def truncate(value, limit=500):
     return text[:limit]
 
 
-class HttpBackend:
+class HttpBackend(ReconnectMixin):
     def __init__(self, name, platform, url, token=None, token_env=None, headers=None, timeout=60):
         self.name = name
         self.platform = platform
@@ -64,9 +84,14 @@ class HttpBackend:
                 return self._parse(body, content_type), session
         except urllib.error.HTTPError as error:
             body = error.read().decode(errors="replace")
+            error.close()
+            if error.code == 404 and self.session_id:
+                raise SessionLost(f"{self.name}: session expired (HTTP 404)") from error
             raise BackendError(f"{self.name}: HTTP {error.code}: {body[:500]}") from error
-        except urllib.error.URLError as error:
-            raise BackendError(f"{self.name}: unreachable at {self.url}: {error.reason}") from error
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
+            self.connected = False
+            self.error = f"{self.name}: unreachable at {self.url}: {getattr(error, 'reason', error)}"
+            raise BackendError(self.error) from error
 
     @staticmethod
     def _parse(body, content_type):
@@ -79,6 +104,9 @@ class HttpBackend:
         return json.loads(body)
 
     def connect(self):
+        self.close()
+        self.session_id = None
+        self.tools = []
         try:
             reply, session = self._post({
                 "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -114,11 +142,13 @@ class HttpBackend:
             raise BackendError(f"{self.name}: empty response")
         if "error" in reply:
             message = reply["error"].get("message", "unknown error")
+            if "not initialized" in message.lower():
+                raise SessionLost(f"{self.name}: {message}")
             raise BackendError(f"{self.name}: {message}")
         return reply.get("result", {})
 
     def close(self):
-        if self.session_id:
+        if self.session_id and self.connected:
             try:
                 request = urllib.request.Request(
                     self.url, method="DELETE", headers=self._headers()
@@ -128,7 +158,7 @@ class HttpBackend:
                 pass
 
 
-class StdioBackend:
+class StdioBackend(ReconnectMixin):
     def __init__(self, name, platform, command, args=None, env=None, timeout=120):
         self.name = name
         self.platform = platform
@@ -144,7 +174,9 @@ class StdioBackend:
 
     def _request(self, payload):
         if not self.process or self.process.poll() is not None:
-            raise BackendError(f"{self.name}: stdio process is not running")
+            self.connected = False
+            self.error = f"{self.name}: stdio process is not running"
+            raise BackendError(self.error)
         self.process.stdin.write(json.dumps(payload) + "\n")
         self.process.stdin.flush()
         deadline = time.monotonic() + self.timeout
@@ -154,7 +186,9 @@ class StdioBackend:
                 continue
             line = self.process.stdout.readline()
             if not line:
-                raise BackendError(f"{self.name}: stdio process closed stdout")
+                self.connected = False
+                self.error = f"{self.name}: stdio process closed stdout"
+                raise BackendError(self.error)
             line = line.strip()
             if not line:
                 continue
@@ -167,6 +201,8 @@ class StdioBackend:
         raise BackendError(f"{self.name}: timeout waiting for MCP response")
 
     def connect(self):
+        self.close()
+        self.tools = []
         try:
             self.process = subprocess.Popen(
                 [self.command] + self.args,
@@ -265,20 +301,38 @@ class Gateway:
         self.backends = backends
         self.report_dir = Path(report_dir)
         self.session = None
-        self.started = False
+        self.notifications = []
+        self._signature = None
 
-    def start(self):
-        if self.started:
-            return
+    def _tool_signature(self):
+        return tuple(
+            (backend.name, backend.connected, tuple(tool.get("name") for tool in backend.tools))
+            for backend in self.backends
+        )
+
+    def _note_changes(self):
+        signature = self._tool_signature()
+        if self._signature is not None and signature != self._signature:
+            self.notifications.append({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+        self._signature = signature
+
+    def start(self, force=False):
+        """Connect backends that are down; retried on later calls (rate-limited)."""
         for backend in self.backends:
-            backend.connect()
-        self.started = True
+            if not backend.connected:
+                backend.ensure_connected(force=force)
+        self._note_changes()
+
+    def drain_notifications(self):
+        pending, self.notifications = self.notifications, []
+        return pending
 
     def backend(self, name):
         return next((backend for backend in self.backends if backend.name == name), None)
 
-    def capabilities(self):
-        self.start()
+    def capabilities(self, connect=True):
+        if connect:
+            self.start(force=True)
         return {
             "gateway_version": GATEWAY_VERSION,
             "backends": [
@@ -386,16 +440,21 @@ class Gateway:
             return self._text(json.dumps(self.capabilities(), indent=2))
         if name == "qa_session":
             return self.qa_session(arguments)
-        self.start()
         if "__" not in name:
             raise BackendError(f"Unknown gateway tool: {name}")
         prefix, tool = name.split("__", 1)
         backend = self.backend(prefix)
         if not backend:
             raise BackendError(f"Unknown backend: {prefix}")
+        backend.ensure_connected(force=True)
         start = time.monotonic()
         try:
-            result = backend.call(tool, arguments)
+            try:
+                result = backend.call(tool, arguments)
+            except SessionLost:
+                if not backend.connect():
+                    raise BackendError(backend.error or f"{prefix}: reconnect failed")
+                result = backend.call(tool, arguments)
             if self.session:
                 self.session.add_call(prefix, tool, arguments, True, int((time.monotonic() - start) * 1000))
             return result
@@ -403,6 +462,8 @@ class Gateway:
             if self.session:
                 self.session.add_call(prefix, tool, arguments, False, int((time.monotonic() - start) * 1000), str(failure))
             raise
+        finally:
+            self._note_changes()
 
     def _report(self):
         if not self.session:
@@ -416,7 +477,7 @@ class Gateway:
             "notes": self.session.notes,
             "steps": self.session.steps,
             "tool_calls": self.session.calls,
-            "backends": self.capabilities()["backends"],
+            "backends": self.capabilities(connect=False)["backends"],
         }
 
     @staticmethod
@@ -493,7 +554,7 @@ def handle(gateway, request):
         version = params.get("protocolVersion")
         result = {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[-1],
-            "capabilities": {"tools": {"listChanged": False}},
+            "capabilities": {"tools": {"listChanged": True}},
             "serverInfo": {"name": "Tester QA Gateway", "version": GATEWAY_VERSION},
             "instructions": "Unified QA gateway. Use qa_capabilities, then <backend>__<tool>.",
         }
@@ -532,6 +593,8 @@ def main():
                 response = handle(gateway, request)
             if response is not None:
                 print(json.dumps(response), flush=True)
+            for notification in gateway.drain_notifications():
+                print(json.dumps(notification), flush=True)
     finally:
         gateway.close()
 

@@ -138,7 +138,7 @@ duration/success/error.
 - Gateway `tools/list`: 2 gateway + backend tools.
 - Gateway QA session: begin → proxied call → end; report contains the tool call.
 - `qa_capabilities`: iOS native connected with 13 tools; iOS UI connected with 14.
-- 13 Python unit tests pass; Android still has 40 passing tests.
+- 17 Python unit tests pass, including reconnect and session-loss tests; Android host tests pass.
 - Appium 3.9.0, XCUITest 12.22.0, Xcode 27.1, iPhone 17 simulator.
 
 Android live backend and physical iOS were not tested in this pass.
@@ -146,7 +146,11 @@ Android live backend and physical iOS were not tested in this pass.
 ## Limitations
 
 - The gateway is a local stdio process; it does not expose a network port.
-- Start order matters: backends and Appium before the first gateway tool call.
+- Backends may start in any order. An offline backend is retried on the next
+  call to one of its tools, on `qa_capabilities`, and on `tools/list` (at most
+  every 2 s). When a backend restarts and loses the session (HTTP 404 or
+  "not initialized"), the gateway reconnects and retries the call once. Changes
+  in the backend tool list are announced with `notifications/tools/list_changed`.
 - Backend approvals remain on the device/app; the gateway does not bypass them.
 - The gateway report does not replace device screenshots/logs; it references
   proxied results and steps.

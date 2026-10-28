@@ -8,6 +8,7 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
+import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
@@ -129,7 +130,17 @@ class IosMcpServerHost(
             onToolCall = { record -> eventFlow.tryEmit(ServerEvent.ToolCalled(record)) },
             platformLabel = "iOS QA"
         )
-        val server = embeddedServer(CIO, port = HTTP_PORT, host = "127.0.0.1") {
+        // reuseAddress lets a quick restart bind while old connections are in TIME_WAIT.
+        val server = embeddedServer(
+            CIO,
+            configure = {
+                connector {
+                    host = "127.0.0.1"
+                    port = HTTP_PORT
+                }
+                reuseAddress = true
+            }
+        ) {
             configureModule()
         }
         server.start(wait = false)
@@ -140,7 +151,9 @@ class IosMcpServerHost(
     private suspend fun isPortAvailable(): Boolean {
         val selector = SelectorManager(Dispatchers.Default)
         return try {
-            val socket = aSocket(selector).tcp().bind("127.0.0.1", HTTP_PORT)
+            val socket = aSocket(selector).tcp().bind("127.0.0.1", HTTP_PORT) {
+                reuseAddress = true
+            }
             socket.close()
             true
         } catch (_: Throwable) {
