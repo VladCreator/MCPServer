@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.1.2** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.1.3** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -16,6 +16,10 @@ Current version: **0.1.2** (Android QA pack complete; iOS embedded QA service im
   `http://localhost:8080/mcp` from the computer; no Wi-Fi needed.
 - **iOS QA service**: embedded MCP service on `127.0.0.1:8080` with 13 iOS tools
   (state, QA session, English TTS). See [`docs/IOS_QA_SERVICE.md`](docs/IOS_QA_SERVICE.md).
+- **iOS UI bridge (0.1.3)**: Appium/XCUITest host bridge with 14 UI tools for the
+  simulator; see [`docs/IOS_UI_BRIDGE.md`](docs/IOS_UI_BRIDGE.md) and
+  [`docs/APPIUM_SETUP.md`](docs/APPIUM_SETUP.md). Start/stop Appium with
+  `tools/appium_ios_ctl.sh`.
 - **JSON-RPC 2.0** dispatcher: `initialize`, `notifications/initialized`, `ping`,
   `tools/list`, `tools/call`, batching and standard error codes.
 - **Hybrid authentication**: `Authorization: Bearer <token>` or manual approval from
