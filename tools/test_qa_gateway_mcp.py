@@ -220,5 +220,14 @@ class HttpReconnectTests(unittest.TestCase):
         self.assertNotEqual(first, second)
 
 
+class UnreachableHintTests(unittest.TestCase):
+    def test_hints(self):
+        url = "http://127.0.0.1:8081/mcp"
+        self.assertIn("ios_tunnel.py --check --local-port 8081", gateway.unreachable_hint(url, TimeoutError("timed out")))
+        self.assertIn("nothing listens on Mac port 8081", gateway.unreachable_hint(url, ConnectionRefusedError()))
+        self.assertIn("Start server", gateway.unreachable_hint(url, ConnectionResetError()))
+        self.assertEqual("", gateway.unreachable_hint("http://10.0.0.5:8080/mcp", TimeoutError()))
+
+
 if __name__ == "__main__":
     unittest.main()

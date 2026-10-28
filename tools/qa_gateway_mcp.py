@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -50,6 +51,29 @@ def truncate(value, limit=500):
     return text[:limit]
 
 
+CONNECT_TIMEOUT_S = 10
+
+
+def unreachable_hint(url, reason):
+    """Explain the usual cause of an unreachable local backend."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+        return ""
+    port = parsed.port
+    text = str(reason).lower()
+    if isinstance(reason, ConnectionRefusedError) or "refused" in text:
+        return (f" | Hint: nothing listens on Mac port {port}. Start the tunnel"
+                f" (iproxy / tools/ios_tunnel.py, or adb forward) or the simulator app.")
+    if isinstance(reason, TimeoutError) or "timed out" in text:
+        return (f" | Hint: port {port} accepts connections but nothing answers. Unlock the device and"
+                f" keep Tester in front with the server Live; if it still times out the iproxy tunnel is"
+                f" stale: run `python3 tools/ios_tunnel.py --check --local-port {port} --udid <udid>`.")
+    if isinstance(reason, ConnectionResetError) or "reset" in text:
+        return (" | Hint: the tunnel is up but Tester is not serving on the device. Unlock it, open Tester"
+                " and tap Start server.")
+    return ""
+
+
 class HttpBackend(ReconnectMixin):
     def __init__(self, name, platform, url, token=None, token_env=None, headers=None, timeout=60):
         self.name = name
@@ -72,12 +96,12 @@ class HttpBackend(ReconnectMixin):
         headers.update(self.headers)
         return headers
 
-    def _post(self, payload):
+    def _post(self, payload, timeout=None):
         request = urllib.request.Request(
             self.url, data=json.dumps(payload).encode(), method="POST", headers=self._headers()
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:
                 body = response.read().decode()
                 session = response.headers.get("Mcp-Session-Id", self.session_id)
                 content_type = response.headers.get("Content-Type", "")
@@ -90,7 +114,8 @@ class HttpBackend(ReconnectMixin):
             raise BackendError(f"{self.name}: HTTP {error.code}: {body[:500]}") from error
         except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
             self.connected = False
-            self.error = f"{self.name}: unreachable at {self.url}: {getattr(error, 'reason', error)}"
+            reason = getattr(error, "reason", error)
+            self.error = f"{self.name}: unreachable at {self.url}: {reason}{unreachable_hint(self.url, reason)}"
             raise BackendError(self.error) from error
 
     @staticmethod
@@ -115,7 +140,7 @@ class HttpBackend(ReconnectMixin):
                     "capabilities": {},
                     "clientInfo": {"name": "Tester QA Gateway", "version": GATEWAY_VERSION},
                 },
-            })
+            }, timeout=min(self.timeout, CONNECT_TIMEOUT_S))
             if not reply or "error" in reply:
                 raise BackendError(f"{self.name}: initialize failed: {reply}")
             self.session_id = session or reply.get("result", {}).get("sessionId")

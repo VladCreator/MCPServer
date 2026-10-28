@@ -104,6 +104,29 @@ A simulator running Tester (or `adb forward` for Android) also uses Mac port
 example `iproxy 8081:8080 -u <device-udid>`, and point that gateway backend at
 `http://127.0.0.1:8081/mcp`.
 
+### Keeping the tunnel healthy
+
+An `iproxy` tunnel can go stale: it keeps the port but stops forwarding, so
+calls time out and a new `iproxy` fails with "Address already in use". Use the
+supervisor instead of plain `iproxy`:
+
+```bash
+python3 tools/ios_tunnel.py --udid <device-udid> --local-port 8081 --replace
+```
+
+It starts `iproxy`, probes Tester every 10 s, prints status changes, restarts
+`iproxy` when it exits or after two timed-out probes (at most every 30 s), and
+with `--replace` stops an old `iproxy` holding the port. To diagnose once:
+
+```bash
+python3 tools/ios_tunnel.py --check --local-port 8081 --udid <device-udid>
+```
+
+It names the process holding the port and compares with a temporary fresh
+tunnel, so the verdict says whether the tunnel is stale or the device side
+(locked device, Tester in the background, server off) is not answering. The
+gateway's `unreachable` errors include the same hints.
+
 Requirements:
 
 - A development team/provisioning profile to install the app on the physical

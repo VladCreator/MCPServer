@@ -162,6 +162,9 @@ class ToolFailure(Exception):
 
 STALE_SESSION_MARKERS = (
     "invalid session id",
+    "session does not exist",
+    "no such driver",
+    "nosuchdrivererror",
     "session is either terminated or not started",
     "a session is either terminated",
     "not authorized for performing ui testing actions",

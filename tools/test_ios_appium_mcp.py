@@ -127,6 +127,11 @@ class SessionRecoveryTests(unittest.TestCase):
         self.assertEqual(2, server.created)
         self.assertEqual(["s1"], server.deleted)
 
+    def test_session_does_not_exist_is_recovered(self):
+        server = FakeServer(["Appium HTTP 404: Session does not exist"])
+        app = FakeAppium(server)
+        self.assertEqual("/session/s2/source", app.call("GET", "/source")["value"])
+
     def test_other_errors_are_not_retried(self):
         app = FakeAppium(FakeServer(["Appium HTTP 404: An element could not be located"]))
         with self.assertRaises(bridge.ToolFailure):

@@ -18,11 +18,14 @@ AI client (DSH)
 | Name | Transport | Start first |
 |---|---|---|
 | `android` | Streamable HTTP | Android app + `adb forward tcp:18080 tcp:8080` |
-| `ios` | Streamable HTTP | iOS app + simulator, or `iproxy` for physical |
+| `ios` | Streamable HTTP | iOS app + simulator, or `tools/ios_tunnel.py` (`iproxy`) for physical |
 | `ios-ui` | stdio | Appium server + simulator + app installed |
 
 The gateway does not start Android, iOS, `iproxy` or Appium; start them first.
-It does start the configured stdio bridge process.
+It does start the configured stdio bridge process. When a local backend is
+unreachable, its error includes a hint (nothing listening, tunnel stale or
+device locked, or Tester not serving); see
+[Keeping the tunnel healthy](IOS_QA_SERVICE.md#keeping-the-tunnel-healthy).
 
 ## Configuration
 
@@ -138,7 +141,8 @@ duration/success/error.
 - Gateway `tools/list`: 2 gateway + backend tools.
 - Gateway QA session: begin → proxied call → end; report contains the tool call.
 - `qa_capabilities`: iOS native connected with 13 tools; iOS UI connected with 14.
-- 17 Python unit tests pass, including reconnect and session-loss tests; Android host tests pass.
+- 28 Python unit tests pass (gateway reconnect/session loss and unreachable hints,
+  Appium session sharing/recovery, tunnel supervisor); Android host tests pass.
 - Appium 3.9.0, XCUITest 12.22.0, Xcode 27.1, iPhone 17 simulator.
 
 Android live backend and physical iOS were not tested in this pass.
