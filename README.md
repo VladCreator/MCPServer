@@ -20,6 +20,9 @@ Current version: **0.1.3** (Android QA pack complete; iOS embedded QA service im
   simulator; see [`docs/IOS_UI_BRIDGE.md`](docs/IOS_UI_BRIDGE.md) and
   [`docs/APPIUM_SETUP.md`](docs/APPIUM_SETUP.md). Start/stop Appium with
   `tools/appium_ios_ctl.sh`.
+- **QA Gateway (0.1.5)**: one stdio MCP gateway for Android native, iOS native and
+  the iOS UI bridge, with `qa_capabilities` and one cross-platform `qa_session`
+  report. See [`docs/QA_GATEWAY.md`](docs/QA_GATEWAY.md).
 - **JSON-RPC 2.0** dispatcher: `initialize`, `notifications/initialized`, `ping`,
   `tools/list`, `tools/call`, batching and standard error codes.
 - **Hybrid authentication**: `Authorization: Bearer <token>` or manual approval from

@@ -1,0 +1,32 @@
+{
+  "backends": [
+    {
+      "name": "android",
+      "platform": "android",
+      "transport": "http",
+      "url": "http://127.0.0.1:18080/mcp",
+      "token_env": "ANDROID_MCP_TOKEN"
+    },
+    {
+      "name": "ios",
+      "platform": "ios",
+      "transport": "http",
+      "url": "http://127.0.0.1:8080/mcp",
+      "token_env": "IOS_MCP_TOKEN"
+    },
+    {
+      "name": "ios-ui",
+      "platform": "ios",
+      "transport": "stdio",
+      "command": "python3",
+      "args": [
+        "/ABSOLUTE/PATH/MCPServer/tools/ios_appium_mcp.py",
+        "--udid",
+        "SIMULATOR-UDID",
+        "--bundle-id",
+        "com.vlad.mcpserver"
+      ]
+    }
+  ],
+  "report_dir": "qa-reports"
+}
