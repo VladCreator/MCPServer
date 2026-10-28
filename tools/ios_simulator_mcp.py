@@ -78,7 +78,7 @@ def handle(request, udid):
         result = {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[-1],
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "Tester iOS Simulator", "version": "0.1.0"},
+            "serverInfo": {"name": "Tester iOS Simulator", "version": "0.1.5"},
             "instructions": (
                 f"Screenshot bridge for simulator {udid}. "
                 "Use the separate Tester iOS connection for qa_session and audio."

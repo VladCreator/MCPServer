@@ -645,7 +645,7 @@ def handle(app, request):
         result = {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[-1],
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "Tester iOS UI Bridge", "version": "0.1.3"},
+            "serverInfo": {"name": "Tester iOS UI Bridge", "version": "0.1.5"},
             "instructions": "Appium/XCUITest UI bridge for one iOS app. Use get_screen_tree first.",
         }
     elif method == "ping":

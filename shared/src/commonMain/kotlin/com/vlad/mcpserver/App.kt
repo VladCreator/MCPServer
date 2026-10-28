@@ -118,7 +118,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
 
     val clipboardManager = LocalClipboardManager.current
 
-    val isIosPlatform = getPlatform().name.contains("iOS", ignoreCase = true)
+    val isIosPlatform = getPlatform().isIos
     var touchServiceEnabled by remember { mutableStateOf(isTouchServiceEnabled()) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted()) }
     var writeSettingsGranted by remember { mutableStateOf(isWriteSettingsGranted()) }
@@ -1041,7 +1041,7 @@ private fun ToolsSheet(onDismiss: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val warning = LocalMcpExtraColors.current.warning
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val tools = if (getPlatform().name.contains("iOS", ignoreCase = true)) {
+    val tools = if (getPlatform().isIos) {
         McpTools.iosAvailable()
     } else {
         McpTools.all
@@ -1134,7 +1134,7 @@ private fun SettingsSheet(
     onCopy: (String, String) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val isIos = getPlatform().name.contains("iOS", ignoreCase = true)
+    val isIos = getPlatform().isIos
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var tokenVisible by remember { mutableStateOf(false) }
     var copiedLabel by remember { mutableStateOf<String?>(null) }
@@ -1306,7 +1306,7 @@ private fun SettingsSheet(
 
             SheetDivider()
             Text(
-                text = "Tester 0.1.3 · Streamable HTTP, SSE and local tools",
+                text = "Tester 0.1.5 · Streamable HTTP, SSE and local tools",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp)
@@ -1324,7 +1324,7 @@ private fun ConnectionSheet(
     onCopy: (String, String) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val isIos = getPlatform().name.contains("iOS", ignoreCase = true)
+    val isIos = getPlatform().isIos
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showWebSocket by remember { mutableStateOf(false) }
     var showFingerprint by remember { mutableStateOf(false) }

@@ -2,6 +2,9 @@ package com.vlad.mcpserver
 
 interface Platform {
     val name: String
+
+    /** True on iPhone and iPad; do not infer this from [name] ("iPadOS" on iPad). */
+    val isIos: Boolean
 }
 
 expect fun getPlatform(): Platform
