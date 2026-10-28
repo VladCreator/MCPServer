@@ -1306,7 +1306,7 @@ private fun SettingsSheet(
 
             SheetDivider()
             Text(
-                text = "Tester 0.1.1 · Streamable HTTP, SSE and local tools",
+                text = "Tester 0.1.2 · Streamable HTTP, SSE and local tools",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp)

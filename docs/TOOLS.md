@@ -1,8 +1,9 @@
-# Supported tools — Tester 0.1.1
+# Supported tools — Tester 0.1.2
 
 Tester exposes **27 tools** over MCP on Android (17 device tools + 10 QA-pack tools).
-The iOS QA service advertises a 10-tool subset: `get_device_info`, `health_check`,
-`read_file`, `create_notification`, `take_photo`, `get_app_version`, `qa_session`,
+The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
+`read_file`, `create_notification`, `take_photo`, `get_app_version`,
+`get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
 `audio_instruction`, `audio_state`, `get_device_state`; see
 [`IOS_QA_SERVICE.md`](IOS_QA_SERVICE.md).
 

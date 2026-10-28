@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.1.1** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.1.2** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -14,7 +14,7 @@ Current version: **0.1.1** (Android QA pack complete; iOS embedded QA service im
 - **WebSocket** at `/mcp` (and the `/ws` alias) for legacy/custom clients.
 - **USB / ADB connection**: run `adb forward tcp:8080 tcp:8080` and use
   `http://localhost:8080/mcp` from the computer; no Wi-Fi needed.
-- **iOS QA service**: embedded MCP service on `127.0.0.1:8080` with 10 iOS tools
+- **iOS QA service**: embedded MCP service on `127.0.0.1:8080` with 13 iOS tools
   (state, QA session, English TTS). See [`docs/IOS_QA_SERVICE.md`](docs/IOS_QA_SERVICE.md).
 - **JSON-RPC 2.0** dispatcher: `initialize`, `notifications/initialized`, `ping`,
   `tools/list`, `tools/call`, batching and standard error codes.
@@ -53,7 +53,7 @@ so the dashboard stays readable instead of stretching across a large screen.
 | ![Settings](docs/screenshots/settings.png) | ![Tablet](docs/screenshots/tablet.png) |
 | **Tools catalog** | **USB / ADB connection** |
 | ![Tools](docs/screenshots/tools.png) | ![USB](docs/screenshots/connect-usb.png) |
-| **iOS QA service** | **iOS tools (10)** |
+| **iOS QA service** | **iOS tools (13)** |
 | ![iOS](docs/screenshots/ios-dashboard.png) | iOS exposes the state/session/audio subset |
 
 Settings, endpoints and the TLS fingerprint live in sheets so the dashboard only shows

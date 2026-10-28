@@ -24,6 +24,7 @@ class IosQaToolExecutor(
     private val notifications = IosNotificationController()
     private val camera = IosCameraController(files)
     private val health = IosHealthCheck(appInfo, files)
+    private val whiteBox = IosWhiteBox()
 
     override suspend fun execute(
         clientId: String,
@@ -31,8 +32,10 @@ class IosQaToolExecutor(
         arguments: JsonObject
     ): ToolResult {
         if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, arguments)) {
+            IosQaLog.add("tool=$toolName rejected")
             return ToolResult("User rejected the tool call.", isError = true)
         }
+        IosQaLog.add("tool=$toolName")
         return when (toolName) {
             "get_device_info" -> ToolResult(device.readText())
             "get_device_state" -> ToolResult(device.readText())
@@ -44,6 +47,9 @@ class IosQaToolExecutor(
             )
             "take_photo" -> camera.capture()
             "get_app_version" -> appInfo.version(arguments.string("package_name"))
+            "get_screen_tree" -> whiteBox.screenTree(arguments.int("max_nodes") ?: 300)
+            "take_screenshot" -> whiteBox.screenshot(arguments.int("max_dimension") ?: 1280)
+            "get_logs" -> whiteBox.logs(arguments)
             "qa_session" -> qaSession(arguments)
             "audio_instruction" -> audioInstruction(arguments)
             "audio_state" -> withContext(Dispatchers.Main) { audio.state() }
