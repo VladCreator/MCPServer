@@ -3,7 +3,9 @@
 
 import argparse
 import base64
+import contextlib
 import datetime
+import fcntl
 import json
 import sys
 import time
@@ -13,6 +15,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
+DEFAULT_STATE_DIR = Path.home() / ".cache" / "tester-appium"
 SELECTOR_PROPERTIES = {
     "index": {"type": "integer", "description": "Element index in the returned tree"},
     "text": {"type": "string", "description": "Label/name/value contains text"},
@@ -157,9 +160,52 @@ class ToolFailure(Exception):
     pass
 
 
+STALE_SESSION_MARKERS = (
+    "invalid session id",
+    "session is either terminated or not started",
+    "a session is either terminated",
+    "not authorized for performing ui testing actions",
+    'previously found element "application',
+    "could not proxy command to the remote server",
+    "socket hang up",
+    "econnrefused",
+)
+
+
+def is_stale_session_error(message):
+    text = message.lower()
+    return any(marker in text for marker in STALE_SESSION_MARKERS)
+
+
+def device_hint(message):
+    if "not authorized for performing ui testing actions" in str(message).lower():
+        return (" | Device action needed: unlock the device and keep it unlocked, and enable"
+                " Settings > Developer > Enable UI Automation. This is an iOS restriction,"
+                " not a Tester error.")
+    return ""
+
+
+def signing_capabilities(xcode_org_id=None, xcode_signing_id=None, wda_bundle_id=None,
+                         show_xcode_log=False):
+    """WebDriverAgent signing capabilities needed for physical devices."""
+    capabilities = {}
+    if xcode_org_id:
+        capabilities["appium:xcodeOrgId"] = xcode_org_id
+        capabilities["appium:xcodeSigningId"] = xcode_signing_id or "Apple Development"
+        capabilities["appium:allowProvisioningDeviceRegistration"] = True
+        capabilities["appium:wdaLaunchTimeout"] = 240000
+        capabilities["appium:wdaConnectionTimeout"] = 240000
+    if wda_bundle_id:
+        capabilities["appium:updatedWDABundleId"] = wda_bundle_id
+    if show_xcode_log:
+        capabilities["appium:showXcodeLog"] = True
+    return capabilities
+
+
 class Appium:
     def __init__(self, base_url, udid, bundle_id, app=None, session_id=None,
-                 device_name=None, platform_version=None):
+                 device_name=None, platform_version=None, signing=None):
+        self.signing = signing or {}
         self.base_url = base_url.rstrip("/")
         self.udid = udid
         self.bundle_id = bundle_id
@@ -167,6 +213,7 @@ class Appium:
         self.session_id = session_id
         self.device_name = device_name
         self.platform_version = platform_version
+        self.state_dir = DEFAULT_STATE_DIR
 
     def request(self, method, path, payload=None, timeout=60):
         data = None if payload is None else json.dumps(payload).encode()
@@ -184,13 +231,32 @@ class Appium:
                 message = value.get("message") if isinstance(value, dict) else value
             except Exception:
                 message = body[:500]
-            raise ToolFailure(f"Appium HTTP {error.code}: {message or body[:500]}") from error
+            raise ToolFailure(f"Appium HTTP {error.code}: {message or body[:500]}{device_hint(message or body)}") from error
         except urllib.error.URLError as error:
             raise ToolFailure(f"Appium is not reachable at {self.base_url}: {error.reason}") from error
 
-    def ensure_session(self):
-        if self.session_id:
+    def ensure_session(self, exclude=None):
+        """Return a session, sharing one per device across bridge processes.
+
+        Every chat starts its own gateway and bridge. A second XCUITest session on
+        the same device makes iOS revoke the first one ("Not authorized for
+        performing UI testing actions"), so bridges reuse the session recorded in
+        a per-device state file instead of creating their own.
+        """
+        if self.session_id and self.session_id != exclude:
             return self.session_id
+        with self.session_lock():
+            shared = self.read_shared_session()
+            if shared and shared != exclude and self.session_alive(shared):
+                self.session_id = shared
+                return shared
+            for stale in {exclude, shared} - {None}:
+                self.delete_session(stale)
+            self.session_id = self.create_session()
+            self.write_shared_session(self.session_id)
+            return self.session_id
+
+    def create_session(self):
         capabilities = {
             "platformName": "iOS",
             "appium:automationName": "XCUITest",
@@ -206,12 +272,69 @@ class Appium:
             capabilities["appium:deviceName"] = self.device_name
         if self.platform_version:
             capabilities["appium:platformVersion"] = self.platform_version
-        result = self.request("POST", "/session", {"capabilities": {"alwaysMatch": capabilities}}, timeout=180)
-        self.session_id = result["value"]["sessionId"]
-        return self.session_id
+        capabilities.update(signing_capabilities(**self.signing))
+        result = self.request("POST", "/session", {"capabilities": {"alwaysMatch": capabilities}}, timeout=600)
+        return result["value"]["sessionId"]
+
+    def session_alive(self, sid):
+        try:
+            self.request("GET", f"/session/{sid}/timeouts", timeout=15)
+            return True
+        except (ToolFailure, OSError):
+            return False
+
+    def delete_session(self, sid):
+        try:
+            self.request("DELETE", f"/session/{sid}", timeout=30)
+        except (ToolFailure, OSError):
+            pass
+
+    def state_file(self):
+        if self.state_dir is None:
+            return None
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.udid)
+        return Path(self.state_dir) / f"{safe}.json"
+
+    @contextlib.contextmanager
+    def session_lock(self):
+        path = self.state_file()
+        if path is None:
+            yield
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path.with_suffix(".lock"), "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def read_shared_session(self):
+        path = self.state_file()
+        if path is None or not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+        return data.get("session_id") if data.get("appium_url") == self.base_url else None
+
+    def write_shared_session(self, sid):
+        path = self.state_file()
+        if path is not None:
+            path.write_text(json.dumps({"appium_url": self.base_url, "session_id": sid}))
 
     def call(self, method, endpoint, payload=None, timeout=60):
         sid = self.ensure_session()
+        try:
+            return self.request(method, f"/session/{sid}{endpoint}", payload, timeout)
+        except ToolFailure as failure:
+            if not is_stale_session_error(str(failure)):
+                raise
+        # The session died (device locked, WDA restarted, idle timeout): adopt a
+        # newer shared session or create one, then retry once.
+        self.session_id = None
+        sid = self.ensure_session(exclude=sid)
         return self.request(method, f"/session/{sid}{endpoint}", payload, timeout)
 
     def source(self):
@@ -677,9 +800,22 @@ def main():
     parser.add_argument("--session-id", default=None)
     parser.add_argument("--device-name", default=None)
     parser.add_argument("--platform-version", default=None)
+    parser.add_argument("--xcode-org-id", default=None,
+                        help="Apple Team ID used to sign WebDriverAgent (physical devices)")
+    parser.add_argument("--xcode-signing-id", default=None,
+                        help='Signing identity, default "Apple Development"')
+    parser.add_argument("--wda-bundle-id", default=None,
+                        help="Unique WebDriverAgent bundle id for your team")
+    parser.add_argument("--show-xcode-log", action="store_true")
     args = parser.parse_args()
+    signing = {
+        "xcode_org_id": args.xcode_org_id,
+        "xcode_signing_id": args.xcode_signing_id,
+        "wda_bundle_id": args.wda_bundle_id,
+        "show_xcode_log": args.show_xcode_log,
+    }
     app = Appium(args.appium_url, args.udid, args.bundle_id, args.app,
-                 args.session_id, args.device_name, args.platform_version)
+                 args.session_id, args.device_name, args.platform_version, signing)
     for line in sys.stdin:
         if not line.strip():
             continue

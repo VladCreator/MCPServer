@@ -101,7 +101,17 @@ Not exercised in this pass:
 ## Limitations
 
 - Appium must be installed and running; it is not bundled in the app.
-- Simulator only in this phase; physical devices need signing/WDA (0.1.4).
+- Physical devices: add `--xcode-org-id <TEAM_ID>` (and optionally
+  `--wda-bundle-id`, `--xcode-signing-id`, `--show-xcode-log`) so Appium can sign
+  and install WebDriverAgent. Verified on an iPhone with iOS 26.6.1.
+- If WebDriverAgent loses its session or UI-testing authorization (device
+  locked, WDA restarted, idle timeout), the bridge creates a new session and
+  retries the call once. Keep the device unlocked while testing.
+- Each chat starts its own gateway and bridge. A second XCUITest session on the
+  same device makes iOS revoke the first one ("Not authorized for performing UI
+  testing actions"), so bridges share one Appium session per device through
+  `~/.cache/tester-appium/<udid>.json` (with a file lock). The shared session
+  keeps the bundle id of the bridge that created it; use `launch_app` to switch.
 - Compose/SwiftUI accessibility output can be sparse; prefer stable labels and
   accessibility identifiers in the app under test.
 - `take_screenshot` is full-resolution PNG; `max_dimension` is not applied.

@@ -94,10 +94,15 @@ The service binds to localhost. To reach it from the Mac over USB:
 
 ```bash
 brew install libimobiledevice
-iproxy 8080 8080 <device-udid>
+iproxy 8080:8080 -u <device-udid>
 ```
 
 Then use `http://127.0.0.1:8080/mcp` on the Mac.
+
+A simulator running Tester (or `adb forward` for Android) also uses Mac port
+8080. To keep both available, forward the device to another local port, for
+example `iproxy 8081:8080 -u <device-udid>`, and point that gateway backend at
+`http://127.0.0.1:8081/mcp`.
 
 Requirements:
 

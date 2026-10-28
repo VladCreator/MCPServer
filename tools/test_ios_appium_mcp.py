@@ -3,6 +3,7 @@
 
 import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -77,6 +78,87 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(1, json.loads(text)["count"])
         unknown = bridge.handle(FakeApp(), {"jsonrpc": "2.0", "id": 4, "method": "unknown"})
         self.assertEqual(-32601, unknown["error"]["code"])
+
+
+class FakeServer:
+    def __init__(self, failures=()):
+        self.failures = list(failures)
+        self.created = 0
+        self.alive = set()
+        self.deleted = []
+
+
+class FakeAppium(bridge.Appium):
+    def __init__(self, server, state_dir=None):
+        super().__init__("http://appium", "udid-1", "com.example")
+        self.server = server
+        self.state_dir = state_dir
+
+    def request(self, method, path, payload=None, timeout=60):
+        server = self.server
+        if method == "POST" and path == "/session":
+            server.created += 1
+            sid = f"s{server.created}"
+            server.alive.add(sid)
+            return {"value": {"sessionId": sid}}
+        sid = path.split("/")[2]
+        if method == "DELETE":
+            server.deleted.append(sid)
+            server.alive.discard(sid)
+            return {}
+        if sid not in server.alive:
+            raise bridge.ToolFailure("Appium HTTP 404: invalid session id")
+        if path.endswith("/timeouts"):
+            return {"value": {}}
+        if server.failures:
+            raise bridge.ToolFailure(server.failures.pop(0))
+        return {"value": path}
+
+
+class SessionRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_stale_session_is_recreated_once(self):
+        server = FakeServer(["Appium HTTP 404: ... Original error: Not authorized for performing UI testing actions."])
+        app = FakeAppium(server)
+        self.assertEqual("/session/s2/source", app.call("GET", "/source")["value"])
+        self.assertEqual(2, server.created)
+        self.assertEqual(["s1"], server.deleted)
+
+    def test_other_errors_are_not_retried(self):
+        app = FakeAppium(FakeServer(["Appium HTTP 404: An element could not be located"]))
+        with self.assertRaises(bridge.ToolFailure):
+            app.call("GET", "/element")
+        self.assertEqual(1, app.server.created)
+
+    def test_bridges_share_one_session_per_device(self):
+        server = FakeServer()
+        first = FakeAppium(server, self.tmp.name)
+        second = FakeAppium(server, self.tmp.name)
+        first.call("GET", "/source")
+        second.call("GET", "/source")
+        self.assertEqual(1, server.created)
+        self.assertEqual("s1", second.session_id)
+
+    def test_bridge_adopts_session_recreated_by_another(self):
+        server = FakeServer()
+        first = FakeAppium(server, self.tmp.name)
+        second = FakeAppium(server, self.tmp.name)
+        first.call("GET", "/source")
+        second.call("GET", "/source")
+        server.alive.discard("s1")
+        first.call("GET", "/source")
+        self.assertEqual("/session/s2/source", second.call("GET", "/source")["value"])
+        self.assertEqual(2, server.created)
+
+    def test_signing_capabilities(self):
+        caps = bridge.signing_capabilities("TEAM", None, "com.x.WDA")
+        self.assertEqual("TEAM", caps["appium:xcodeOrgId"])
+        self.assertEqual("Apple Development", caps["appium:xcodeSigningId"])
+        self.assertEqual("com.x.WDA", caps["appium:updatedWDABundleId"])
+        self.assertEqual({}, bridge.signing_capabilities())
 
 
 if __name__ == "__main__":

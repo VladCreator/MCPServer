@@ -170,7 +170,7 @@ See [`IOS_UI_BRIDGE.md`](IOS_UI_BRIDGE.md) for capabilities and limits.
 | `Element was not found` | `get_screen_tree`; use accessibility labels/identifiers |
 | Session already exists | Appium supports one session per device; delete it or use `--session-id` |
 | `input_text` fails | Field may not expose a settable value; tap it first or use XCUITest |
-| Physical device | Signing, `iproxy`, and WDA signing are 0.1.4; not covered here |
+| Physical device | Pass `--xcode-org-id <TEAM_ID> --wda-bundle-id com.<you>.WebDriverAgentRunner` to `ios_appium_mcp.py`; trust the developer on the device; first build can take minutes |
 
 ## Is there already a Python command?
 
