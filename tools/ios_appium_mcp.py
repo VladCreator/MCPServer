@@ -197,7 +197,7 @@ def signing_capabilities(xcode_org_id=None, xcode_signing_id=None, wda_bundle_id
         capabilities["appium:xcodeSigningId"] = xcode_signing_id or "Apple Development"
         capabilities["appium:allowProvisioningDeviceRegistration"] = True
         capabilities["appium:wdaLaunchTimeout"] = 240000
-        capabilities["appium:wdaConnectionTimeout"] = 240000
+        capabilities["appium:wdaConnectionTimeout"] = 60000
     if wda_bundle_id:
         capabilities["appium:updatedWDABundleId"] = wda_bundle_id
     if show_xcode_log:

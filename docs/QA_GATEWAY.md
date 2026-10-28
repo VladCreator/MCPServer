@@ -141,7 +141,7 @@ duration/success/error.
 - Gateway `tools/list`: 2 gateway + backend tools.
 - Gateway QA session: begin → proxied call → end; report contains the tool call.
 - `qa_capabilities`: iOS native connected with 13 tools; iOS UI connected with 14.
-- 28 Python unit tests pass (gateway reconnect/session loss and unreachable hints,
+- 29 Python unit tests pass (gateway reconnect/session loss and unreachable hints,
   Appium session sharing/recovery, tunnel supervisor); Android host tests pass.
 - Appium 3.9.0, XCUITest 12.22.0, Xcode 27.1, iPhone 17 simulator.
 

@@ -198,12 +198,19 @@ class StdioBackend(ReconnectMixin):
         self.error = None
 
     def _request(self, payload):
+        # A dead process means the request was never sent, so the gateway may
+        # safely restart the bridge and retry (SessionLost).
         if not self.process or self.process.poll() is not None:
             self.connected = False
             self.error = f"{self.name}: stdio process is not running"
-            raise BackendError(self.error)
-        self.process.stdin.write(json.dumps(payload) + "\n")
-        self.process.stdin.flush()
+            raise SessionLost(self.error)
+        try:
+            self.process.stdin.write(json.dumps(payload) + "\n")
+            self.process.stdin.flush()
+        except (BrokenPipeError, OSError) as error:
+            self.connected = False
+            self.error = f"{self.name}: stdio process is not running"
+            raise SessionLost(self.error) from error
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
             ready, _, _ = select.select([self.process.stdout], [], [], max(0.1, deadline - time.monotonic()))
@@ -282,6 +289,12 @@ class StdioBackend(ReconnectMixin):
             except Exception:
                 try:
                     self.process.kill()
+                except Exception:
+                    pass
+            for stream in (self.process.stdin, self.process.stdout):
+                try:
+                    if stream:
+                        stream.close()
                 except Exception:
                     pass
             self.process = None

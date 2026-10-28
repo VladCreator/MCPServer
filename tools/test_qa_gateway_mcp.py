@@ -3,6 +3,7 @@
 
 import importlib.util
 import json
+import sys
 import tempfile
 import threading
 import unittest
@@ -227,6 +228,39 @@ class UnreachableHintTests(unittest.TestCase):
         self.assertIn("nothing listens on Mac port 8081", gateway.unreachable_hint(url, ConnectionRefusedError()))
         self.assertIn("Start server", gateway.unreachable_hint(url, ConnectionResetError()))
         self.assertEqual("", gateway.unreachable_hint("http://10.0.0.5:8080/mcp", TimeoutError()))
+
+
+FAKE_STDIO_BRIDGE = """
+import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    if "id" not in msg:
+        continue
+    method = msg["method"]
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "ping", "inputSchema": {"type": "object"}}]}
+    else:
+        result = {"content": [{"type": "text", "text": "pong"}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}), flush=True)
+"""
+
+
+class StdioRestartTests(unittest.TestCase):
+    def test_dead_bridge_is_restarted_and_call_retried(self):
+        backend = gateway.StdioBackend("ui", "ios", sys.executable, ["-c", FAKE_STDIO_BRIDGE], timeout=10)
+        gw = gateway.Gateway([backend], tempfile.mkdtemp())
+        self.addCleanup(backend.close)
+        gw.start()
+        self.assertTrue(backend.connected)
+        first = backend.process
+        first.kill()
+        first.wait()
+        result = gw.call("ui__ping", {})
+        self.assertFalse(result.get("isError"))
+        self.assertIsNot(first, backend.process)
+        self.assertIsNone(backend.process.poll())
 
 
 if __name__ == "__main__":
