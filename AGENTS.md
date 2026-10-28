@@ -1,4 +1,4 @@
-# AGENTS.md - Tester (Version 0.1.0)
+# AGENTS.md - Tester (Version 0.1.1)
 
 ## Project Objective
 Tester (repository/package `MCPServer` / `com.vlad.mcpserver`) is an Android (Kotlin Multiplatform) application designed to act as a Model Context Protocol (MCP) server host on mobile devices. 
@@ -27,7 +27,7 @@ Its primary objectives are:
 - **Language**: All source code, variable names, functions, classes, and code comments must be written strictly in **English**.
 
 ## Architecture & Versioning
-- **Version**: 0.1.0
+- **Version**: 0.1.1
 - **Platform**: Kotlin Multiplatform (Android primary target)
 - **UI Framework**: Jetpack Compose Multiplatform
 - **Communication Protocol**: MCP over SSE / WebSockets / HTTP for AI client connections.

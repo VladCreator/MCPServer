@@ -556,6 +556,11 @@ object McpTools {
      */
     fun iosAvailable(): List<ToolDefinition> = listOf(
         getDeviceInfo,
+        healthCheck,
+        readFile,
+        createNotification,
+        takePhoto,
+        getAppVersion,
         qaSession,
         audioInstruction,
         audioState,

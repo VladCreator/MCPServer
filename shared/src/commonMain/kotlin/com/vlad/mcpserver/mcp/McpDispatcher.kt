@@ -292,7 +292,7 @@ class McpDispatcher(
             "2024-11-05"
         )
         const val SERVER_NAME = "Tester"
-        const val SERVER_VERSION = "0.1.0"
+        const val SERVER_VERSION = "0.1.1"
         private const val MAX_LOGGED_ARGUMENTS = 2_000
         private const val MAX_LOGGED_RESULT = 2_000
     }

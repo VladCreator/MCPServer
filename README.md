@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.1.0** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.1.1** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -14,7 +14,7 @@ Current version: **0.1.0** (Android QA pack complete; iOS embedded QA service im
 - **WebSocket** at `/mcp` (and the `/ws` alias) for legacy/custom clients.
 - **USB / ADB connection**: run `adb forward tcp:8080 tcp:8080` and use
   `http://localhost:8080/mcp` from the computer; no Wi-Fi needed.
-- **iOS QA service**: embedded MCP service on `127.0.0.1:8080` with 5 iOS tools
+- **iOS QA service**: embedded MCP service on `127.0.0.1:8080` with 10 iOS tools
   (state, QA session, English TTS). See [`docs/IOS_QA_SERVICE.md`](docs/IOS_QA_SERVICE.md).
 - **JSON-RPC 2.0** dispatcher: `initialize`, `notifications/initialized`, `ping`,
   `tools/list`, `tools/call`, batching and standard error codes.
@@ -35,7 +35,7 @@ Current version: **0.1.0** (Android QA pack complete; iOS embedded QA service im
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 22 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 27 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
@@ -53,7 +53,7 @@ so the dashboard stays readable instead of stretching across a large screen.
 | ![Settings](docs/screenshots/settings.png) | ![Tablet](docs/screenshots/tablet.png) |
 | **Tools catalog** | **USB / ADB connection** |
 | ![Tools](docs/screenshots/tools.png) | ![USB](docs/screenshots/connect-usb.png) |
-| **iOS QA service** | **iOS tools (5)** |
+| **iOS QA service** | **iOS tools (10)** |
 | ![iOS](docs/screenshots/ios-dashboard.png) | iOS exposes the state/session/audio subset |
 
 Settings, endpoints and the TLS fingerprint live in sheets so the dashboard only shows
@@ -244,7 +244,7 @@ addresses, `localhost` and `127.0.0.1`:
 ./gradlew :shared:compileKotlinIosSimulatorArm64
 ```
 
-The suite (39 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
+The suite (40 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
 validation, errors/batches/notifications, bearer parsing, token storage behavior,
 tool-approval events and the ViewModel event flow. Camera, accessibility, foreground
 service and approval UI are verified manually on a device/emulator because they need
@@ -288,7 +288,7 @@ with a five-tool, localhost-only QA service.
 - The app does not advertise itself over mDNS/Bonjour or show a QR code yet.
 - Self-signed TLS requires client trust; for production, use a proper certificate or
   pin the fingerprint.
-- The iOS QA service runs only while the app is in the foreground and exposes 5 tools.
+- The iOS QA service runs only while the app is in the foreground and exposes 10 tools.
   For cross-app simulator screenshots, configure the separate
   [Mac-side screenshot MCP bridge](docs/IOS_SIMULATOR.md).
   Physical-device XCUITest, `iproxy`, the host gateway and Keychain token storage are

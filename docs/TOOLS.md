@@ -1,8 +1,9 @@
-# Supported tools — Tester 0.1.0
+# Supported tools — Tester 0.1.1
 
-Tester exposes **22 tools** over MCP on Android (12 device tools + 10 QA-pack tools).
-The iOS QA service advertises a 5-tool subset (`get_device_info`, `qa_session`,
-`audio_instruction`, `audio_state`, `get_device_state`); see
+Tester exposes **27 tools** over MCP on Android (17 device tools + 10 QA-pack tools).
+The iOS QA service advertises a 10-tool subset: `get_device_info`, `health_check`,
+`read_file`, `create_notification`, `take_photo`, `get_app_version`, `qa_session`,
+`audio_instruction`, `audio_state`, `get_device_state`; see
 [`IOS_QA_SERVICE.md`](IOS_QA_SERVICE.md).
 
 In DeepSeek Harness the names are namespaced as
@@ -27,6 +28,11 @@ requirements of each tool.
 | `take_photo` | `quality` (string, optional, currently ignored) | Camera permission; the app must be in the foreground | Yes | MCP `image` block (`image/jpeg`) plus the file path. |
 | `touch_test` | `x`, `y` (integer, required; screen pixels) | **MCP Touch Service** enabled | Yes | Text confirming the tap. |
 | `launch_app` | `package_name` or `app_name`; optional `wait_ms` (default 8000, 0 disables) | Installed app with a launcher activity; from the background also needs overlay permission or MCP Touch Service | Yes | Text confirming the launch. |
+| `list_apps` | `query` (string, optional) | — | No | Launchable apps with visible name and package; optionally filtered. |
+| `health_check` | none | — | No | Server time, uptime, version, Touch Service and special-access state. |
+| `swipe` | `direction` or `x`/`y`/`to_x`/`to_y`; `duration_ms`, `distance`, `count`, `interval_ms` | **MCP Touch Service** enabled | Yes | Text confirming the swipe. |
+| `get_app_version` | `package_name` (required) | Installed app or Tester | No | versionName, versionCode and install/update times. |
+| `get_logs` | `package_name`, `level`, `query`, `lines`, `crashes` | `READ_LOGS` via ADB for other apps' logs | Yes | Filtered logcat text. |
 | `get_screen_tree` | `max_nodes` (integer, optional; default 300, range 1–1000) | **MCP Touch Service** enabled | Yes | Indented text tree: index, class, text, content description, resource id, bounds and flags. |
 | `take_screenshot` | `max_dimension` (integer, optional; default 1280, range 320–2400) | **MCP Touch Service** enabled; unavailable on `FLAG_SECURE` screens | Yes | MCP `image` block (`image/jpeg`) plus a scale hint. |
 | `click_element` | One of `index`, `text`, `resource_id`, `content_desc`, `class_name`; optional `text_exact`, `nth`, `long_press` | **MCP Touch Service** enabled | Yes | Text describing the clicked element. |
@@ -48,14 +54,16 @@ requirements of each tool.
 
 Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
-`global_action`, `ui_gesture`, `audio_instruction` and `device_state` (13 of 22).
+`global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
+`device_state` (15 of 27).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
 must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 
-`get_device_info`, `create_notification`, `qa_session`, `ui_find`, `ui_wait`,
-`ui_assert`, `audio_state`, `get_device_state` and `ui_diff` run without an extra approval.
+`get_device_info`, `create_notification`, `list_apps`, `health_check`,
+`get_app_version`, `qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `audio_state`,
+`get_device_state` and `ui_diff` run without an extra approval.
 
 ## Requirements
 

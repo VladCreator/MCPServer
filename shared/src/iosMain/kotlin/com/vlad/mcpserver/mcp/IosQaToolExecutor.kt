@@ -19,6 +19,11 @@ class IosQaToolExecutor(
     private val audio = IosAudioController()
     private val device = IosDeviceStateReader()
     private val qa = IosQaSessionManager()
+    private val files = IosFileAccess()
+    private val appInfo = IosAppInfo()
+    private val notifications = IosNotificationController()
+    private val camera = IosCameraController(files)
+    private val health = IosHealthCheck(appInfo, files)
 
     override suspend fun execute(
         clientId: String,
@@ -31,6 +36,14 @@ class IosQaToolExecutor(
         return when (toolName) {
             "get_device_info" -> ToolResult(device.readText())
             "get_device_state" -> ToolResult(device.readText())
+            "health_check" -> ToolResult(health.read())
+            "read_file" -> files.read(arguments.string("path").orEmpty())
+            "create_notification" -> notifications.post(
+                title = arguments.string("title").orEmpty(),
+                message = arguments.string("message").orEmpty()
+            )
+            "take_photo" -> camera.capture()
+            "get_app_version" -> appInfo.version(arguments.string("package_name"))
             "qa_session" -> qaSession(arguments)
             "audio_instruction" -> audioInstruction(arguments)
             "audio_state" -> withContext(Dispatchers.Main) { audio.state() }

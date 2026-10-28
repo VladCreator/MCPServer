@@ -87,6 +87,25 @@ class McpDispatcherTest {
     }
 
     @Test
+    fun iosToolSurfaceIsExplicitAndEnglishNamed() = runTest {
+        assertEquals(
+            listOf(
+                "get_device_info",
+                "health_check",
+                "read_file",
+                "create_notification",
+                "take_photo",
+                "get_app_version",
+                "qa_session",
+                "audio_instruction",
+                "audio_state",
+                "get_device_state"
+            ),
+            McpTools.iosAvailable().map { it.name }
+        )
+    }
+
+    @Test
     fun toolsCallInvokesExecutorAndReturnsContent() = runTest {
         val executor = FakeExecutor(ToolResult("file contents"))
         val dispatcher = dispatcher(executor)
