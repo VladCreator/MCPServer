@@ -11,6 +11,10 @@ import android.view.WindowManager
 import com.vlad.mcpserver.McpTouchAccessibilityService
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.add
 
 /**
  * QA environment state: dark mode, rotation, font scale, animation scales,
@@ -115,11 +119,11 @@ class AndroidDeviceStateController(private val context: Context) {
     fun setRotation(value: String): String {
         requireSystemWrite()
         when (value.lowercase()) {
-            "auto" -> Settings.System.putInt(
+            "auto" -> check(Settings.System.putInt(
                 context.contentResolver,
                 Settings.System.ACCELEROMETER_ROTATION,
                 1
-            )
+            )) { "System rejected auto rotation." }
             "portrait" -> setFixedRotation(0)
             "landscape" -> setFixedRotation(1)
             "reverse_portrait" -> setFixedRotation(2)
@@ -148,28 +152,30 @@ class AndroidDeviceStateController(private val context: Context) {
     fun setFontScale(value: Float): String {
         requireSystemWrite()
         val scale = value.coerceIn(0.85f, 2.0f)
-        Settings.System.putFloat(context.contentResolver, Settings.System.FONT_SCALE, scale)
+        check(Settings.System.putFloat(context.contentResolver, Settings.System.FONT_SCALE, scale)) {
+            "System rejected font scale."
+        }
         return "Font scale set to ${"%.2f".format(scale)}."
     }
 
     fun setAnimations(enabled: Boolean): String {
         val scale = if (enabled) 1.0f else 0.0f
         requireSecureWrite()
-        Settings.Global.putFloat(
+        check(Settings.Global.putFloat(
             context.contentResolver,
             Settings.Global.ANIMATOR_DURATION_SCALE,
             scale
-        )
-        Settings.Global.putFloat(
+        )) { "System rejected animator scale." }
+        check(Settings.Global.putFloat(
             context.contentResolver,
             Settings.Global.TRANSITION_ANIMATION_SCALE,
             scale
-        )
-        Settings.Global.putFloat(
+        )) { "System rejected transition scale." }
+        check(Settings.Global.putFloat(
             context.contentResolver,
             Settings.Global.WINDOW_ANIMATION_SCALE,
             scale
-        )
+        )) { "System rejected window scale." }
         return "Animations ${if (enabled) "enabled" else "disabled"}."
     }
 
@@ -199,63 +205,96 @@ class AndroidDeviceStateController(private val context: Context) {
         return "Keep awake disabled."
     }
 
-    fun restore(): String {
-        val snapshot = saved ?: return "No device-state snapshot is available."
+    fun restore(): ToolResult {
+        val snapshot = saved ?: return ToolResult(
+            "No device-state snapshot is available.", isError = true,
+            structuredContent = buildJsonObject {
+                put("reason", "no_snapshot")
+                put("retryable", false)
+            }
+        )
         val results = mutableListOf<String>()
         runCatching {
             if (snapshot.autoRotate == 1) {
                 requireSystemWrite()
-                Settings.System.putInt(
+                check(Settings.System.putInt(
                     context.contentResolver,
                     Settings.System.ACCELEROMETER_ROTATION,
                     1
-                )
+                )) { "System rejected rotation restoration." }
             } else {
                 requireSystemWrite()
                 setFixedRotation(snapshot.userRotation)
             }
+            check(Settings.System.getInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION) == snapshot.autoRotate) {
+                "Rotation policy readback did not match."
+            }
         }.onSuccess { results += "rotation" }.onFailure { results += "rotation failed: ${it.message}" }
         runCatching {
             requireSystemWrite()
-            Settings.System.putFloat(
+            check(Settings.System.putFloat(
                 context.contentResolver,
                 Settings.System.FONT_SCALE,
                 snapshot.fontScale
-            )
+            )) { "System rejected font restoration." }
+            check(Settings.System.getFloat(context.contentResolver, Settings.System.FONT_SCALE) == snapshot.fontScale) {
+                "Font setting readback did not match."
+            }
         }.onSuccess { results += "font_scale" }.onFailure { results += "font failed: ${it.message}" }
-        snapshot.nightMode?.let { mode ->
-            runCatching {
-                requireSecureWrite()
-                Settings.Secure.putString(context.contentResolver, "ui_night_mode", mode)
-            }.onSuccess { results += "dark_mode" }.onFailure { results += "dark mode failed: ${it.message}" }
-        }
         runCatching {
             requireSecureWrite()
-            Settings.Global.putFloat(
+            check(Settings.Secure.putString(context.contentResolver, "ui_night_mode", snapshot.nightMode)) {
+                "System rejected dark-mode restoration."
+            }
+            check(Settings.Secure.getString(context.contentResolver, "ui_night_mode") == snapshot.nightMode) {
+                "Dark-mode setting readback did not match."
+            }
+        }.onSuccess { results += "dark_mode" }.onFailure { results += "dark mode failed: ${it.message}" }
+        runCatching {
+            requireSecureWrite()
+            check(Settings.Global.putFloat(
                 context.contentResolver,
                 Settings.Global.ANIMATOR_DURATION_SCALE,
                 snapshot.animatorScale
-            )
-            Settings.Global.putFloat(
+            )) { "System rejected animator restoration." }
+            check(Settings.Global.putFloat(
                 context.contentResolver,
                 Settings.Global.TRANSITION_ANIMATION_SCALE,
                 snapshot.transitionScale
-            )
-            Settings.Global.putFloat(
+            )) { "System rejected transition restoration." }
+            check(Settings.Global.putFloat(
                 context.contentResolver,
                 Settings.Global.WINDOW_ANIMATION_SCALE,
                 snapshot.windowScale
-            )
+            )) { "System rejected window-scale restoration." }
+            check(Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE) == snapshot.animatorScale &&
+                Settings.Global.getFloat(context.contentResolver, Settings.Global.TRANSITION_ANIMATION_SCALE) == snapshot.transitionScale &&
+                Settings.Global.getFloat(context.contentResolver, Settings.Global.WINDOW_ANIMATION_SCALE) == snapshot.windowScale) {
+                "Animation setting readback did not match."
+            }
         }.onSuccess { results += "animations" }.onFailure { results += "animations failed: ${it.message}" }
-        runCatching { audioManager()?.setStreamVolume(AudioManager.STREAM_MUSIC, snapshot.volume, 0) }
+        runCatching {
+            val audio = audioManager() ?: error("AudioManager is unavailable")
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, snapshot.volume, 0)
+            check(audio.getStreamVolume(AudioManager.STREAM_MUSIC) == snapshot.volume) { "Media volume was not restored." }
+        }
             .onSuccess { results += "volume" }.onFailure { results += "volume failed: ${it.message}" }
         runCatching { setKeepAwake(snapshot.keepAwake) }
             .onSuccess { results += "keep_awake" }.onFailure { results += "wake lock failed: ${it.message}" }
         val failed = results.any { it.contains("failed") }
         // Keep the snapshot when something failed so restore can be retried after granting access.
         if (!failed) saved = null
-        return "Restored: ${results.joinToString(", ")}." +
-            if (failed) " Snapshot kept; fix the failures and call device_state action=restore again." else ""
+        return ToolResult(
+            "Restored: ${results.joinToString(", ")}." +
+                if (failed) " Snapshot kept; fix the failures and call device_state action=restore again." else "",
+            isError = failed,
+            structuredContent = buildJsonObject {
+                put("reason", if (failed) "partial_restore" else "restored")
+                put("snapshot_retained", failed)
+                put("retryable", failed)
+                putJsonArray("fields") { results.forEach { add(it) } }
+            }
+        )
     }
 
     fun release() {
@@ -287,16 +326,16 @@ class AndroidDeviceStateController(private val context: Context) {
     }
 
     private fun setFixedRotation(value: Int) {
-        Settings.System.putInt(
+        check(Settings.System.putInt(
             context.contentResolver,
             Settings.System.ACCELEROMETER_ROTATION,
             0
-        )
-        Settings.System.putInt(
+        )) { "System rejected rotation lock." }
+        check(Settings.System.putInt(
             context.contentResolver,
             Settings.System.USER_ROTATION,
             value.coerceIn(0, 3)
-        )
+        )) { "System rejected rotation value." }
     }
 
     private fun rotation(): Int = runCatching {

@@ -76,8 +76,9 @@ class McpDispatcherTest {
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
 
-        assertEquals(28, tools.size)
+        assertEquals(29, tools.size)
         assertTrue(tools.contains("run_route"))
+        assertTrue(tools.contains("get_capabilities"))
         assertEquals(tools.size, tools.toSet().size, "tool names must be unique")
         listOf("qa_session", "ui_find", "ui_wait", "ui_assert", "ui_gesture", "audio_instruction", "audio_state", "get_device_state", "device_state", "ui_diff")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
@@ -85,6 +86,19 @@ class McpDispatcherTest {
             McpTools.all.filter { it.sensitive }.all { it.requirement != null },
             "sensitive tools must declare a requirement for the in-app catalog"
         )
+    }
+
+    @Test
+    fun structuredResultsAreAdditiveAndPreserveFailureFlag() = runTest {
+        val structured = JsonRpc.json.parseToJsonElement("""{"reason":"text_mismatch","passed":false}""").jsonObject
+        val dispatcher = dispatcher(FakeExecutor(ToolResult("Mismatch", isError = true, structuredContent = structured)))
+        val session = initializedSession(dispatcher)
+        val response = dispatcher.handle(session,
+            """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ui_assert","arguments":{"condition":"text","text":"Tester","expected":"Wrong"}}}"""
+        )!!.jsonObject.getValue("result").jsonObject
+        assertEquals(structured, response["structuredContent"])
+        assertEquals("true", response.getValue("isError").jsonPrimitive.content)
+        assertEquals("Mismatch", response.getValue("content").jsonArray.last().jsonObject.getValue("text").jsonPrimitive.content)
     }
 
     @Test

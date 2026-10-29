@@ -47,15 +47,35 @@ class YamlRouteTest {
     }
 
     @Test
-    fun textChecksCompileToActualExactTextMatching() {
+    fun textChecksUseTheNativePredicateWithoutSelectorRewriting() {
         val route = YamlRouteParser.parse(source(
             """- assert: {condition: text, resource_id: title, expected: Projects}"""
         ))
         val args = route.steps.single().arguments
-        assertEquals("visible", args.getValue("condition").jsonPrimitive.content)
-        assertEquals("Projects", args.getValue("text").jsonPrimitive.content)
-        assertEquals(true, args.getValue("text_exact").jsonPrimitive.boolean)
+        assertEquals("text", args.getValue("condition").jsonPrimitive.content)
+        assertEquals("Projects", args.getValue("expected").jsonPrimitive.content)
+        assertFalse("text" in args)
         assertEquals("title", args.getValue("resource_id").jsonPrimitive.content)
+    }
+
+    @Test
+    fun routesPreserveNativeTextFailureAndStructuredOutcome() = runTest {
+        val route = YamlRouteParser.parse(source(
+            "- assert: {condition: text, resource_id: title, expected: Wrong}\n- back: {}"
+        ))
+        var calls = 0
+        val result = YamlRouteRunner().run(route) { step ->
+            calls++
+            val outcome = UiPredicate.evaluate("text", listOf("Projects"),
+                step.arguments.getValue("expected").jsonPrimitive.content, true, "app", "app")
+            ToolResult("Actual: Projects", isError = !outcome.passed,
+                structuredContent = outcome.structured("text", "Wrong", 10))
+        }
+        assertTrue(result.isError)
+        assertEquals(1, calls)
+        assertEquals(listOf("failed", "skipped"), statuses(result))
+        val record = Json.parseToJsonElement(result.text).jsonObject.getValue("steps").jsonArray.first().jsonObject
+        assertEquals("text_mismatch", record.getValue("result").jsonObject.getValue("reason").jsonPrimitive.content)
     }
 
     @Test

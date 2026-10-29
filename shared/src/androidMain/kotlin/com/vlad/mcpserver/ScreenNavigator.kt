@@ -128,13 +128,14 @@ object ScreenNavigator {
     fun findAll(
         service: AccessibilityService,
         selector: NodeSelector,
-        limit: Int = 50
+        limit: Int = 50,
+        root: AccessibilityNodeInfo? = service.rootInActiveWindow
     ): List<AccessibilityNodeInfo> {
         selector.index?.let { index ->
             val node = lastNodes.getOrNull(index) ?: return emptyList()
             return if (node.refresh() && (selector.includeInvisible || node.isVisibleToUser)) listOf(node) else emptyList()
         }
-        val root = service.rootInActiveWindow ?: return emptyList()
+        if (root == null) return emptyList()
         val candidates = mutableListOf<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo) {
             if (!selector.includeInvisible && !node.isVisibleToUser) return

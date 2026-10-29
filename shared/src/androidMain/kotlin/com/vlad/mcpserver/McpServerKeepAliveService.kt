@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.os.Build
 
 /**
  * Foreground service that gives the process foreground priority while the MCP
@@ -114,6 +115,10 @@ class McpServerKeepAliveService : Service() {
             } else {
                 builder.setSmallIcon(ToolIconBitmap.icon(activity.toolName))
             }
+            if (Build.VERSION.SDK_INT >= 36) {
+                builder.setShortCriticalText(chip)
+                builder.addExtras(android.os.Bundle().apply { putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true) })
+            }
             return builder
                 .setContentTitle(title)
                 .setContentText(text)
@@ -124,8 +129,6 @@ class McpServerKeepAliveService : Service() {
                 .setShowWhen(activity != null)
                 .setWhen(activity?.timestamp ?: System.currentTimeMillis())
                 .setCategory(Notification.CATEGORY_SERVICE)
-                .setShortCriticalText(chip)
-                .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true) })
                 .build()
         }
     }

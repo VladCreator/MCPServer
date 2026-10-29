@@ -90,8 +90,11 @@ Empty arguments use `{}`.
 | `assert` | Required `condition: visible/absent/text/count`; selector; optional `expected` and `timeout_ms` (250..30000). Failure uses the existing assertion screenshot/tree evidence. |
 
 Wait/assert selectors support `resource_id`, `text`, `content_desc`, `class_name`
-and optional `text_exact`. `text` conditions check exact text using `expected` if
-provided, otherwise the `text` selector. `count` requires a quoted integer
+and optional `text_exact`. In 0.1.6, `text` conditions use the same native predicate
+as direct MCP calls: a unique candidate's actual text must equal `expected`
+(case-sensitive), or satisfy the text selector when no expectation is supplied.
+The YAML compiler does not rewrite text assertions into visibility checks.
+`count` requires a quoted integer
 `expected` in 0..99, such as `"2"`; the native matcher caps results at 100.
 Waits/assertions use the existing default timeout
 (5000 ms) if omitted, bounded by the overall route deadline.

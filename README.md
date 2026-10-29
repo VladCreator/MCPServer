@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.1.5** (Android QA pack complete; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.1.6** (Android P0 reliability; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -42,17 +42,22 @@ Current version: **0.1.5** (Android QA pack complete; iOS embedded QA service im
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 28 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 29 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
 - **YAML task routes (Android)**: `run_route` executes validated, parameterized
   steps locally with one approval, bounded delays and per-step results. See
   [`docs/YAML_ROUTES.md`](docs/YAML_ROUTES.md).
+- **Agent reliability (0.1.6)**: native text comparisons, structured predicate
+  outcomes, capability discovery, explicit restoration failures and Android 15+
+  notification compatibility. See [`docs/P0_0.1.6.md`](docs/P0_0.1.6.md).
 
-Planned QA improvements and reusable task routes are described in
-[`docs/QA_RELIABILITY_PLAN.md`](docs/QA_RELIABILITY_PLAN.md). This roadmap
-distinguishes existing tools from proposed capabilities.
+The [agent-first implementation plan](docs/AGENT_QUALITY_IMPLEMENTATION_PLAN.md)
+prioritizes tool correctness, reliable observations, evidence, environment setup
+and reusable scenarios. The [earlier QA roadmap](docs/QA_RELIABILITY_PLAN.md)
+retains design details and device-validation findings. Both distinguish existing
+tools from proposed capabilities.
 
 ## UI
 
@@ -82,8 +87,9 @@ the endpoint. Users can turn it off in the app's notification settings.
 ## Requirements
 
 - macOS/Linux with JDK 21+ (the project was built with JDK 25).
-- Android SDK with API 36 (the app `minSdk` is 36) and build-tools.
-- An Android 16+ device or emulator on the same network as the AI client.
+- Android SDK with API 37 (the configured compile/target SDK) and build-tools.
+- An Android 15+ device or emulator (minSdk 35) on the same network as the AI client,
+  or connected through ADB forwarding. Live Update notification chips require Android 16+.
 
 ## Build and install
 

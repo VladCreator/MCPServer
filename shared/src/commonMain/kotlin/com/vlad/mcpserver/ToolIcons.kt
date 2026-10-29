@@ -64,6 +64,7 @@ fun toolIcon(name: String): ImageVector = when (name) {
     "ui_gesture" -> Icons.Rounded.Gesture
     "qa_session" -> Icons.Rounded.Checklist
     "run_route" -> Icons.Rounded.Checklist
+    "get_capabilities" -> Icons.Rounded.Info
     "device_state" -> Icons.Rounded.Tune
     "get_device_state" -> Icons.Rounded.Settings
     "audio_instruction" -> Icons.Rounded.RecordVoiceOver

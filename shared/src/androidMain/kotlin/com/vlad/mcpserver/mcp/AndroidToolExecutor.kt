@@ -90,7 +90,8 @@ class AndroidToolExecutor(
                 }
             }
             if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, approvalArguments)) {
-                return@withContext ToolResult("User rejected the tool call.", isError = true)
+                return@withContext ToolResult("User rejected the tool call.", isError = true,
+                    structuredContent = buildJsonObject { put("reason", "consent_denied"); put("retryable", false) })
             }
             if (route != null) {
                 return@withContext routeExecutionMutex.withLock {
@@ -142,6 +143,7 @@ class AndroidToolExecutor(
                 "get_app_version" -> appVersion(arguments)
                 "get_logs" -> logs(arguments)
                 "health_check" -> healthCheck()
+                "get_capabilities" -> capabilities()
                 "get_screen_tree" -> screenTree(arguments)
                 "take_screenshot" -> screenshot(arguments)
                 "click_element" -> clickElement(arguments)
@@ -174,6 +176,82 @@ class AndroidToolExecutor(
             append("Local IP: ${getLocalIpAddress()}")
         }
         return ToolResult(text)
+    }
+
+    private fun capabilities(): ToolResult {
+        val touchTools = setOf(
+            "touch_test", "swipe", "get_screen_tree", "take_screenshot", "click_element",
+            "input_text", "scroll", "global_action", "ui_find", "ui_wait", "ui_assert",
+            "ui_gesture", "ui_diff", "run_route"
+        )
+        val mutations = setOf(
+            "touch_test", "launch_app", "swipe", "click_element", "input_text", "scroll",
+            "global_action", "ui_gesture", "run_route", "create_notification", "take_photo",
+            "qa_session", "ui_diff", "audio_instruction", "device_state"
+        )
+        val result = buildJsonObject {
+            put("platform", "android")
+            put("server_version", McpDispatcher.SERVER_VERSION)
+            put("api_level", Build.VERSION.SDK_INT)
+            put("minimum_api", 35)
+            putJsonObject("permissions") {
+                put("accessibility_service", touchService() != null)
+                put("camera", context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+                put("notifications", context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+                put("read_logs", context.checkSelfPermission(Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED)
+                put("write_settings", Settings.System.canWrite(context))
+                put("write_secure_settings", deviceState.canWriteSecureSettings())
+                put("overlay", Settings.canDrawOverlays(context))
+            }
+            putJsonArray("tools") {
+                McpTools.available().forEach { tool ->
+                    val missing = buildList {
+                        if (tool.name in touchTools && touchService() == null) add("accessibility_service")
+                        if (tool.name == "take_photo" &&
+                            context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) add("camera")
+                        if (tool.name == "create_notification" &&
+                            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) add("notifications")
+                    }
+                    add(buildJsonObject {
+                        put("name", tool.name)
+                        put("execution_location", "android_device")
+                        put("implemented", true)
+                        put("status", if (missing.isNotEmpty()) "blocked" else
+                            if (tool.name in touchTools || tool.name in setOf("device_state", "get_logs", "launch_app", "take_photo")) "conditional"
+                            else "available")
+                        putJsonArray("missing_permissions") { missing.forEach { add(it) } }
+                        put("requires_confirmation_when_enabled", tool.sensitive)
+                        put("target_app_dependency", when (tool.name) {
+                            "get_logs" -> "Other-app logs require READ_LOGS and OS/user log-access approval."
+                            "launch_app", "get_app_version" -> "Target must be installed and visible to Android package queries."
+                            in touchTools -> "Target must expose an accessible window; secure screens block capture."
+                            else -> "none"
+                        })
+                        put("mutation", tool.name in mutations)
+                        put("reversibility", when (tool.name) {
+                            "device_state" -> "snapshot_restore; partial failures possible"
+                            "audio_instruction" -> "manual_restore"
+                            in mutations -> "not_guaranteed"
+                            else -> "not_applicable"
+                        })
+                        put("potentially_destructive", tool.name in setOf(
+                            "click_element", "input_text", "ui_gesture", "touch_test", "global_action", "run_route"
+                        ))
+                        tool.requirement?.let { put("requirement", it) }
+                    })
+                }
+            }
+            putJsonObject("device_state_requirements") {
+                put("rotation_font_scale", "WRITE_SETTINGS")
+                put("dark_mode_animations", "WRITE_SECURE_SETTINGS; effective dark-mode application is OS-dependent")
+                put("volume_keep_awake", "System policy may reject changes; restore requires a snapshot")
+            }
+            putJsonArray("unsupported_controls") {
+                listOf("permission_grant_revoke", "global_locale", "mock_location", "clipboard",
+                    "other_app_data_reset", "device_time", "connectivity").forEach { add(it) }
+            }
+        }
+        return ToolResult(result.toString(), structuredContent = result)
     }
 
     private fun readFile(arguments: JsonObject): ToolResult {
@@ -587,7 +665,9 @@ class AndroidToolExecutor(
         } else {
             ToolResult(
                 "Launched $packageName, but after ${wait.elapsedMs}ms: ${wait.actual}. " +
-                    "It may still be starting; call ui_wait idle with package_name=$packageName."
+                    "It may still be starting; call ui_wait idle with package_name=$packageName.",
+                isError = true,
+                structuredContent = wait.structured("idle", packageName)
             )
         }
     }
@@ -597,7 +677,12 @@ class AndroidToolExecutor(
     private fun touchServiceMissing(): ToolResult = ToolResult(
         "This tool needs 'MCP Touch Service'. Enable it in Android Settings > Accessibility " +
             "(or Tester Settings > Device access), then try again.",
-        isError = true
+        isError = true,
+        structuredContent = buildJsonObject {
+            put("reason", "permission_denied")
+            put("requirement", "accessibility_service")
+            put("retryable", false)
+        }
     )
 
     private fun JsonObject.string(key: String): String? =
@@ -830,13 +915,17 @@ class AndroidToolExecutor(
             )
             "status" -> qa.status()
             "end" -> {
-                val restore = deviceState.restore()
+                val restore = if (deviceState.hasSnapshot()) deviceState.restore() else ToolResult("No state changes to restore.")
                 val notes = listOfNotNull(
                     arguments.string("notes"),
-                    "Device restore: $restore"
+                    "Device restore: ${restore.text}"
                 ).joinToString("\n")
-                val report = qa.end(arguments.string("result").orEmpty(), notes)
-                if (report.isError) report else ToolResult("${report.text}\n$restore")
+                val report = qa.end(if (restore.isError) "FAIL" else arguments.string("result").orEmpty(), notes)
+                ToolResult(
+                    "${report.text}\n${restore.text}",
+                    isError = report.isError || restore.isError,
+                    structuredContent = restore.structuredContent
+                )
             }
             else -> ToolResult("action must be begin, step, status or end.", isError = true)
         }
@@ -874,6 +963,12 @@ class AndroidToolExecutor(
         if (condition != "idle" && selector.isEmpty) {
             return ToolResult("Provide a selector for condition '$condition'.", isError = true)
         }
+        val expected = arguments.rawString("expected")
+        val mode = arguments.string("text_mode") ?: "exact"
+        if (mode !in setOf("exact", "contains") ||
+            (condition == "text" && expected == null && selector.text == null)) {
+            return ToolResult("Text checks need expected or a text selector; text_mode must be exact or contains.", isError = true)
+        }
         val timeout = (arguments.int("timeout_ms") ?: DEFAULT_QA_TIMEOUT_MS)
             .coerceIn(MIN_QA_TIMEOUT_MS, MAX_QA_TIMEOUT_MS)
         val interval = (arguments.int("interval_ms") ?: DEFAULT_QA_INTERVAL_MS)
@@ -884,17 +979,20 @@ class AndroidToolExecutor(
             service = service,
             condition = condition,
             selector = selector,
-            expected = arguments.string("expected").orEmpty(),
+            expected = expected,
             timeoutMs = timeout.toLong(),
             intervalMs = interval.toLong(),
             quietMs = quiet.toLong(),
-            packageName = arguments.string("package_name")
+            packageName = arguments.string("package_name"),
+            contains = mode == "contains",
+            ignoreCase = arguments.bool("ignore_case")
         )
         val detail = "condition=$condition elapsed=${result.elapsedMs}ms actual=${result.actual}"
         return if (result.passed) {
-            ToolResult("WAIT OK: $detail")
+            ToolResult("WAIT OK: $detail", structuredContent = result.structured(condition, expected))
         } else {
-            ToolResult("WAIT TIMEOUT: $detail", isError = true)
+            val label = if (result.outcome.reason in setOf("ambiguous_match", "truncated_count")) "WAIT FAILED" else "WAIT TIMEOUT"
+            ToolResult("$label: $detail", isError = true, structuredContent = result.structured(condition, expected))
         }
     }
 
@@ -906,18 +1004,22 @@ class AndroidToolExecutor(
             return ToolResult("condition must be visible, absent, text or count.", isError = true)
         }
         var selector = qaSelector(arguments)
-        val expected = arguments.string("expected").orEmpty()
-        if (condition == "text" && selector.isEmpty && expected.isNotBlank()) {
-            selector = selector.copy(text = expected)
+        val expected = arguments.rawString("expected")
+        if (condition == "text" && selector.isEmpty && !expected.isNullOrEmpty()) {
+            selector = selector.copy(text = expected, textExact = true)
         }
         if (selector.isEmpty) {
             return ToolResult("Provide a selector for condition '$condition'.", isError = true)
         }
-        if (condition == "count" && expected.toIntOrNull() == null) {
-            return ToolResult("condition=count requires an integer expected.", isError = true)
+        if (condition == "count" && expected?.toIntOrNull()?.let { it >= 0 } != true) {
+            return ToolResult("condition=count requires a nonnegative integer expected.", isError = true)
         }
-        if (condition == "text" && expected.isBlank() && selector.text == null) {
+        if (condition == "text" && expected == null && selector.text == null) {
             return ToolResult("condition=text requires expected or a text selector.", isError = true)
+        }
+        val mode = arguments.string("text_mode") ?: "exact"
+        if (mode !in setOf("exact", "contains")) {
+            return ToolResult("text_mode must be exact or contains.", isError = true)
         }
         val timeout = (arguments.int("timeout_ms") ?: DEFAULT_QA_TIMEOUT_MS)
             .coerceIn(MIN_QA_TIMEOUT_MS, MAX_QA_TIMEOUT_MS)
@@ -928,12 +1030,16 @@ class AndroidToolExecutor(
             expected = expected,
             timeoutMs = timeout.toLong(),
             intervalMs = DEFAULT_QA_INTERVAL_MS.toLong(),
-            quietMs = DEFAULT_QA_QUIET_MS.toLong()
+            quietMs = DEFAULT_QA_QUIET_MS.toLong(),
+            packageName = arguments.string("package_name"),
+            contains = mode == "contains",
+            ignoreCase = arguments.bool("ignore_case")
         )
         if (result.passed) {
             return ToolResult(
-                "ASSERTION PASSED: condition=$condition expected=${expected.ifBlank { selector.toString() }} " +
-                    "actual=${result.actual} elapsed=${result.elapsedMs}ms"
+                "ASSERTION PASSED: condition=$condition expected=${expected ?: selector.toString()} " +
+                    "actual=${result.actual} elapsed=${result.elapsedMs}ms",
+                structuredContent = result.structured(condition, expected)
             )
         }
 
@@ -942,7 +1048,7 @@ class AndroidToolExecutor(
         val shot = captureScreenshot(service, maxDimension).getOrNull()
         val tree = ScreenNavigator.dumpTree(service, ASSERT_TREE_NODES)?.take(ASSERT_TREE_CHARS)
         val text = buildString {
-            appendLine("ASSERTION FAILED: condition=$condition expected=${expected.ifBlank { selector.toString() }}")
+            appendLine("ASSERTION FAILED: condition=$condition expected=${expected ?: selector.toString()}")
             appendLine("actual=${result.actual} elapsed=${result.elapsedMs}ms")
             if (tree != null) {
                 appendLine("--- tree excerpt ---")
@@ -953,7 +1059,8 @@ class AndroidToolExecutor(
             text = text,
             isError = true,
             imageBase64 = shot?.let { java.util.Base64.getEncoder().encodeToString(it.jpegBytes) },
-            imageMimeType = if (shot != null) "image/jpeg" else null
+            imageMimeType = if (shot != null) "image/jpeg" else null,
+            structuredContent = result.structured(condition, expected)
         )
     }
 
@@ -1057,7 +1164,7 @@ class AndroidToolExecutor(
     private fun setDeviceState(arguments: JsonObject): ToolResult {
         val action = arguments.string("action")?.lowercase()
             ?: return ToolResult("Missing required argument: action", isError = true)
-        if (action == "restore") return ToolResult(deviceState.restore())
+        if (action == "restore") return deviceState.restore()
         if (action != "set") {
             return ToolResult("action must be set or restore.", isError = true)
         }
@@ -1106,7 +1213,13 @@ class AndroidToolExecutor(
             if (applied.isNotEmpty()) appendLine("Applied: ${applied.joinToString(" ")}")
             if (failed.isNotEmpty()) append("Failed: ${failed.joinToString("; ")}")
         }.trimEnd()
-        return ToolResult(text, isError = failed.isNotEmpty())
+        return ToolResult(text, isError = failed.isNotEmpty(), structuredContent = buildJsonObject {
+            put("reason", if (failed.isEmpty()) "applied" else "partial_set")
+            put("snapshot_retained", deviceState.hasSnapshot())
+            put("retryable", failed.isNotEmpty())
+            putJsonArray("applied") { applied.forEach { add(it) } }
+            putJsonArray("failed") { failed.forEach { add(it) } }
+        })
     }
 
     private suspend fun uiDiff(arguments: JsonObject): ToolResult {
@@ -1198,18 +1311,27 @@ class AndroidToolExecutor(
     private data class WaitResult(
         val passed: Boolean,
         val actual: String,
-        val elapsedMs: Long
-    )
+        val elapsedMs: Long,
+        val outcome: PredicateOutcome = PredicateOutcome(passed, if (passed) "matched" else "not_idle", emptyList())
+    ) {
+        fun structured(condition: String, expected: String?): JsonObject =
+            outcome.structured(condition, expected, elapsedMs)
+    }
+
+    private fun JsonObject.rawString(key: String): String? =
+        (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
     private suspend fun waitForCondition(
         service: McpTouchAccessibilityService,
         condition: String,
         selector: NodeSelector,
-        expected: String,
+        expected: String?,
         timeoutMs: Long,
         intervalMs: Long,
         quietMs: Long,
-        packageName: String? = null
+        packageName: String? = null,
+        contains: Boolean = false,
+        ignoreCase: Boolean = false
     ): WaitResult {
         val started = SystemClock.elapsedRealtime()
         val deadline = started + timeoutMs
@@ -1217,6 +1339,8 @@ class AndroidToolExecutor(
         var lastHash = 0
         var changedAt = started
         var initialized = false
+        var targetPackage = packageName ?: service.rootInActiveWindow?.packageName?.toString()
+        var outcome = PredicateOutcome(false, "no_window", emptyList())
 
         while (SystemClock.elapsedRealtime() <= deadline) {
             if (condition == "idle") {
@@ -1224,7 +1348,8 @@ class AndroidToolExecutor(
                 val tree = ScreenNavigator.dumpTree(service, MAX_TREE_NODES) ?: ""
                 val now = SystemClock.elapsedRealtime()
                 // A missing/empty window or the wrong foreground app is a transition, not idle.
-                val ready = tree.isNotBlank() && (packageName == null || foreground == packageName)
+                if (targetPackage == null && foreground != null) targetPackage = foreground
+                val ready = tree.isNotBlank() && foreground != null && foreground == targetPackage
                 val hash = if (ready) tree.hashCode() else 0
                 if (!initialized || !ready || hash != lastHash) {
                     initialized = true
@@ -1233,36 +1358,39 @@ class AndroidToolExecutor(
                 }
                 val stableFor = now - changedAt
                 actual = if (!ready) {
-                    "waiting for ${packageName ?: "a window"} (foreground: ${foreground ?: "none"})"
+                    "waiting for ${targetPackage ?: "a window"} (foreground: ${foreground ?: "none"})"
                 } else {
                     "stable ${stableFor}ms (foreground: $foreground)"
                 }
+                outcome = PredicateOutcome(false, when {
+                    foreground == null || tree.isBlank() -> "no_window"
+                    foreground != targetPackage -> "wrong_package"
+                    else -> "not_idle"
+                }, listOf(actual))
                 if (ready && stableFor >= quietMs) {
-                    return WaitResult(true, actual, now - started)
+                    return WaitResult(true, actual, now - started, PredicateOutcome(true, "matched", listOf(actual)))
                 }
             } else {
-                val matches = ScreenNavigator.findAll(service, selector, MAX_QA_MATCHES)
-                actual = when (condition) {
-                    "visible" -> "matches=${matches.size}"
-                    "absent" -> "matches=${matches.size}"
-                    "text" -> "matches=${matches.size}"
-                    "count" -> "count=${matches.size}"
-                    else -> "matches=${matches.size}"
-                }
-                val passed = when (condition) {
-                    "visible" -> matches.isNotEmpty()
-                    "absent" -> matches.isEmpty()
-                    "text" -> matches.isNotEmpty()
-                    "count" -> expected.toIntOrNull() == matches.size
-                    else -> false
-                }
-                if (passed) {
-                    return WaitResult(true, actual, SystemClock.elapsedRealtime() - started)
+                val root = service.rootInActiveWindow
+                val foreground = root?.packageName?.toString()
+                if (targetPackage == null && foreground != null) targetPackage = foreground
+                val matches = ScreenNavigator.findAll(service, selector, MAX_QA_MATCHES, root)
+                outcome = UiPredicate.evaluate(
+                    condition, matches.map { if (it.isPassword) null else it.text?.toString() },
+                    expected, root != null, foreground, targetPackage,
+                    truncated = matches.size >= MAX_QA_MATCHES, contains = contains, ignoreCase = ignoreCase
+                )
+                actual = "${outcome.reason} matches=${matches.size}" +
+                    if (condition == "text") " text=${outcome.actual}" else ""
+                if (outcome.passed || outcome.reason in setOf("ambiguous_match", "truncated_count")) {
+                    return WaitResult(outcome.passed, actual, SystemClock.elapsedRealtime() - started, outcome)
                 }
             }
-            delay(intervalMs)
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) break
+            delay(minOf(intervalMs, remaining))
         }
-        return WaitResult(false, actual, SystemClock.elapsedRealtime() - started)
+        return WaitResult(false, actual, SystemClock.elapsedRealtime() - started, outcome)
     }
 
     private fun compareBitmaps(baseline: Bitmap, current: Bitmap): Float {

@@ -109,6 +109,17 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(self.gateway.call("ios__run_route", {"yaml": "route"})["isError"])
         self.assertFalse(self.gateway.session.calls[-1]["ok"])
 
+    def test_native_structured_failure_is_preserved(self):
+        self.gateway.qa_session({"action": "begin", "test_case": "predicate"})
+        result = {
+            "content": [{"type": "text", "text": "Mismatch"}],
+            "isError": True,
+            "structuredContent": {"reason": "text_mismatch", "actual": ["Tester"], "expected": "Wrong"},
+        }
+        self.backend.call = lambda tool, arguments: result
+        self.assertEqual(result, self.gateway.call("ios__ui_assert", {"condition": "text"}))
+        self.assertFalse(self.gateway.session.calls[-1]["ok"])
+
     def test_route_is_not_replayed_after_session_loss(self):
         calls = []
 

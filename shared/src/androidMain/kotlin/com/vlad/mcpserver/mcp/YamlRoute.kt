@@ -40,7 +40,7 @@ internal data class YamlRoute(
 internal object YamlRouteParser {
     private val name = Regex("[A-Za-z][A-Za-z0-9_.-]{0,79}")
     private val packageName = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
-    private val reference = Regex("""\$\{([A-Za-z][A-Za-z0-9_.-]{0,79})}""")
+    private val reference = Regex("""\$\{([A-Za-z][A-Za-z0-9_.-]{0,79})\}""")
     private val selectors = setOf("text", "resource_id", "content_desc", "class_name", "text_exact")
 
     fun parse(source: String, supplied: JsonObject = JsonObject(emptyMap())): YamlRoute {
@@ -122,7 +122,8 @@ internal object YamlRouteParser {
                 }
                 "timeout_ms" -> args.integer(key, 250..30000)
                 "milliseconds" -> args.integer(key, 0..5000)
-                else -> args.string(key, allowEmpty = key == "text" && command == "input_text")
+                else -> args.string(key, allowEmpty = (key == "text" && command == "input_text") ||
+                    (key == "expected" && command in setOf("wait", "assert")))
             }
         }
         fun requireSelector() {
@@ -159,11 +160,6 @@ internal object YamlRouteParser {
                 "launch_app" -> { put("package_name", app); put("wait_ms", 0) }
                 "back" -> put("action", "back")
                 "wait" -> if (args["condition"] == JsonPrimitive("idle")) put("package_name", app)
-            }
-            if (command in setOf("wait", "assert") && args["condition"] == JsonPrimitive("text")) {
-                put("condition", "visible")
-                put("text", args["expected"] ?: args.getValue("text"))
-                put("text_exact", true)
             }
         }
         return RouteStep("step_${index + 1}", tool, compiled)
@@ -262,6 +258,7 @@ internal class YamlRouteRunner {
                     put("duration_ms", stepStart.elapsedNow().inWholeMilliseconds)
                     if (step.tool == "delay") put("requested_delay_ms", step.arguments.getValue("milliseconds"))
                     put("output", result.text.take(8000))
+                    result.structuredContent?.let { put("result", it) }
                 }
             }
             true

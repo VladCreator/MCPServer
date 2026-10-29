@@ -1,4 +1,4 @@
-# Unified QA Gateway — 0.1.5
+# Unified QA Gateway — 0.1.6
 
 The QA Gateway is a **stdio MCP server on the Mac** that presents Android and iOS
 QA backends through one tool list and one gateway QA report.
@@ -118,6 +118,11 @@ ios-ui__click_element
 
 `qa_capabilities` is the source of truth when a backend is offline or lacks a
 tool. The gateway does not pretend a tool exists on a disconnected backend.
+
+Android 0.1.6 adds `android__get_capabilities` for per-tool permission and operation
+requirements. `qa_capabilities` remains the gateway/backend health summary. Native
+MCP structured results are forwarded unchanged, and backend `isError` results are
+recorded as failed calls rather than transport successes.
 
 ## Gateway QA report
 

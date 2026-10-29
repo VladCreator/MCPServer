@@ -1314,7 +1314,7 @@ private fun SettingsSheet(
 
             SheetDivider()
             Text(
-                text = "Tester 0.1.5 · Streamable HTTP, SSE and local tools",
+                text = "Tester ${com.vlad.mcpserver.mcp.McpDispatcher.SERVER_VERSION} · Streamable HTTP, SSE and local tools",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp)

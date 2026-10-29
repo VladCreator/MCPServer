@@ -29,7 +29,8 @@ data class ToolResult(
     val text: String,
     val isError: Boolean = false,
     val imageBase64: String? = null,
-    val imageMimeType: String? = null
+    val imageMimeType: String? = null,
+    val structuredContent: JsonObject? = null
 )
 
 interface ToolExecutor {
@@ -384,7 +385,8 @@ object McpTools {
     val uiWait: ToolDefinition = ToolDefinition(
         name = "ui_wait",
         description = "Wait until a UI condition is met: visible, absent, text or idle (tree stops changing). " +
-            "After launching an app, pass package_name so idle also waits for that app to be in front. " +
+            "Pass package_name to guard every condition against the wrong foreground app. " +
+            "For text, expected compares the unique candidate's actual text (exact and case-sensitive by default). " +
             "Prefer this over polling get_screen_tree in a loop.",
         required = listOf("condition"),
         inputSchema = schema(listOf("condition")) {
@@ -393,10 +395,11 @@ object McpTools {
                 putJsonArray("enum") { add("visible"); add("absent"); add("text"); add("idle") }
             }
             qaSelectorProperties()
+            textComparisonProperties()
             putJsonObject("timeout_ms") { put("type", "integer"); put("description", "Default 5000, max 30000") }
             putJsonObject("interval_ms") { put("type", "integer"); put("description", "Poll interval, default 250") }
             putJsonObject("quiet_ms") { put("type", "integer"); put("description", "Idle: quiet period, default 700") }
-            putJsonObject("package_name") { put("type", "string"); put("description", "Idle: require this app in the foreground") }
+            putJsonObject("package_name") { put("type", "string"); put("description", "Require this app for every condition; otherwise bind to the initial foreground app") }
         },
         requirement = "MCP Touch Service enabled"
     )
@@ -412,7 +415,8 @@ object McpTools {
                 putJsonArray("enum") { add("visible"); add("absent"); add("text"); add("count") }
             }
             qaSelectorProperties()
-            putJsonObject("expected") { put("type", "string"); put("description", "Expected text or count") }
+            textComparisonProperties()
+            putJsonObject("package_name") { put("type", "string"); put("description", "Require this foreground app for the assertion") }
             putJsonObject("timeout_ms") { put("type", "integer"); put("description", "Default 5000, max 30000") }
             putJsonObject("max_dimension") { put("type", "integer"); put("description", "Failure screenshot size, default 900") }
         },
@@ -538,6 +542,13 @@ object McpTools {
         requirement = "Android; MCP Touch Service; one approval for the complete route"
     )
 
+    val getCapabilities = ToolDefinition(
+        name = "get_capabilities",
+        description = "Read Android tool support, current permission blockers, execution location and " +
+            "mutation/restoration classifications. Conditional support is not permission to execute.",
+        inputSchema = schema(emptyList()) {}
+    )
+
     val all: List<ToolDefinition> = listOf(
         getDeviceInfo,
         readFile,
@@ -566,7 +577,8 @@ object McpTools {
         getDeviceState,
         deviceState,
         uiDiff,
-        runRoute
+        runRoute,
+        getCapabilities
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
@@ -602,6 +614,12 @@ object McpTools {
         putJsonObject("content_desc") { put("type", "string"); put("description", "Content description (partial)") }
         putJsonObject("class_name") { put("type", "string"); put("description", "Simple or full class name") }
         putJsonObject("text_exact") { put("type", "boolean"); put("description", "Require exact text (default false)") }
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.textComparisonProperties() {
+        putJsonObject("expected") { put("type", "string"); put("description", "Expected actual text or count; omitted text expectation uses the text selector") }
+        putJsonObject("text_mode") { put("type", "string"); putJsonArray("enum") { add("exact"); add("contains") }; put("description", "Comparison of expected against actual text; default exact") }
+        putJsonObject("ignore_case") { put("type", "boolean"); put("description", "Expected text comparison ignores case (default false); independent of selector matching") }
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.selectorProperties(

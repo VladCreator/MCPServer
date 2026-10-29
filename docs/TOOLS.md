@@ -1,7 +1,7 @@
-# Supported tools — Tester 0.1.5
+# Supported tools — Tester 0.1.6
 
-Tester exposes **28 tools** over MCP on Android (17 device tools + 10 QA-pack tools
-and YAML route execution).
+Tester exposes **29 tools** over MCP on Android (17 device tools + 10 QA-pack tools,
+YAML route execution and capability discovery).
 The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
 `read_file`, `create_notification`, `take_photo`, `get_app_version`,
 `get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
@@ -32,6 +32,7 @@ requirements of each tool.
 | `launch_app` | `package_name` or `app_name`; optional `wait_ms` (default 8000, 0 disables) | Installed app with a launcher activity; from the background also needs overlay permission or MCP Touch Service | Yes | Text confirming the launch. |
 | `list_apps` | `query` (string, optional) | — | No | Launchable apps with visible name and package; optionally filtered. |
 | `health_check` | none | — | No | Server time, uptime, version, Touch Service and special-access state. |
+| `get_capabilities` | none | Android | No | Structured per-tool support, missing permissions, execution location, mutation/risk classification and unsupported controls. |
 | `swipe` | `direction` or `x`/`y`/`to_x`/`to_y`; `duration_ms`, `distance`, `count`, `interval_ms` | **MCP Touch Service** enabled | Yes | Text confirming the swipe. |
 | `get_app_version` | `package_name` (required) | Installed app or Tester | No | versionName, versionCode and install/update times. |
 | `get_logs` | `package_name`, `level`, `query`, `lines`, `crashes` | `READ_LOGS` via ADB for other apps' logs | Yes | Filtered logcat text. |
@@ -43,8 +44,8 @@ requirements of each tool.
 | `global_action` | `action`: `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen` (required) | **MCP Touch Service** enabled | Yes | Text confirming the action. |
 | `qa_session` | `action`: `begin`, `step`, `status`, `end`; `test_case`, `title`, `expected`, `actual`, `status`, `result`, `notes` | App sandbox for reports | No | Session text; end writes JSON + Markdown. |
 | `ui_find` | Selector: `text`, `text_exact`, `resource_id`, `content_desc`, `class_name`, `index`; `include_invisible`, `limit`, `nth` (absolute `match_index`) | **MCP Touch Service** enabled | No | JSON: count + matches with bounds/flags. |
-| `ui_wait` | `condition`: `visible`, `absent`, `text`, `idle`; selector; `timeout_ms`, `interval_ms`, `quiet_ms`, `package_name` (idle waits for that app in front) | **MCP Touch Service** enabled | No | WAIT OK/TIMEOUT with elapsed. |
-| `ui_assert` | `condition`: `visible`, `absent`, `text`, `count`; selector; `expected`, `timeout_ms`, `max_dimension` | **MCP Touch Service** enabled | No | PASS/FAIL; failure includes screenshot + tree excerpt. |
+| `ui_wait` | `condition`: `visible`, `absent`, `text`, `idle`; selector; `expected`, `text_mode`, `ignore_case`, `timeout_ms`, `interval_ms`, `quiet_ms`, `package_name` | **MCP Touch Service** enabled | No | Text plus structured predicate result; every condition checks foreground/window. |
+| `ui_assert` | `condition`: `visible`, `absent`, `text`, `count`; selector; `expected`, `text_mode`, `ignore_case`, `package_name`, `timeout_ms`, `max_dimension` | **MCP Touch Service** enabled | No | Text plus structured predicate result; failure includes screenshot + tree excerpt when capture is available. |
 | `ui_gesture` | `type`: `tap`, `double_tap`, `multi_tap`, `long_press`, `swipe`, `drag`, `pinch`; coordinates or selector; `count`, `interval_ms`, `duration_ms`, `direction`, `radius` | **MCP Touch Service** enabled | Yes | Text confirming the gesture. |
 | `audio_instruction` | `action`: `speak`, `play`, `stop`, `set_volume`; `text`, `path`, `language`, `rate`, `volume`, `loop`, `wait` | Device TTS/audio; path inside sandbox | Yes | Text; TTS defaults to en-US. |
 | `audio_state` | none | — | No | Volume, music active, TTS/player state. |
@@ -58,14 +59,14 @@ requirements of each tool.
 Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
 `global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
-`device_state` and `run_route` (16 of 28).
+`device_state` and `run_route` (16 of 29).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
 must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 
 `get_device_info`, `create_notification`, `list_apps`, `health_check`,
-`get_app_version`, `qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `audio_state`,
+`get_app_version`, `get_capabilities`, `qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `audio_state`,
 `get_device_state` and `ui_diff` run without an extra approval.
 
 ## Requirements
@@ -91,6 +92,34 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
   launcher activity.
 
 ## Recommended UI automation loop
+
+In 0.1.6, text checks require a selector identifying one candidate. `expected`
+compares its actual text, exactly and case-sensitively by default. Use
+`text_mode: "contains"` and/or `ignore_case: true` to change the value comparison.
+These options are independent of `text_exact`, which controls selector matching.
+Without `expected`, a `text` selector retains its selector-based behavior; multiple
+text candidates fail as ambiguous rather than returning a false positive.
+For compatibility, `ui_assert` can infer an exact text selector from a nonempty
+`expected` when no selector is supplied; empty-text expectations need an explicit
+field selector.
+
+All wait/assert conditions require an active window and the requested
+`package_name`, or bind to the initial foreground package if omitted. A missing
+window cannot satisfy `absent` or zero count. Counts of 100 or more are conservatively
+reported as `truncated_count`, not an exact total.
+
+Predicate results include MCP `structuredContent` alongside existing text/images:
+`condition`, `passed`, `reason`, `expected`, `actual`, `truncated`, `elapsed_ms`
+and `retryable`. No action is automatically retried. `device_state restore` now
+returns an error when no snapshot exists or restoration is partial; partial
+failures retain the snapshot. `launch_app` readiness timeout is also an error,
+although the app launch itself may already have occurred.
+
+Capability discovery does not grant authorization. `conditional` indicates target,
+screen or operation-specific requirements; `blocked` includes missing permissions.
+`requires_confirmation_when_enabled` reflects the sensitive-tool policy, not the
+current Settings toggle. Restoration checks stored settings and media volume;
+effective UI configuration changes can still be OS-dependent.
 
 ```
 get_screen_tree
