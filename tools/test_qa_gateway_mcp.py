@@ -95,6 +95,32 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(result["result"]["isError"])
         self.assertIn("Unknown backend", result["result"]["content"][0]["text"])
 
+    def test_route_is_forwarded_without_persisting_payload(self):
+        self.gateway.qa_session({"action": "begin", "test_case": "route"})
+        arguments = {"yaml": "private route", "parameters": {"password": "private"}}
+        result = self.gateway.call("ios__run_route", arguments)
+        self.assertFalse(result["isError"])
+        self.assertEqual(("run_route", arguments), self.backend.calls[-1])
+        self.assertEqual("[route payload omitted]", self.gateway.session.calls[-1]["arguments"])
+
+    def test_route_failure_is_recorded_as_failure(self):
+        self.gateway.qa_session({"action": "begin", "test_case": "route"})
+        self.backend.call = lambda tool, arguments: {"content": [], "isError": True}
+        self.assertTrue(self.gateway.call("ios__run_route", {"yaml": "route"})["isError"])
+        self.assertFalse(self.gateway.session.calls[-1]["ok"])
+
+    def test_route_is_not_replayed_after_session_loss(self):
+        calls = []
+
+        def lose_session(tool, arguments):
+            calls.append(tool)
+            raise gateway.SessionLost("lost")
+
+        self.backend.call = lose_session
+        with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+            self.gateway.call("ios__run_route", {"yaml": "route"})
+        self.assertEqual(["run_route"], calls)
+
 
 class FlakyBackend(FakeBackend):
     """Offline until `online` is set; raises SessionLost once when `expire` is set."""

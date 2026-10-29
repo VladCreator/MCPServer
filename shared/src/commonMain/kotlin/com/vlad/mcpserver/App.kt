@@ -615,7 +615,15 @@ private fun ToolApprovalCard(
                             style = MaterialTheme.typography.titleSmall
                         )
                     }
-                    Text(
+                    if (request.toolName == "run_route") {
+                        Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                            Text(
+                                text = "${request.clientName}\n${request.arguments}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant
+                            )
+                        }
+                    } else Text(
                         text = "${request.clientName} · ${request.arguments}",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,

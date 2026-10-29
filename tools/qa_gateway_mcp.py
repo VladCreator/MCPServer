@@ -326,7 +326,7 @@ class GatewaySession:
         self.calls.append({
             "backend": backend,
             "tool": tool,
-            "arguments": truncate(arguments, 1000),
+            "arguments": "[route payload omitted]" if tool == "run_route" else truncate(arguments, 1000),
             "ok": ok,
             "duration_ms": duration_ms,
             "error": error,
@@ -490,11 +490,17 @@ class Gateway:
             try:
                 result = backend.call(tool, arguments)
             except SessionLost:
+                if tool == "run_route":
+                    raise BackendError(
+                        f"{prefix}: session lost during route; execution outcome is unknown. "
+                        "Route was not retried because actions may already have executed."
+                    ) from None
                 if not backend.connect():
                     raise BackendError(backend.error or f"{prefix}: reconnect failed")
                 result = backend.call(tool, arguments)
             if self.session:
-                self.session.add_call(prefix, tool, arguments, True, int((time.monotonic() - start) * 1000))
+                self.session.add_call(prefix, tool, arguments, not result.get("isError", False),
+                                      int((time.monotonic() - start) * 1000))
             return result
         except Exception as failure:
             if self.session:

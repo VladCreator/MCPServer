@@ -76,7 +76,8 @@ class McpDispatcherTest {
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
 
-        assertEquals(27, tools.size)
+        assertEquals(28, tools.size)
+        assertTrue(tools.contains("run_route"))
         assertEquals(tools.size, tools.toSet().size, "tool names must be unique")
         listOf("qa_session", "ui_find", "ui_wait", "ui_assert", "ui_gesture", "audio_instruction", "audio_state", "get_device_state", "device_state", "ui_diff")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
@@ -84,6 +85,26 @@ class McpDispatcherTest {
             McpTools.all.filter { it.sensitive }.all { it.requirement != null },
             "sensitive tools must declare a requirement for the in-app catalog"
         )
+    }
+
+    @Test
+    fun routeHistoryOmitsPayloadAndResultContent() = runTest {
+        var loggedArguments = ""
+        var loggedMessage = ""
+        val executor = FakeExecutor(ToolResult("private result"))
+        val dispatcher = McpDispatcher(executor = executor, onToolCall = {
+            loggedArguments = it.arguments
+            loggedMessage = it.message
+        })
+        val session = initializedSession(dispatcher)
+        val response = dispatcher.handle(session,
+            """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"run_route","arguments":{"yaml":"private route","parameters":{"password":"private"}}}}"""
+        )!!.jsonObject
+        assertNull(response["error"])
+        assertEquals("run_route", executor.lastTool)
+        assertEquals("[route payload omitted]", loggedArguments)
+        assertFalse(loggedMessage.contains("private"))
+        assertTrue(response.toString().contains("private result"))
     }
 
     @Test

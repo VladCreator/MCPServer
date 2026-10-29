@@ -595,7 +595,7 @@ private class AndroidMcpServerHost(
             clientId = clientId,
             clientName = client?.name ?: "Unknown client",
             toolName = toolName,
-            arguments = arguments.toString().take(2_000),
+            arguments = if (toolName == "run_route") arguments.toString() else arguments.toString().take(2_000),
             requestedAt = nowMillis()
         )
         val decision = kotlinx.coroutines.CompletableDeferred<Boolean>()

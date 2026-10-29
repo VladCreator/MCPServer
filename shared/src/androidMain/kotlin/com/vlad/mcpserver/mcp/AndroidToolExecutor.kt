@@ -23,6 +23,8 @@ import com.vlad.mcpserver.getLocalIpAddress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -62,9 +64,72 @@ class AndroidToolExecutor(
         toolName: String,
         arguments: JsonObject
     ): ToolResult = withContext(Dispatchers.IO) {
-            if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, arguments)) {
+            val route = if (toolName == "run_route") {
+                try {
+                    val source = arguments["yaml"] as? JsonPrimitive
+                    require(source?.isString == true) { "yaml must be a string." }
+                    val parameters = arguments["parameters"]
+                    require(parameters == null || parameters is JsonObject) { "parameters must be an object." }
+                    YamlRouteParser.parse(source.content, parameters as? JsonObject ?: JsonObject(emptyMap()))
+                } catch (error: IllegalArgumentException) {
+                    return@withContext ToolResult("Invalid route: ${error.message}", isError = true)
+                }
+            } else null
+            val approvalArguments = if (route == null) arguments else buildJsonObject {
+                put("route_id", route.id)
+                put("app_id", route.packageName)
+                put("timeout_ms", route.timeoutMs)
+                putJsonArray("steps") {
+                    route.steps.forEach { step ->
+                        add(buildJsonObject {
+                            put("id", step.id)
+                            put("tool", step.tool)
+                            put("arguments", step.arguments)
+                        })
+                    }
+                }
+            }
+            if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, approvalArguments)) {
                 return@withContext ToolResult("User rejected the tool call.", isError = true)
             }
+            if (route != null) {
+                return@withContext routeExecutionMutex.withLock {
+                    YamlRouteRunner().run(route) { step -> executeRouteStep(route, step) }
+                }
+            }
+            if (toolName in ROUTE_SERIALIZED_TOOLS) {
+                routeExecutionMutex.withLock { executeTool(toolName, arguments) }
+            } else executeTool(toolName, arguments)
+        }
+
+    private suspend fun executeRouteStep(route: YamlRoute, step: RouteStep): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val waitsForApp = step.tool == "ui_wait" && step.arguments.string("condition") == "idle"
+        if (step.tool != "launch_app" && !waitsForApp &&
+            service.rootInActiveWindow?.packageName?.toString() != route.packageName
+        ) {
+            return ToolResult("Route stopped: target app is not in the foreground.", isError = true)
+        }
+        if (step.tool in setOf("click_element", "input_text", "scroll")) {
+            val selector = if (step.tool == "input_text") step.arguments.selector("match_text")
+                else step.arguments.selector().copy(
+                    className = step.arguments.string("class_name"),
+                    textExact = step.arguments.bool("text_exact")
+                )
+            if (!selector.isEmpty && ScreenNavigator.findAll(service, selector, 2).size != 1) {
+                return ToolResult("Route stopped: selector must match exactly one visible element.", isError = true)
+            }
+        }
+        val result = executeTool(step.tool, step.arguments)
+        if (!result.isError && step.tool in setOf("ui_wait", "ui_assert") &&
+            service.rootInActiveWindow?.packageName?.toString() != route.packageName
+        ) {
+            return ToolResult("Route stopped: foreground app changed during the check.", isError = true)
+        }
+        return result
+    }
+
+    private suspend fun executeTool(toolName: String, arguments: JsonObject): ToolResult =
             when (toolName) {
                 "get_device_info" -> deviceInfo()
                 "read_file" -> readFile(arguments)
@@ -95,7 +160,6 @@ class AndroidToolExecutor(
                 "ui_diff" -> uiDiff(arguments)
                 else -> ToolResult("Tool '$toolName' is not available.", isError = true)
             }
-        }
 
     private fun deviceInfo(): ToolResult {
         val versionName = runCatching {
@@ -1285,6 +1349,13 @@ class AndroidToolExecutor(
     }
 
     private companion object {
+        val routeExecutionMutex = Mutex()
+        val ROUTE_SERIALIZED_TOOLS = setOf(
+            "touch_test", "launch_app", "swipe", "get_screen_tree", "take_screenshot",
+            "click_element", "input_text", "scroll", "global_action", "ui_find", "ui_wait",
+            "ui_assert", "ui_gesture", "device_state", "get_device_state", "ui_diff", "take_photo",
+            "qa_session", "audio_instruction"
+        )
         const val MAX_FILE_BYTES = 64 * 1024
         const val CHANNEL_ID = "mcp_tools"
         const val DEFAULT_TREE_NODES = 300

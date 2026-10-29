@@ -212,9 +212,11 @@ class McpDispatcher(
         val record = ToolCallRecord(
             clientId = session.client.id,
             toolName = toolName,
-            arguments = arguments.toString().take(MAX_LOGGED_ARGUMENTS),
+            arguments = if (toolName == "run_route") "[route payload omitted]" else arguments.toString().take(MAX_LOGGED_ARGUMENTS),
             outcome = if (result.isError) ToolCallOutcome.FAILED else ToolCallOutcome.SUCCESS,
-            message = result.text.take(MAX_LOGGED_RESULT),
+            message = if (toolName == "run_route") {
+                if (result.isError) "Route failed; see tool response." else "Route completed; see tool response."
+            } else result.text.take(MAX_LOGGED_RESULT),
             timestamp = nowMillis()
         )
         try {

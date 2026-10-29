@@ -1,6 +1,7 @@
 # Supported tools — Tester 0.1.5
 
-Tester exposes **27 tools** over MCP on Android (17 device tools + 10 QA-pack tools).
+Tester exposes **28 tools** over MCP on Android (17 device tools + 10 QA-pack tools
+and YAML route execution).
 The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
 `read_file`, `create_notification`, `take_photo`, `get_app_version`,
 `get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
@@ -50,13 +51,14 @@ requirements of each tool.
 | `get_device_state` | none | — | No | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
 | `device_state` | `action`: `set`, `restore`; `rotation`, `dark_mode`, `font_scale`, `animations`, `volume`, `keep_awake` | `WRITE_SETTINGS`/`WRITE_SECURE_SETTINGS` for some fields | Yes | Applied/restored fields or actionable error. |
 | `ui_diff` | `action`: `save_baseline`, `compare`; `name`, `threshold`, `max_dimension` | **MCP Touch Service**; baseline in app sandbox | No | Diff percentage + PASS/FAIL; failure image. |
+| `run_route` | `yaml` (required), `parameters` (object, optional) | Android; **MCP Touch Service** | Yes, once for expanded route | JSON step results/timings; stops at first failure. See [YAML routes](YAML_ROUTES.md). |
 
 ## Approval behavior
 
 Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
 `global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
-`device_state` (15 of 27).
+`device_state` and `run_route` (16 of 28).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client

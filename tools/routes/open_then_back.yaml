@@ -1,0 +1,34 @@
+schema_version: 1
+id: navigation.open_then_back
+platform: android
+app_id: "${target_package}"
+timeout_ms: 15000
+
+parameters:
+  target_package:
+    type: string
+  open_button_id:
+    type: string
+  list_id:
+    type: string
+  back_delay_ms:
+    type: integer
+    default: 100
+
+steps:
+  - launch_app: {}
+  - wait:
+      condition: idle
+      timeout_ms: 5000
+  - assert:
+      condition: visible
+      resource_id: "${list_id}"
+  - tap:
+      resource_id: "${open_button_id}"
+  - delay:
+      milliseconds: "${back_delay_ms}"
+  - back: {}
+  - assert:
+      condition: visible
+      resource_id: "${list_id}"
+      timeout_ms: 5000

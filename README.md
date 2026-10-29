@@ -42,10 +42,17 @@ Current version: **0.1.5** (Android QA pack complete; iOS embedded QA service im
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 27 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 28 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
+- **YAML task routes (Android)**: `run_route` executes validated, parameterized
+  steps locally with one approval, bounded delays and per-step results. See
+  [`docs/YAML_ROUTES.md`](docs/YAML_ROUTES.md).
+
+Planned QA improvements and reusable task routes are described in
+[`docs/QA_RELIABILITY_PLAN.md`](docs/QA_RELIABILITY_PLAN.md). This roadmap
+distinguishes existing tools from proposed capabilities.
 
 ## UI
 

@@ -518,6 +518,26 @@ object McpTools {
         requirement = "MCP Touch Service; baseline stored in the app sandbox"
     )
 
+    val runRoute = ToolDefinition(
+        name = "run_route",
+        description = "Validate and execute a Tester YAML v1 route locally on Android. " +
+            "Supports launch_app, tap, input_text, scroll, back, delay, wait and assert. " +
+            "Stops on the first failure; no implicit idle waits or retries. Not Maestro compatible.",
+        required = listOf("yaml"),
+        inputSchema = schema(listOf("yaml")) {
+            putJsonObject("yaml") {
+                put("type", "string")
+                put("description", "Inline Tester YAML v1 route, at most 32768 characters")
+            }
+            putJsonObject("parameters") {
+                put("type", "object")
+                put("description", "Typed values for declared route parameters")
+            }
+        },
+        sensitive = true,
+        requirement = "Android; MCP Touch Service; one approval for the complete route"
+    )
+
     val all: List<ToolDefinition> = listOf(
         getDeviceInfo,
         readFile,
@@ -545,7 +565,8 @@ object McpTools {
         audioState,
         getDeviceState,
         deviceState,
-        uiDiff
+        uiDiff,
+        runRoute
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
