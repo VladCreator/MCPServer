@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.2.1** (Android P3 environment controls/recovery; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.2.2** (Android P4 saved scenarios and CI; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -42,7 +42,7 @@ Current version: **0.2.1** (Android P3 environment controls/recovery; iOS embedd
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 40 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 43 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
@@ -64,6 +64,12 @@ Current version: **0.2.1** (Android P3 environment controls/recovery; iOS embedd
   inspection and app-reported build provenance. `device_state` now requires a
   caller-retained recovery key; global dark-mode writes fail explicitly.
   See [`docs/P3_0.2.1.md`](docs/P3_0.2.1.md).
+- **Saved scenarios and CI (0.2.2)**: reviewed APK-bundled routes with exact versions/
+  digests, YAML/structured-input parity, setup and cancellation-safe cleanup,
+  bounded exact-plan consent and canonical JSON/Markdown/JUnit exports.
+  [`tools/tester_ci.py`](tools/tester_ci.py) submits to the native engine, preserves
+  recovery ownership before dispatch and exits nonzero for failed/unfinished cleanup.
+  See [`docs/P4_0.2.2.md`](docs/P4_0.2.2.md).
 
 The [agent-first implementation plan](docs/AGENT_QUALITY_IMPLEMENTATION_PLAN.md)
 prioritizes tool correctness, reliable observations, evidence, environment setup
@@ -281,11 +287,12 @@ addresses, `localhost` and `127.0.0.1`:
 ./gradlew :shared:compileKotlinIosSimulatorArm64
 ```
 
-The suite (40 tests) covers JSON-RPC dispatch, protocol negotiation, tool schema
-validation, errors/batches/notifications, bearer parsing, token storage behavior,
-tool-approval events and the ViewModel event flow. Camera, accessibility, foreground
-service and approval UI are verified manually on a device/emulator because they need
-platform services.
+Host tests cover JSON-RPC dispatch, protocol negotiation, tool schemas, predicates,
+route/scenario compilation, cleanup, scoped consent, report verdicts, token storage
+and ViewModel events. Python gateway/CI contracts and opt-in native fixture suites
+are described in the versioned [release notes](docs/P4_0.2.2.md). Camera,
+accessibility, foreground service and approval UI need device/emulator platform
+services; host tests alone do not certify them.
 
 ## Architecture
 

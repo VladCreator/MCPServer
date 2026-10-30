@@ -135,9 +135,34 @@ class GatewayTests(unittest.TestCase):
     def test_run_recovery_arguments_are_not_persisted(self):
         self.gateway.qa_session({"action": "begin", "test_case": "recovery"})
         for tool in ("get_run", "cancel_run", "collect_failure_bundle", "export_run", "get_artifact",
-                     "device_state", "open_link", "clipboard", "qa_session"):
+                     "device_state", "open_link", "clipboard", "qa_session", "route_policy"):
             self.gateway.call("ios__" + tool, {"run_id": "id", "run_key": "private key"})
             self.assertEqual("[private tool payload omitted]", self.gateway.session.calls[-1]["arguments"])
+
+    def test_canonical_run_reference_is_preserved_without_duplicating_native_steps(self):
+        self.gateway.qa_session({"action": "begin", "test_case": "catalog"})
+        run_id = "12345678-1234-1234-1234-123456789abc"
+        self.backend.call = lambda tool, args: {"isError": False, "structuredContent": {
+            "run_id": run_id, "run_key": "SECRET", "steps": [{"output": "SECRET"}]}}
+        self.gateway.call("ios__run_route", {"policy_id": "SECRET"})
+        call = self.gateway.session.calls[-1]
+        self.assertEqual({"run_id": run_id, "source": "native_canonical"}, call["native_run"])
+        self.assertNotIn("SECRET", json.dumps(call))
+        markdown = self.gateway._markdown(self.gateway._report())
+        self.assertIn(f"native_run={run_id} (canonical)", markdown)
+        self.assertNotIn("SECRET", markdown)
+
+    def test_scoped_policy_is_not_replayed_after_session_loss(self):
+        calls = []
+
+        def lose_session(tool, arguments):
+            calls.append(tool)
+            raise gateway.SessionLost("lost")
+
+        self.backend.call = lose_session
+        with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+            self.gateway.call("ios__route_policy", {"action": "grant"})
+        self.assertEqual(["route_policy"], calls)
 
     def test_failure_bundle_is_not_recaptured_after_session_loss(self):
         calls = []

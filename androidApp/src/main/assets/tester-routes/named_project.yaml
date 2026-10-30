@@ -1,0 +1,17 @@
+schema_version: 2
+id: fixture.named_project
+version: 1.0.0
+platform: android
+app_id: com.vlad.mcpserver.fixture
+timeout_ms: 15000
+setup:
+  - device_state: {keep_awake: true}
+  - open_link: {uri: "tester-fixture://route/cards"}
+  - wait: {condition: idle, timeout_ms: 3000}
+steps:
+  - tap: {resource_id: open, within: {resource_id: project_beta}}
+postconditions:
+  - assert: {condition: text, resource_id: status, expected: "Opened Beta"}
+  - assert: {condition: text, resource_id: action_count, expected: "1"}
+cleanup:
+  - input_text: {resource_id: field, within: {resource_id: project_beta}, text: "Beta input"}

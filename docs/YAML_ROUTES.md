@@ -1,12 +1,14 @@
-# Tester YAML routes (Android, schema v1)
+# Tester routes and scenarios (Android, schema v1/v2)
 
 `run_route` accepts an inline YAML document and optional typed parameters. Tester
 validates the entire document before requesting approval or executing any action,
 then executes the expanded steps locally. This is a small Tester-specific language,
 inspired by Maestro; Maestro flow files are not compatible.
 
-The initial implementation supports inline routes, not a stored route catalog.
-Keep reusable YAML in your repository and send its contents through MCP.
+Schema v1 remains compatible. Since 0.2.2, schema v2 adds lifecycle phases, a
+reviewed APK-bundled catalog and structured `scenario` input using the same compiler.
+See [P4](P4_0.2.2.md) for schema v2, exact-version discovery and CI consent.
+Clients cannot edit the bundled catalog; inline definitions remain supported.
 [`open_then_back.yaml`](../tools/routes/open_then_back.yaml) is a parameterized
 example; obtain actual package/resource IDs from the target app before running it.
 
@@ -113,7 +115,8 @@ Actions default to `visibility: fully_visible`; checks default to accessibility
 visibility. These policies use reported geometry, not guaranteed overlay detection.
 
 Indices, `nth`, ephemeral `element_ref`, subroutes, loops, scripts, arbitrary tool
-calls, connectivity changes and state mutations are intentionally unsupported.
+calls and connectivity changes are intentionally unsupported. State mutations are
+available only in schema v2 setup, with automatic owned restoration.
 
 ## Execution and consent
 
@@ -166,7 +169,7 @@ before submitting a new attempt; this is deduplication, not exactly-once executi
 
 Queue waiting has a separate 250–30000 ms limit (default 10000); the route deadline
 starts after lock acquisition. Cancellation is cooperative and cannot undo actions.
-Recovery/deduplication lasts only while a run is retained: at most 64 runs, 8
+Recovery/deduplication lasts only while a run is retained: at most 128 runs, 8
 active/pending; expired terminal runs are pruned on admission after 7 days.
 
 ## Results, history and limitations
@@ -197,5 +200,5 @@ Container scoping and standalone session-bound references are implemented in 0.1
 saved routes intentionally use stable selectors, not transient references.
 Standalone combined waits are available through `wait_for_state`; no YAML extension
 is required. P3 adds standalone owned environment recovery and app-reported build
-provenance; see [P3](P3_0.2.1.md). Saved route catalogs and scenario setup/cleanup
-remain P4 in [`AGENT_QUALITY_IMPLEMENTATION_PLAN.md`](AGENT_QUALITY_IMPLEMENTATION_PLAN.md).
+provenance; see [P3](P3_0.2.1.md). P4 adds versioned saved scenarios, bounded
+cleanup, exact-plan policies and canonical JUnit exports; see [P4](P4_0.2.2.md).

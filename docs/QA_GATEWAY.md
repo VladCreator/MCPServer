@@ -1,4 +1,4 @@
-# Unified QA Gateway — 0.2.1
+# Unified QA Gateway — 0.2.2
 
 Android 0.1.7 dynamically exposes `android__observe_screen`; its structured
 observation and optional image are forwarded unchanged. Element references remain
@@ -12,13 +12,22 @@ not another unkeyed submission. Run/evidence arguments, results and failure
 details are omitted from gateway history so recovery keys do not enter reports.
 See [P2](P2_0.2.0.md) for privacy, retention and interruption semantics.
 
-Android 0.2.1 exposes `android__open_link`, `android__clipboard` and
+Android 0.2.1+ exposes `android__open_link`, `android__clipboard` and
 `android__get_test_environment`. `android__device_state` requires `state_key`;
 the gateway forwards it but omits environment arguments/results/errors from its
 call history. Environment mutations are not replayed after session loss.
 `android__qa_session end` performs native owned cleanup; the gateway's unprefixed
 `qa_session` only manages its report and does not restore device settings.
 See [P3](P3_0.2.1.md) for ownership, provenance and unsupported-adapter limits.
+
+Android 0.2.2 also exposes `android__list_routes`, `android__get_route` and
+`android__route_policy`. YAML, structured scenarios and exact catalog execution
+all go through native `android__run_route`; the gateway does not interpret phases
+or execute timing-critical steps. Granting a policy always needs dashboard approval.
+The gateway never retries policy mutation or run submission after session loss.
+Gateway call entries reference a validated native `run_id` without copying keys,
+policy contents or native step reports; `get_run`/`export_run` remain canonical.
+The standalone [CI CLI](P4_0.2.2.md) connects directly to native HTTP MCP.
 
 The QA Gateway is a **stdio MCP server on the Mac** that presents Android and iOS
 QA backends through one tool list and one gateway QA report.

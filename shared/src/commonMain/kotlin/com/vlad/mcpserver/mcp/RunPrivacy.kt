@@ -7,7 +7,7 @@ internal object RunPrivacy {
     private val values = setOf(
         "id", "tool", "status", "reason", "condition", "execution_location", "run_id",
         "schema_version", "started_at_ms", "duration_ms", "elapsed_ms", "requested_delay_ms",
-        "passed", "truncated", "retryable", "action_dispatched"
+        "passed", "truncated", "retryable", "action_dispatched", "phase", "offset_ms", "pending_cleanup"
     )
 
     fun step(value: JsonObject): JsonObject = buildJsonObject {

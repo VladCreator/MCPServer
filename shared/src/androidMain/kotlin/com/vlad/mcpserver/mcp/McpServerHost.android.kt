@@ -591,7 +591,7 @@ private class AndroidMcpServerHost(
         toolName: String,
         arguments: kotlinx.serialization.json.JsonObject
     ): Boolean {
-        if (!shouldConfirmTools() || !McpTools.isSensitive(toolName)) return true
+        if (toolName != "route_policy" && (!shouldConfirmTools() || !McpTools.isSensitive(toolName))) return true
 
         val client = sessions[clientId]?.client
         val request = ToolApprovalRequest(
@@ -599,7 +599,7 @@ private class AndroidMcpServerHost(
             clientId = clientId,
             clientName = client?.name ?: "Unknown client",
             toolName = toolName,
-            arguments = if (toolName == "run_route") arguments.toString() else arguments.toString().take(2_000),
+            arguments = if (toolName in setOf("run_route", "route_policy")) arguments.toString() else arguments.toString().take(2_000),
             requestedAt = nowMillis()
         )
         val decision = kotlinx.coroutines.CompletableDeferred<Boolean>()

@@ -33,6 +33,16 @@ class FixtureActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        render(savedInstanceState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.data != null) render(null)
+    }
+
+    private fun render(savedInstanceState: Bundle?) {
         val mode = intent.getStringExtra("screen") ?: "cards"
         if (mode == "secure") window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         val column = LinearLayout(this).apply {
@@ -78,7 +88,7 @@ class FixtureActivity : ComponentActivity() {
             for (screen in listOf("compose", "webview", "secure")) {
                 column.addView(button("Show $screen") {
                     startActivity(Intent(this, FixtureActivity::class.java).putExtra("screen", screen))
-                })
+                }.apply { if (screen == "compose") id = R.id.show_compose })
             }
             column.addView(label("Unicode: café 日本語 😀"))
             column.addView(label("Scrollable synthetic footer"), LinearLayout.LayoutParams(-1, dp(800)))

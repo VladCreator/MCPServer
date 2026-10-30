@@ -25,16 +25,10 @@ internal class AndroidEnvironmentTools(private val context: Context) {
     suspend fun openLink(arguments: JsonObject): ToolResult {
         val pkg = packageName(arguments)
         val raw = arguments.string("uri") ?: return failure("invalid_uri", "uri is required.")
-        if (raw.length !in 1..2048 || raw.any { it.isWhitespace() || it.code < 32 })
-            return failure("invalid_uri", "URI must be 1-2048 characters without whitespace/control characters.")
-        val uri = Uri.parse(raw)
-        val scheme = uri.scheme?.lowercase()
-        if (scheme == null || !Regex("[a-z][a-z0-9+.-]*").matches(scheme) ||
-            scheme in setOf("file", "content", "intent", "javascript", "data", "tel", "sms", "smsto", "mailto",
-                "package", "market", "android-app") ||
-            !uri.isHierarchical || uri.host.isNullOrBlank() || uri.userInfo != null) {
-            return failure("invalid_uri", "Only hierarchical HTTP(S)/custom app links without credentials are supported.")
+        try { AppLink.validate(raw) } catch (error: IllegalArgumentException) {
+            return failure("invalid_uri", error.message ?: "Invalid app link.")
         }
+        val uri = Uri.parse(raw)
         val wait = if ("wait_ms" in arguments) {
             val value = arguments["wait_ms"] as? JsonPrimitive
             require(value != null && !value.isString && value.intOrNull != null) { "wait_ms must be an integer." }
@@ -44,7 +38,7 @@ internal class AndroidEnvironmentTools(private val context: Context) {
         val service = McpTouchAccessibilityService.instance()
             ?: return failure("accessibility_required", "Enable accessibility to verify target readiness before launching.")
         val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(pkg)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val candidates = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
             .map { it.activityInfo }.filter { it.exported && it.enabled && it.packageName == pkg && it.permission == null }
         if (candidates.size != 1) return failure("ambiguous_or_unavailable_handler",

@@ -5,6 +5,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import select
 import subprocess
 import sys
@@ -15,10 +16,10 @@ import urllib.request
 from pathlib import Path
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
-GATEWAY_VERSION = "0.2.1"
+GATEWAY_VERSION = "0.2.2"
 PRIVATE_HISTORY_TOOLS = {
     "run_route", "get_run", "cancel_run", "collect_failure_bundle",
-    "export_run", "get_artifact", "wait_for_state", "device_state", "qa_session", "open_link", "clipboard",
+    "export_run", "get_artifact", "wait_for_state", "device_state", "qa_session", "open_link", "clipboard", "route_policy",
 }
 
 
@@ -326,7 +327,7 @@ class GatewaySession:
             "at": iso_now(),
         })
 
-    def add_call(self, backend, tool, arguments, ok, duration_ms, error=None):
+    def add_call(self, backend, tool, arguments, ok, duration_ms, error=None, run_reference=None):
         self.calls.append({
             "backend": backend,
             "tool": tool,
@@ -335,6 +336,7 @@ class GatewaySession:
             "duration_ms": duration_ms,
             "error": "[private tool failure omitted]" if error and tool in PRIVATE_HISTORY_TOOLS else error,
             "at": iso_now(),
+            "native_run": run_reference,
         })
 
 
@@ -494,7 +496,7 @@ class Gateway:
             try:
                 result = backend.call(tool, arguments)
             except SessionLost:
-                if tool in {"run_route", "collect_failure_bundle", "device_state", "open_link", "clipboard", "qa_session"}:
+                if tool in {"run_route", "route_policy", "collect_failure_bundle", "device_state", "open_link", "clipboard", "qa_session"}:
                     raise BackendError(
                         f"{prefix}: session lost during {tool}; execution outcome is unknown. "
                         "Tool was not retried because actions or capture may already have executed."
@@ -503,8 +505,14 @@ class Gateway:
                     raise BackendError(backend.error or f"{prefix}: reconnect failed")
                 result = backend.call(tool, arguments)
             if self.session:
+                data = result.get("structuredContent", {})
+                run_reference = None
+                if tool in {"run_route", "get_run", "cancel_run"} and isinstance(data, dict):
+                    run_id = data.get("run_id")
+                    if isinstance(run_id, str) and re.fullmatch(r"[a-f0-9-]{36}", run_id):
+                        run_reference = {"run_id": run_id, "source": "native_canonical"}
                 self.session.add_call(prefix, tool, arguments, not result.get("isError", False),
-                                      int((time.monotonic() - start) * 1000))
+                                      int((time.monotonic() - start) * 1000), run_reference=run_reference)
             return result
         except Exception as failure:
             if self.session:
@@ -552,7 +560,9 @@ class Gateway:
         lines.append("")
         lines.append("## Tool calls")
         for call in report["tool_calls"]:
-            lines.append(f"- {call['backend']}__{call['tool']} ok={call['ok']} {call['duration_ms']}ms")
+            native = call.get("native_run")
+            reference = f" native_run={native['run_id']} (canonical)" if native else ""
+            lines.append(f"- {call['backend']}__{call['tool']} ok={call['ok']} {call['duration_ms']}ms{reference}")
         return "\n".join(lines) + "\n"
 
     @staticmethod

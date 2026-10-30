@@ -66,7 +66,7 @@ fun toolIcon(name: String): ImageVector = when (name) {
     "ui_diff" -> Icons.Rounded.Compare
     "ui_gesture" -> Icons.Rounded.Gesture
     "qa_session" -> Icons.Rounded.Checklist
-    "run_route" -> Icons.Rounded.Checklist
+    "run_route", "list_routes", "get_route", "route_policy" -> Icons.Rounded.Checklist
     "get_capabilities" -> Icons.Rounded.Info
     "device_state", "open_link", "clipboard", "get_test_environment" -> Icons.Rounded.Tune
     "get_device_state" -> Icons.Rounded.Settings

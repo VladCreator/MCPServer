@@ -27,7 +27,8 @@ internal class RunStore private constructor(context: Context) :
     }
 
     @Synchronized fun admit(
-        key: String, submission: String, digest: String, steps: List<RouteStep>, privacySensitive: Boolean, packageName: String
+        key: String, submission: String, digest: String, steps: List<RouteStep>, privacySensitive: Boolean, packageName: String,
+        metadata: JsonObject = JsonObject(emptyMap())
     ): Pair<JsonObject, Boolean> {
         require(KEY.matches(key)) { "run_key must be 32-128 URL-safe characters generated with cryptographic randomness." }
         require(SUBMISSION.matches(submission)) { "submission_id must be 1-80 letters, digits, dot, underscore or hyphen." }
@@ -46,9 +47,10 @@ internal class RunStore private constructor(context: Context) :
             prune(db)
             val all = rows(db)
             check(all.count { it.string("status") in ACTIVE } < 8) { "Eight runs are already pending or active; wait or cancel." }
-            check(all.size < 64) { "Run retention limit reached; wait for retention expiry." }
+            check(all.size < 128) { "Run retention limit reached; wait for retention expiry." }
             val id = UUID.randomUUID().toString()
             val body = buildJsonObject {
+                metadata.forEach { (key, value) -> put(key, value) }
                 put("run_id", id); put("status", "awaiting_approval")
                 put("plan_digest", digest); put("created_at_ms", System.currentTimeMillis())
                 put("disconnect_policy", "continue_until_terminal")
@@ -57,6 +59,7 @@ internal class RunStore private constructor(context: Context) :
                 put("target_package", packageName)
                 put("steps", JsonArray(steps.map { buildJsonObject {
                     put("id", it.id); put("tool", it.tool); put("status", "pending")
+                    put("phase", it.phase)
                     put("arguments", "[omitted]")
                 } }))
             }
@@ -89,7 +92,7 @@ internal class RunStore private constructor(context: Context) :
         val (total, count) = db.rawQuery("SELECT COALESCE(SUM(length(body)),0),COUNT(*) FROM artifacts", null).use {
             it.moveToFirst(); it.getLong(0) to it.getInt(1)
         }
-        check(count < 256) { "Artifact retention count limit of 256 reached." }
+        check(count < 512) { "Artifact retention count limit of 512 reached." }
         check(total + bytes.size <= 20 * 1024 * 1024) { "Artifact retention quota of 20 MiB reached." }
         val id = UUID.randomUUID().toString()
         db.insertOrThrow("artifacts", null, ContentValues().apply {

@@ -68,6 +68,8 @@ class AndroidToolExecutor(
     private val deviceState = AndroidDeviceStateController.get(context)
     private val qa = QaSessionManager(context)
     private val environment = AndroidEnvironmentTools(context)
+    private val catalog by lazy { ScenarioCatalog { path -> context.assets.open(path).bufferedReader().use { it.readText() } } }
+    private val routePolicies = ScenarioPolicies(SystemClock::elapsedRealtime)
     private val durableDelegate = lazy { DurableRoutes(context, routeExecutionMutex) }
     private val durable by durableDelegate
     private val startedAt = SystemClock.elapsedRealtime()
@@ -90,49 +92,62 @@ class AndroidToolExecutor(
             }
             val route = if (toolName == "run_route") {
                 try {
-                    val source = arguments["yaml"] as? JsonPrimitive
-                    require(source?.isString == true) { "yaml must be a string." }
-                    val parameters = arguments["parameters"]
-                    require(parameters == null || parameters is JsonObject) { "parameters must be an object." }
-                    YamlRouteParser.parse(source.content, parameters as? JsonObject ?: JsonObject(emptyMap()))
+                    resolveRoute(arguments).also { route ->
+                        route.steps.filter { it.tool == "device_state" }.forEach { deviceState.validateSetup(it.arguments) }
+                    }
                 } catch (error: IllegalArgumentException) {
                     return@withContext ToolResult("Invalid route: ${error.message}", isError = true)
+                } catch (error: IllegalStateException) {
+                    return@withContext targetingError("setup_unavailable", error.message ?: "Scenario setup unavailable.")
                 }
             } else null
-            val approvalArguments = if (route == null) JsonObject(arguments.filterKeys { it !in setOf("run_key", "state_key") }) else buildJsonObject {
-                put("route_id", route.id)
-                put("app_id", route.packageName)
-                put("timeout_ms", route.timeoutMs)
+            val approvalArguments = if (route == null) JsonObject(arguments.filterKeys { it !in setOf("run_key", "state_key", "policy_id") }) else buildJsonObject {
+                route.plan().forEach { (key, value) -> put(key, value) }
                 put("mode", arguments.string("mode") ?: "sync")
                 put("disconnect_policy", "continue_until_terminal")
                 put("failure_evidence", if (arguments.optionalBool("privacy_sensitive") == false)
                     "automatic bundle metadata only; direct assertion failure images may be unmasked"
                     else "bounded metadata; all free text/log messages redacted; screenshots omitted")
                 put("privacy_sensitive", arguments.optionalBool("privacy_sensitive") ?: true)
-                putJsonArray("steps") {
-                    route.steps.forEach { step ->
-                        add(buildJsonObject {
-                            put("id", step.id)
-                            put("tool", step.tool)
-                            put("arguments", step.arguments)
-                        })
-                    }
-                }
+                put("state_recovery", "Automatic restoration uses run_key; retain it before setup. Unfinished restoration remains pending.")
             }
             if (route != null) {
                 return@withContext try {
                     durable.submit(route, arguments,
-                        approve = { consent(clientId, toolName, approvalArguments) },
+                        approve = {
+                            val policy = arguments.string("policy_id")
+                            if (policy == null) consent(clientId, toolName, approvalArguments)
+                            else route.catalogDigest != null && routePolicies.consume(clientId, policy,
+                                routePolicies.identity(route, arguments.optionalBool("privacy_sensitive") ?: true))
+                        },
                         failureEvidence = { runId ->
                             collectFailureBundle(clientId, runId, route.packageName, includeScreenshot = false)
                         }
-                    ) { step -> executeRouteStep(clientId, route, step,
-                        privacySensitive = arguments.optionalBool("privacy_sensitive") ?: true) }
+                    ) { step, key ->
+                        when (step.tool) {
+                            "device_state" -> deviceState.set(deviceState.owner(key), step.arguments)
+                            "restore_state" -> {
+                                val owner = deviceState.owner(key)
+                                val status = deviceState.status(owner)
+                                if (status.isError || status.structuredContent?.string("reason") == "no_snapshot") status
+                                else deviceState.restore(owner)
+                            }
+                            else -> executeRouteStep(clientId, route, step,
+                                privacySensitive = arguments.optionalBool("privacy_sensitive") ?: true)
+                        }
+                    }
                 } catch (error: IllegalArgumentException) {
                     targetingError("invalid_run", error.message ?: "Invalid run submission.")
                 } catch (error: IllegalStateException) {
                     targetingError("run_unavailable", error.message ?: "Run store unavailable.")
                 }
+            }
+            if (toolName == "route_policy") return@withContext try {
+                routePolicy(clientId, arguments)
+            } catch (error: IllegalArgumentException) {
+                targetingError("invalid_policy", error.message ?: "Invalid policy.")
+            } catch (error: IllegalStateException) {
+                targetingError("policy_unavailable", error.message ?: "Policy unavailable.")
             }
             if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, approvalArguments)) {
                 return@withContext ToolResult("User rejected the tool call.", isError = true,
@@ -160,7 +175,7 @@ class AndroidToolExecutor(
     ): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val waitsForApp = step.tool == "ui_wait" && step.arguments.string("condition") == "idle"
-        if (step.tool != "launch_app" && !waitsForApp &&
+        if (step.tool !in setOf("launch_app", "open_link") && !waitsForApp &&
             service.rootInActiveWindow?.packageName?.toString() != route.packageName
         ) {
             return ToolResult("Route stopped: target app is not in the foreground.", isError = true)
@@ -185,6 +200,68 @@ class AndroidToolExecutor(
         return result
     }
 
+    private fun resolveRoute(arguments: JsonObject): YamlRoute {
+        require(arguments.keys.all { it in setOf("yaml", "scenario", "route_id", "version", "digest", "parameters",
+            "mode", "run_key", "submission_id", "disconnect_policy", "queue_timeout_ms", "privacy_sensitive", "policy_id") }) {
+            "Unknown run_route argument."
+        }
+        require(listOf("yaml", "scenario", "route_id").count { it in arguments } == 1) {
+            "Provide exactly one of yaml, scenario or exact catalog route_id/version/digest."
+        }
+        if ("route_id" in arguments) return catalog.resolve(arguments)
+        require(arguments.keys.none { it in setOf("version", "digest", "policy_id") }) {
+            "version/digest/policy_id require an unmodified catalog route."
+        }
+        val parameters = arguments["parameters"] ?: JsonObject(emptyMap())
+        require(parameters is JsonObject) { "parameters must be an object." }
+        return if ("scenario" in arguments) {
+            val scenario = arguments["scenario"]
+            require(scenario is JsonObject) { "scenario must be a structured object." }
+            YamlRouteParser.parse(scenario, parameters)
+        } else {
+            val source = arguments["yaml"] as? JsonPrimitive
+            require(source?.isString == true) { "yaml must be a string." }
+            YamlRouteParser.parse(source.content, parameters)
+        }
+    }
+
+    private suspend fun routePolicy(clientId: String, arguments: JsonObject): ToolResult {
+        require(arguments.keys.all { it in setOf("action", "policy_id", "route_id", "version", "digest", "parameters",
+            "privacy_sensitive", "max_runs", "ttl_ms") }) { "Unknown policy argument." }
+        val action = arguments.string("action")
+        val result = when (action) {
+            "status", "revoke" -> {
+                require(arguments.keys.all { it in setOf("action", "policy_id") })
+                val id = arguments.string("policy_id") ?: error("policy_id is required.")
+                if (action == "status") routePolicies.status(clientId, id) else routePolicies.revoke(clientId, id)
+            }
+            "grant" -> {
+                require("policy_id" !in arguments)
+                val route = catalog.resolve(arguments)
+                fun number(key: String, default: Int, range: IntRange): Int {
+                    if (key !in arguments) return default
+                    val value = arguments[key] as? JsonPrimitive
+                    val number = value?.takeUnless { it.isString }?.content?.toIntOrNull()
+                    require(number != null && number in range) { "Invalid $key." }
+                    return number
+                }
+                val count = number("max_runs", 1, 1..30)
+                val ttl = number("ttl_ms", 600000, 1000..900000)
+                val privacy = arguments.optionalBool("privacy_sensitive") ?: true
+                val approval = JsonObject(route.plan() + buildJsonObject {
+                    put("max_runs", count); put("ttl_ms", ttl); put("privacy_sensitive", privacy)
+                    put("scope", "Exact expanded plan, current approved session, process lifetime, fresh attempts only")
+                    put("cleanup", "Automatic touched-state restoration using each retained run_key; failures remain pending")
+                })
+                if (!consent(clientId, "route_policy", approval))
+                    return targetingError("consent_denied", "Scenario policy rejected; no authority granted.")
+                routePolicies.grant(clientId, routePolicies.identity(route, privacy), count, ttl.toLong())
+            }
+            else -> throw IllegalArgumentException("action must be grant, status or revoke.")
+        }
+        return ToolResult(result.toString(), structuredContent = result)
+    }
+
     private suspend fun executeTool(clientId: String, toolName: String, arguments: JsonObject): ToolResult {
         val result = when (toolName) {
                 "get_device_info" -> deviceInfo()
@@ -203,6 +280,8 @@ class AndroidToolExecutor(
                 "observe_screen" -> observeScreen(clientId, arguments)
                 "wait_for_state" -> waitForState(arguments)
                 "get_run" -> durable.get(arguments)
+                "list_routes" -> catalog.list().let { ToolResult(it.toString(), structuredContent = it) }
+                "get_route" -> catalog.get(arguments).let { ToolResult(it.toString(), structuredContent = it) }
                 "cancel_run" -> durable.cancel(arguments)
                 "get_build_identity" -> buildIdentity(arguments)
                 "open_link" -> environment.openLink(arguments)
@@ -270,7 +349,7 @@ class AndroidToolExecutor(
             "touch_test", "launch_app", "swipe", "click_element", "input_text", "scroll",
             "global_action", "ui_gesture", "run_route", "create_notification", "take_photo",
             "qa_session", "ui_diff", "audio_instruction", "device_state", "collect_failure_bundle", "export_run", "cancel_run",
-            "open_link", "clipboard"
+            "open_link", "clipboard", "route_policy"
         )
         val result = buildJsonObject {
             put("platform", "android")
@@ -304,6 +383,7 @@ class AndroidToolExecutor(
                             else "available")
                         putJsonArray("missing_permissions") { missing.forEach { add(it) } }
                         put("requires_confirmation_when_enabled", tool.sensitive)
+                        if (tool.name == "route_policy") put("grant_always_requires_confirmation", true)
                         put("target_app_dependency", when (tool.name) {
                             "get_logs" -> "Other-app logs require READ_LOGS and OS/user log-access approval."
                             "launch_app", "get_app_version", "get_build_identity" -> "Target must be installed and visible to Android package queries."
@@ -333,6 +413,14 @@ class AndroidToolExecutor(
                 put("volume_keep_awake", "System policy may reject changes; restore requires a snapshot")
                 put("ownership", "Required random state_key; retain for process/reconnection recovery")
                 put("pending_recovery", deviceState.hasSnapshot())
+            }
+            putJsonObject("scenarios") {
+                put("schema_versions", JsonArray(listOf(JsonPrimitive(1), JsonPrimitive(2))))
+                put("catalog", "immutable_apk_bundled; exact version and SHA-256 required")
+                put("scoped_policy", "session/process scoped; exact expanded plan/privacy; 1-30 attempts; <=15 minutes; explicit approval")
+                put("cleanup", "bounded cancellation-safe; run_key recovers pending touched-state restoration")
+                put("subscenarios", "unsupported"); put("action_retries", false)
+                put("exports", JsonArray(listOf("json", "markdown", "junit").map(::JsonPrimitive)))
             }
             putJsonArray("unsupported_controls") {
                 listOf("permission_grant_revoke", "global_locale", "target_locale_mutation", "mock_location",
@@ -1534,10 +1622,10 @@ class AndroidToolExecutor(
                 "state_key must be a random URL-safe secret, 32-128 characters."
             }
         }
-        if (toolName in setOf("run_route", "get_run", "cancel_run", "collect_failure_bundle",
+        if (toolName in setOf("run_route", "route_policy", "get_route", "get_run", "cancel_run", "collect_failure_bundle",
                 "export_run", "get_artifact", "get_build_identity", "wait_for_state")) {
             for (name in listOf("mode", "run_key", "submission_id", "disconnect_policy", "run_id",
-                    "artifact_id", "package_name", "format")) arguments[name]?.let {
+                    "artifact_id", "package_name", "format", "route_id", "version", "digest", "policy_id")) arguments[name]?.let {
                 require(it is JsonPrimitive && it.isString && it.content.isNotBlank()) { "$name must be a nonempty string." }
             }
             for (name in listOf("privacy_sensitive", "include_screenshot")) arguments[name]?.let {
@@ -1949,20 +2037,12 @@ class AndroidToolExecutor(
     private fun exportRun(arguments: JsonObject): ToolResult {
         val run = durable.owned(arguments)
         val format = arguments.string("format") ?: "json"
-        require(format in setOf("json", "markdown")) { "format must be json or markdown." }
-        val content = if (format == "json") run.toString() else buildString {
-            appendLine("# Tester run ${run.string("run_id")}")
-            appendLine("\nStatus: ${run.string("status")}\n\nFree text and step arguments are redacted.\n")
-            appendLine("| Step | Tool | Status | Duration (ms) |")
-            appendLine("| --- | --- | --- | --- |")
-            run.getValue("steps").jsonArray.forEach { raw ->
-                val step = raw.jsonObject
-                appendLine("| ${step.string("id")} | ${step.string("tool")} | ${step.string("status")} | ${step.string("duration_ms") ?: ""} |")
-            }
+        val (mime, content) = RunReports.export(run, format)
+        val id = durable.store.artifact(run.string("run_id")!!, mime, content.toByteArray())
+        val data = buildJsonObject {
+            put("artifact_id", id); put("run_id", run.string("run_id")); put("format", format)
+            put("size_bytes", content.toByteArray().size); put("content_redacted", true); put("content", content)
         }
-        val id = durable.store.artifact(run.string("run_id")!!,
-            if (format == "json") "application/json" else "text/markdown", content.toByteArray())
-        val data = buildJsonObject { put("artifact_id", id); put("format", format); put("size_bytes", content.toByteArray().size) }
         return ToolResult(data.toString(), structuredContent = data)
     }
 
@@ -1976,7 +2056,10 @@ class AndroidToolExecutor(
         return ToolResult(artifact.second.toString(Charsets.UTF_8))
     }
 
-    fun stopRuns() { if (durableDelegate.isInitialized()) durable.stop() }
+    fun stopRuns() {
+        routePolicies.clear()
+        if (durableDelegate.isInitialized()) durable.stop()
+    }
 
     private fun JsonObject.optionalBool(key: String): Boolean? {
         val value = (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() ?: return null

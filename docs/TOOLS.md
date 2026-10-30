@@ -1,7 +1,8 @@
-# Supported tools — Tester 0.2.1
+# Supported tools — Tester 0.2.2
 
-Tester exposes **40 tools** over MCP on Android, including combined waits,
-durable routes, private evidence, owned recovery and explicit environment controls.
+Tester exposes **43 tools** over MCP on Android, including combined waits,
+durable scenarios, reviewed route discovery, scoped CI consent, private evidence,
+owned recovery and explicit environment controls.
 The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
 `read_file`, `create_notification`, `take_photo`, `get_app_version`,
 `get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
@@ -53,13 +54,16 @@ requirements of each tool.
 | `get_device_state` | none | — | No | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
 | `device_state` | `action`: `set`, `restore`, `status`; required secret `state_key`; `rotation`, `font_scale`, `animations`, `volume`, `keep_awake` | `WRITE_SETTINGS` for rotation/font; `WRITE_SECURE_SETTINGS` for animations | Yes | Only touched originals persisted before writes; effective readback, owned recovery and pending failed fields. `dark_mode` explicitly unsupported. |
 | `ui_diff` | `action`: `save_baseline`, `compare`; `name`, `threshold`, `max_dimension` | **MCP Touch Service**; baseline in app sandbox | No | Diff percentage + PASS/FAIL; failure image. |
-| `run_route` | `yaml`, optional `parameters`, `mode`, `run_key`, `submission_id`, `disconnect_policy`, `queue_timeout_ms`, `privacy_sensitive` | Android; **MCP Touch Service** | Yes, once for expanded route | Durable run identity and redacted timeline; synchronous call also returns live outputs. See [YAML routes](YAML_ROUTES.md). |
+| `run_route` | Exactly one of `yaml`, structured `scenario`, or catalog `route_id`/`version`/`digest`; optional `parameters`, `mode`, `run_key`, `submission_id`, `disconnect_policy`, `queue_timeout_ms`, `privacy_sensitive`, `policy_id` | Android; **MCP Touch Service** | Once for expanded plan, or exact approved catalog policy | Same native lifecycle for YAML/JSON/catalog; schema 2 phases and automatic touched-state cleanup. |
+| `list_routes` | none | Bundled Android catalog | No | Three reviewed fixture route IDs, exact versions and SHA-256 digests; no execution authority. |
+| `get_route` | `route_id`, exact `version` | Bundled Android catalog | No | Reviewed definition YAML and digest; immutable to clients. |
+| `route_policy` | `action`: `grant`/`status`/`revoke`; grant: exact catalog identity, optional `parameters`, `privacy_sensitive`, `max_runs` (1–30), `ttl_ms` (1000–900000); status/revoke: `policy_id` | Approved session; exact expanded catalog plan | Grant **always** asks, irrespective of global confirmation setting | Session/process-scoped bounded attempts; privacy/parameter/plan changes fail closed. No global unattended bypass. |
 | `wait_for_state` | `all` (1–10 predicates), `package_name`, `timeout_ms`, `interval_ms` | **MCP Touch Service** | No | One shared deadline, per-condition outcomes/timestamps and failed indices; unstable polls cannot pass. |
 | `get_run` | `run_id`, `run_key` | Approved session and recovery key | No | Durable redacted status/timeline; no replay. |
 | `cancel_run` | `run_id`, `run_key` | Approved session and recovery key | No | Cooperative cancellation; pending/unknown outcomes remain explicit. |
 | `get_build_identity` | `package_name` | Installed/visible package | No | Package/version and optional schema-1 manifest SHA/artifact, labeled app-reported/unverified; absent metadata stays unknown. |
 | `collect_failure_bundle` | `run_id`, `run_key`, approved `package_name`, optional `include_screenshot` | Owned run; accessibility/log permissions per source | Yes | Bounded redacted manifest and artifact ID; unavailable sources explicit, partial failures return `isError`. |
-| `export_run` | `run_id`, `run_key`, `format`: `json`/`markdown` | Owned run | No | Redacted report artifact ID. |
+| `export_run` | `run_id`, `run_key`, `format`: `json`/`markdown`/`junit` | Owned run | No | Canonical redacted report artifact ID and identical bounded inline `content`; safe CI download without image-read approval. |
 | `get_artifact` | `run_id`, `run_key`, `artifact_id` | Artifact belongs to owned run | Yes | Stored JSON/Markdown or explicitly approved unmasked image; no arbitrary paths. |
 | `open_link` | Required `package_name`, `uri`; `wait_ms` (250–30000, default 5000) | Accessibility; one exported browsable target handler | Yes | Explicit app launch and foreground/quiet readiness; no arbitrary extras/flags or dangerous system/file URI schemes. |
 | `clipboard` | `action`: `write`, `read_owned`, `clear_owned`; `text` for write (max 5000) | Tester foreground; same approved session/process owns read/clear | Yes | Plain-text write-first access, never unrelated clipboard snapshots; text omitted from command history. |
@@ -71,7 +75,7 @@ Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
 `global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
 `device_state`, `run_route`, `observe_screen`, `collect_failure_bundle` and
-`get_artifact`, `open_link` and `clipboard` (21 of 40).
+`get_artifact`, `open_link`, `clipboard` and `route_policy` (22 of 43).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
@@ -80,7 +84,11 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 `get_device_info`, `create_notification`, `list_apps`, `health_check`,
 `get_app_version`, `get_capabilities`, `qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `audio_state`,
 `get_device_state`, `ui_diff`, `wait_for_state`, `get_run`, `cancel_run`,
-`get_build_identity`, `export_run` and `get_test_environment` run without an extra approval.
+`get_build_identity`, `export_run`, `get_test_environment`, `list_routes` and `get_route`
+run without an extra approval. `route_policy status/revoke` also need no dialog;
+grant always shows the full expanded plan, attempt limit, privacy and expiry.
+Policies authorize only fresh exact-plan catalog attempts in that approved session;
+duplicates return the original run without consuming another attempt.
 
 Run recovery keys are bearer capabilities, not client names: another approved
 session must explicitly possess the key. Private run/evidence tool payloads and
@@ -96,6 +104,9 @@ This does not redact caller-authored QA step text from explicit QA reports.
 The gateway does not replay environment mutations after session loss. Retain
 `state_key` before setup; recovery requires it even in a new approved session.
 See [P3 controls and recovery](P3_0.2.1.md) for the deliberate migration and limits.
+Since 0.2.2, scenario setup uses its retained `run_key` as the P3 `state_key` for
+automatic restoration and manual recovery. Policy payloads/results are omitted
+from history. See [P4 scenarios and CI](P4_0.2.2.md).
 
 ## Requirements
 

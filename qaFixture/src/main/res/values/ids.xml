@@ -7,4 +7,5 @@
     <item name="action_count" type="id" />
     <item name="clipped" type="id" />
     <item name="web" type="id" />
+    <item name="show_compose" type="id" />
 </resources>

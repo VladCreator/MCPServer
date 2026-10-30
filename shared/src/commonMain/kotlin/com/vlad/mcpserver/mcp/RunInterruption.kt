@@ -6,9 +6,14 @@ internal object RunInterruption {
     fun apply(run: JsonObject, status: String, reason: String): JsonObject = JsonObject(run + buildJsonObject {
         val dispatched = run["active_step"] != null && run["active_step"] !is JsonNull
         put("status", status); put("reason", reason)
+        if (run["schema_version"] == JsonPrimitive(2)) {
+            put("primary_status", run["primary_status"] ?: JsonPrimitive(status))
+            put("cleanup_status", if (run["cleanup_status"] == JsonPrimitive("completed"))
+                "completed" else "interrupted")
+        }
         put("action_outcome_unknown", dispatched)
         // Even a completed UI step may have changed app state; recovery is never automatic.
-        put("pending_cleanup", dispatched || run.getValue("steps").jsonArray.any {
+        put("pending_cleanup", run["pending_cleanup"] == JsonPrimitive(true) || dispatched || run.getValue("steps").jsonArray.any {
             it.jsonObject.stringValue("status") == "completed" &&
                 it.jsonObject.stringValue("tool") !in setOf("delay", "ui_wait", "ui_assert")
         })

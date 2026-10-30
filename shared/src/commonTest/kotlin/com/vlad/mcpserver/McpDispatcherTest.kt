@@ -76,10 +76,11 @@ class McpDispatcherTest {
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
 
-        assertEquals(40, tools.size)
+        assertEquals(43, tools.size)
         assertTrue(tools.contains("run_route"))
         assertTrue(tools.contains("get_capabilities"))
         assertTrue(tools.contains("observe_screen"))
+        listOf("list_routes", "get_route", "route_policy").forEach { assertTrue(it in tools) }
         assertEquals(tools.size, tools.toSet().size, "tool names must be unique")
         listOf("qa_session", "ui_find", "ui_wait", "ui_assert", "ui_gesture", "audio_instruction", "audio_state", "get_device_state", "device_state", "ui_diff")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
@@ -164,10 +165,11 @@ class McpDispatcherTest {
             "device_state" to """{"action":"status","state_key":"private state key"}""",
             "qa_session" to """{"action":"end","state_key":"private state key"}""",
             "open_link" to """{"package_name":"com.synthetic.fixture","uri":"synthetic://route?token=private"}""",
-            "clipboard" to """{"action":"write","text":"private clipboard"}"""
+            "clipboard" to """{"action":"write","text":"private clipboard"}""",
+            "route_policy" to """{"action":"status","policy_id":"private policy"}"""
         )) dispatcher.handle(session, """{"jsonrpc":"2.0","id":9,"method":"tools/call",
             "params":{"name":"$tool","arguments":$args}}""")
-        assertEquals(4, records.size)
+        assertEquals(5, records.size)
         records.forEach {
             assertEquals("[private tool payload omitted]", it.arguments)
             assertFalse("private live content" in it.message)

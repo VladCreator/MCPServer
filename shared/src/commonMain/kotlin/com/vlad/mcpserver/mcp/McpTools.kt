@@ -1,6 +1,7 @@
 package com.vlad.mcpserver.mcp
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -547,15 +548,17 @@ object McpTools {
 
     val runRoute = ToolDefinition(
         name = "run_route",
-        description = "Validate and execute a Tester YAML v1 route locally on Android. " +
-            "Supports launch_app, tap, input_text, scroll, back, delay, wait and assert. " +
-            "Stops on the first failure; no implicit idle waits or retries. Not Maestro compatible.",
-        required = listOf("yaml"),
-        inputSchema = schema(listOf("yaml")) {
+        description = "Execute one native scenario from YAML v1/v2, structured scenario or exact catalog route_id/version/digest. " +
+            "Schema 2 supports typed parameters, preconditions, setup, postconditions and bounded cancellation-safe cleanup. " +
+            "No action retries or implicit idle waits. Catalog policies pin the complete expanded plan.",
+        inputSchema = schema(emptyList()) {
             putJsonObject("yaml") {
                 put("type", "string")
-                put("description", "Inline Tester YAML v1 route, at most 32768 characters")
+                put("description", "Inline Tester YAML v1/v2, at most 32768 characters; mutually exclusive with scenario/route_id")
             }
+            putJsonObject("scenario") { put("type", "object"); put("description", "Structured v1/v2 definition; same compiler as YAML") }
+            catalogProperties()
+            putJsonObject("policy_id") { put("type", "string"); put("description", "Optional session-scoped exact catalog-plan consent from route_policy") }
             putJsonObject("parameters") {
                 put("type", "object")
                 put("description", "Typed values for declared route parameters")
@@ -571,6 +574,38 @@ object McpTools {
         requirement = "Android; MCP Touch Service; one approval for the complete route"
     )
 
+    private fun JsonObjectBuilder.catalogProperties() {
+        putJsonObject("route_id") { put("type", "string") }
+        putJsonObject("version") { put("type", "string"); put("description", "Exact catalog major.minor.patch, no latest alias") }
+        putJsonObject("digest") { put("type", "string"); put("description", "Exact SHA-256 of bundled definition from get_route") }
+    }
+
+    val listRoutes = ToolDefinition(
+        name = "list_routes", description = "List immutable APK-bundled reviewed Android fixture scenarios with exact versions and SHA-256 digests.",
+        inputSchema = schema(emptyList()) {}
+    )
+    val getRoute = ToolDefinition(
+        name = "get_route", description = "Retrieve the exact reviewed catalog version and YAML; read-only, not execution authority.",
+        required = listOf("route_id", "version"),
+        inputSchema = schema(listOf("route_id", "version")) { catalogProperties() }
+    )
+    val routePolicy = ToolDefinition(
+        name = "route_policy",
+        description = "Grant, inspect or revoke bounded unattended consent for one exact expanded catalog plan, parameters and privacy policy. " +
+            "Grant ALWAYS requires dashboard approval, even with sensitive confirmations disabled. Session/process scoped, 1-30 attempts, at most 15 minutes. No global bypass.",
+        required = listOf("action"),
+        inputSchema = schema(listOf("action")) {
+            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add("grant"); add("status"); add("revoke") } }
+            catalogProperties()
+            putJsonObject("parameters") { put("type", "object") }
+            putJsonObject("privacy_sensitive") { put("type", "boolean") }
+            putJsonObject("policy_id") { put("type", "string") }
+            putJsonObject("max_runs") { put("type", "integer"); put("description", "1-30, default 1; counts fresh attempts, never deduplication") }
+            putJsonObject("ttl_ms") { put("type", "integer"); put("description", "1000-900000, default 600000") }
+        },
+        sensitive = true,
+        requirement = "Explicit dashboard approval on grant; exact APK catalog plan; approved session only"
+    )
     val getCapabilities = ToolDefinition(
         name = "get_capabilities",
         description = "Read Android tool support, current permission blockers, execution location and " +
@@ -637,11 +672,11 @@ object McpTools {
     )
     val exportRun = ToolDefinition(
         name = "export_run",
-        description = "Export an owned redacted run as bounded JSON or Markdown artifact. Returns opaque artifact_id, never an arbitrary path.",
+        description = "Export the owned canonical redacted run as JSON, Markdown timeline or JUnit XML. Returns opaque artifact_id, never an arbitrary path.",
         required = listOf("run_id", "run_key"),
         inputSchema = schema(listOf("run_id", "run_key")) {
             runOwnershipProperties()
-            putJsonObject("format") { put("type", "string"); putJsonArray("enum") { add("json"); add("markdown") } }
+            putJsonObject("format") { put("type", "string"); putJsonArray("enum") { add("json"); add("markdown"); add("junit") } }
         }
     )
     val getArtifact = ToolDefinition(
@@ -734,7 +769,10 @@ object McpTools {
         getBuildIdentity,
         openLink,
         clipboard,
-        getTestEnvironment
+        getTestEnvironment,
+        listRoutes,
+        getRoute,
+        routePolicy
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }

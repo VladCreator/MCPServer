@@ -47,4 +47,17 @@ class RunPrivacyTest {
         assertTrue(RunInterruption.apply(mutated, "cancelled", "cancel_requested")
             .getValue("pending_cleanup").jsonPrimitive.boolean)
     }
+
+    @Test fun scenarioRestartPreservesPrimaryVerdictAndOwnedPendingRestoration() {
+        val run = Json.parseToJsonElement("""{"schema_version":2,"active_step":"cleanup_state",
+            "primary_status":"failed","cleanup_status":"running","pending_cleanup":true,
+            "pending_state_restore":true,"steps":[
+            {"id":"step_1","tool":"ui_assert","status":"failed","phase":"steps"},
+            {"id":"cleanup_state","tool":"restore_state","status":"dispatched","phase":"cleanup"}]}""").jsonObject
+        val interrupted = RunInterruption.apply(run, "interrupted", "process_restart")
+        assertEquals(JsonPrimitive("failed"), interrupted["primary_status"])
+        assertEquals(JsonPrimitive("interrupted"), interrupted["cleanup_status"])
+        assertEquals(JsonPrimitive(true), interrupted["pending_state_restore"])
+        assertEquals(JsonPrimitive(true), interrupted["pending_cleanup"])
+    }
 }

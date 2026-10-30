@@ -44,6 +44,14 @@ class AndroidDeviceStateController private constructor(private val context: Cont
     }
 
     suspend fun set(owner: String, arguments: JsonObject): ToolResult {
+        return recovery.set(owner, values(arguments))
+    }
+
+    fun validateSetup(arguments: JsonObject) {
+        values(arguments).keys.forEach(::preflight)
+    }
+
+    private fun values(arguments: JsonObject): JsonObject {
         val fields = arguments.filterKeys { it in FIELDS }
         require(fields.isNotEmpty()) { "Provide at least one device-state field." }
         val values = fields.mapValues { (field, value) ->
@@ -83,7 +91,7 @@ class AndroidDeviceStateController private constructor(private val context: Cont
                 else -> primitive
             }
         }
-        return recovery.set(owner, JsonObject(values))
+        return JsonObject(values)
     }
 
     fun canWriteSecureSettings(): Boolean =

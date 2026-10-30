@@ -18,7 +18,7 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
         arguments: JsonObject,
         approve: suspend () -> Boolean,
         failureEvidence: suspend (String) -> Unit,
-        execute: suspend (RouteStep) -> ToolResult
+        execute: suspend (RouteStep, String) -> ToolResult
     ): ToolResult {
         val mode = arguments.string("mode") ?: "sync"
         require(mode in setOf("sync", "async")) { "mode must be sync or async." }
@@ -37,14 +37,17 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
         val queueMs = (arguments["queue_timeout_ms"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 10_000
         require(queueMs in 250..30_000) { "queue_timeout_ms must be 250-30000." }
         val digest = RunStore.planDigest(key, RunPrivacy.canonical(buildJsonObject {
-            put("app_id", route.packageName); put("timeout_ms", route.timeoutMs); put("queue_timeout_ms", queueMs)
+            put("plan", route.plan()); put("queue_timeout_ms", queueMs)
             put("privacy_sensitive", arguments["privacy_sensitive"] ?: JsonPrimitive(true))
-            putJsonArray("steps") { route.steps.forEach {
-                add(buildJsonObject { put("tool", it.tool); put("arguments", it.arguments) })
-            } }
         }))
-        val (admitted, fresh) = store.admit(key, submission, digest, route.steps,
-            arguments["privacy_sensitive"] != JsonPrimitive(false), route.packageName)
+        val (admitted, fresh) = store.admit(key, submission, digest, route.allSteps,
+            arguments["privacy_sensitive"] != JsonPrimitive(false), route.packageName, buildJsonObject {
+                put("route_id", if (route.catalogDigest == null) "inline" else route.id)
+                put("schema_version", route.schemaVersion)
+                route.version?.let { put("route_version", it) }
+                route.catalogDigest?.let { put("catalog_digest", it) }
+                put("cleanup_status", if (route.schemaVersion == 2) "pending" else "not_configured")
+            })
         val id = admitted.string("run_id")!!
         if (!fresh) return response(admitted, key, true)
         try {
@@ -80,11 +83,15 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
                         else run
                     }
                     if (running.string("status") != "running") return@async response(running, key)
-                    val output = YamlRouteRunner().run(route, id, onStep = { step -> recordStep(id, step) }, execute = execute)
+                    val output = YamlRouteRunner().run(route, id, onStep = { step -> recordStep(id, step) }) { step ->
+                        execute(step, key)
+                    }
                     val report = Json.parseToJsonElement(output.text).jsonObject
                     store.update(id) { run -> JsonObject(run + buildJsonObject {
                         put("status", report.getValue("status")); put("duration_ms", report.getValue("duration_ms"))
                         put("active_step", JsonNull); put("completed_at_ms", System.currentTimeMillis())
+                        for (field in listOf("primary_status", "cleanup_status", "pending_cleanup", "pending_state_restore"))
+                            report[field]?.let { put(field, it) }
                         if (output.isError) put("evidence_status", "pending")
                     }) }
                     if (output.isError) {
@@ -168,7 +175,8 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
 
     private fun recordStep(id: String, step: JsonObject) {
         store.update(id) { run ->
-            if (run.string("status") == "cancelling") throw CancellationException("Run cancellation requested.")
+            if (run.string("status") == "cancelling" && step.string("phase") != "cleanup" &&
+                step.string("status") == "dispatched") throw CancellationException("Run cancellation requested.")
             val clean = RunPrivacy.step(step)
             val records = run.getValue("steps").jsonArray.map {
                 if (it.jsonObject.string("id") == step.string("id")) clean else it
@@ -176,6 +184,25 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
             JsonObject(run + buildJsonObject {
                 put("steps", JsonArray(records))
                 put("active_step", if (step.string("status") == "dispatched") step.getValue("id") else JsonNull)
+                if (step.string("phase") == "cleanup" && step.string("status") == "dispatched") {
+                    put("cleanup_status", "running"); put("pending_cleanup", true)
+                    if ("primary_status" !in run) {
+                        val main = records.map { it.jsonObject }.filter { it.string("phase") != "cleanup" }
+                        put("primary_status", when {
+                            run.string("status") == "cancelling" -> "cancelled"
+                            main.any { it.string("status") == "timed_out" } -> "timed_out"
+                            main.any { it.string("status") == "failed" } -> "failed"
+                            main.all { it.string("status") == "completed" } -> "completed"
+                            else -> "interrupted"
+                        })
+                    }
+                }
+                if (step.string("tool") == "device_state" && step.string("status") == "dispatched") {
+                    put("pending_state_restore", true); put("pending_cleanup", true)
+                }
+                if (step.string("tool") == "restore_state" && step.string("status") == "completed") {
+                    put("pending_state_restore", false)
+                }
             })
         }
     }

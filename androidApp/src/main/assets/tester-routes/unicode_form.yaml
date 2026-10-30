@@ -1,0 +1,20 @@
+schema_version: 2
+id: fixture.unicode_form
+version: 1.0.0
+platform: android
+app_id: com.vlad.mcpserver.fixture
+timeout_ms: 15000
+parameters:
+  value: {type: string, default: "café 日本語 😀"}
+setup:
+  - device_state: {keep_awake: true}
+  - open_link: {uri: "tester-fixture://route/cards"}
+  - wait: {condition: idle, timeout_ms: 3000}
+steps:
+  - input_text: {resource_id: field, within: {resource_id: project_beta}, text: "${value}"}
+postconditions:
+  - assert: {condition: text, resource_id: field, within: {resource_id: project_beta}, expected: "${value}"}
+  - assert: {condition: text, resource_id: field, within: {resource_id: project_alpha}, expected: "Alpha input"}
+  - assert: {condition: text, resource_id: action_count, expected: "0"}
+cleanup:
+  - input_text: {resource_id: field, within: {resource_id: project_beta}, text: "Beta input"}
