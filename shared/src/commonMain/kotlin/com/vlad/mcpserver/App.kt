@@ -97,6 +97,7 @@ import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.ToolDefinition
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -928,7 +929,8 @@ private fun ActivityCard(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    val visible = if (showAll) logs else logs.take(4)
+    val sorted = logs.sortedByDescending { it.timestamp }
+    val visible = groupActivityByDay(if (showAll) sorted else sorted.take(4))
     OutlinedCard(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -967,21 +969,44 @@ private fun ActivityCard(
                     color = colors.onSurfaceVariant
                 )
                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                    items(visible) { log ->
-                        ActivityRow(log)
-                        HorizontalDivider(color = colors.outlineVariant)
+                    visible.forEach { (day, dayLogs) ->
+                        item(key = "day:$day") { ActivityDayHeader(day) }
+                        items(dayLogs, key = { it.id }) { log ->
+                            ActivityRow(log)
+                            HorizontalDivider(color = colors.outlineVariant)
+                        }
                     }
                 }
             } else {
-                visible.forEachIndexed { index, log ->
-                    ActivityRow(log)
-                    if (index < visible.lastIndex) {
-                        HorizontalDivider(color = colors.outlineVariant)
+                visible.forEach { (day, dayLogs) ->
+                    ActivityDayHeader(day)
+                    dayLogs.forEachIndexed { index, log ->
+                        ActivityRow(log)
+                        if (index < dayLogs.lastIndex) {
+                            HorizontalDivider(color = colors.outlineVariant)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ActivityDayHeader(day: LocalDate?) {
+    Text(
+        text = day?.toString() ?: "Unknown date",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+    )
+}
+
+internal fun groupActivityByDay(
+    logs: List<ToolExecutionLog>,
+    zone: TimeZone = TimeZone.currentSystemDefault()
+): Map<LocalDate?, List<ToolExecutionLog>> = logs.sortedByDescending { it.timestamp }.groupBy {
+    if (it.timestamp <= 0L) null else Instant.fromEpochMilliseconds(it.timestamp).toLocalDateTime(zone).date
 }
 
 @Composable
