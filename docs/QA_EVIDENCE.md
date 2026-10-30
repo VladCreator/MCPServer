@@ -4,6 +4,9 @@ The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 640 dp or more. Narrow screens stack the two cards to keep their contents usable.
 No sandbox path copying, ADB, broad storage permission or cloud account is needed.
 Refresh the card after collecting evidence; it also refreshes on returning to Tester.
+Evidence is grouped by calendar day in the device's time zone, newest first.
+View/Open and Share sit beside each filename; the source and local time appear
+underneath the name.
 
 ## What appears
 

@@ -1,6 +1,9 @@
 package com.vlad.mcpserver
 
 import java.nio.file.Files
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -8,6 +11,26 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class QaEvidenceTest {
+    @Test
+    fun groupsNewestFirstByLocalCalendarDayAcrossMidnightAndDaylightSaving() {
+        fun entry(id: String, timestamp: String) = QaEvidence(
+            id, "$id.md", "text/markdown", Instant.parse(timestamp).toEpochMilli(),
+            "reports", EvidenceSource.StoredFile(java.io.File("$id.md"))
+        )
+        val beforeMidnight = entry("previous-day", "2026-11-01T06:59:00Z")
+        val afterMidnight = entry("midnight", "2026-11-01T07:01:00Z")
+        val firstOneAm = entry("first-1am", "2026-11-01T08:30:00Z")
+        val repeatedOneAm = entry("repeated-1am", "2026-11-01T09:30:00Z")
+        val grouped = groupEvidenceByDay(
+            listOf(beforeMidnight, firstOneAm, afterMidnight, repeatedOneAm),
+            ZoneId.of("America/Los_Angeles")
+        )
+        assertEquals(listOf(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 10, 31)), grouped.keys.toList())
+        assertEquals(listOf(repeatedOneAm, firstOneAm, afterMidnight), grouped.values.first())
+        assertEquals(listOf(beforeMidnight), grouped.values.last())
+        assertTrue(groupEvidenceByDay(emptyList()).isEmpty())
+    }
+
     @Test
     fun listsOnlyApprovedEvidenceAndRejectsRemovedFiles() {
         val directory = Files.createTempDirectory("qa-evidence-test").toFile()

@@ -46,6 +46,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Date
 
 private data class EvidencePreview(val title: String, val text: String? = null, val image: ImageBitmap? = null)
@@ -136,12 +141,20 @@ actual fun QaEvidenceCard(modifier: Modifier) {
                     style = MaterialTheme.typography.bodySmall)
             }
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(if (showAll) entries else entries.take(4), key = { it.id }) { item ->
-                    Column {
-                        Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${item.origin} | ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(item.created))}",
-                            style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Row {
+                groupEvidenceByDay(if (showAll) entries else entries.take(4)).forEach { (day, evidence) ->
+                    item(key = "day:$day") {
+                        Text(day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 8.dp))
+                    }
+                    items(evidence, key = { it.id }) { item ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${item.origin} | ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(item.created))}",
+                                    style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
                             TextButton(onClick = { view(item) }, enabled = !busy) {
                                 Text(if (isEvidenceText(item.mime) || item.mime.startsWith("image/")) "View" else "Open")
                             }
@@ -212,6 +225,13 @@ actual fun QaEvidenceCard(modifier: Modifier) {
 
 internal fun isEvidenceText(mime: String): Boolean =
     mime.startsWith("text/") || mime in setOf("application/json", "application/xml")
+
+internal fun groupEvidenceByDay(
+    entries: List<QaEvidence>,
+    zone: ZoneId = ZoneId.systemDefault()
+): Map<LocalDate, List<QaEvidence>> = entries.sortedByDescending { it.created }.groupBy {
+    Instant.ofEpochMilli(it.created).atZone(zone).toLocalDate()
+}
 
 internal fun readEvidenceText(file: File): String {
     val bytes = file.inputStream().use { it.readNBytes(256 * 1024 + 1) }
