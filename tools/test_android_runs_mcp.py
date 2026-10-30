@@ -182,9 +182,13 @@ steps:
     def test_build_identity_does_not_infer_sha(self):
         data = self.ok("get_build_identity", {"package_name": self.package})["structuredContent"]
         self.assertEqual(self.package, data["package_name"])
-        self.assertIsNone(data["sha"])
-        self.assertIsNone(data["ci_artifact"])
-        self.assertEqual("unknown", data["provenance_status"])
+        self.assertEqual("abcdef0123456789abcdef0123456789abcdef01", data["sha"])
+        self.assertEqual("app_reported_unverified", data["provenance_status"])
+        self.assertFalse(data["independently_verified"])
+        missing = self.ok("get_build_identity", {"package_name": "com.vlad.mcpserver"})["structuredContent"]
+        self.assertIsNone(missing["sha"])
+        self.assertIsNone(missing["ci_artifact"])
+        self.assertEqual("unknown", missing["provenance_status"])
 
     def test_privacy_policy_blocks_images_and_explicit_synthetic_capture_is_owned(self):
         private, _, _ = self.submit(["- delay: {milliseconds: 1}"])

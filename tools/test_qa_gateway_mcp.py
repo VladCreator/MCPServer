@@ -134,7 +134,8 @@ class GatewayTests(unittest.TestCase):
 
     def test_run_recovery_arguments_are_not_persisted(self):
         self.gateway.qa_session({"action": "begin", "test_case": "recovery"})
-        for tool in ("get_run", "cancel_run", "collect_failure_bundle", "export_run", "get_artifact"):
+        for tool in ("get_run", "cancel_run", "collect_failure_bundle", "export_run", "get_artifact",
+                     "device_state", "open_link", "clipboard", "qa_session"):
             self.gateway.call("ios__" + tool, {"run_id": "id", "run_key": "private key"})
             self.assertEqual("[private tool payload omitted]", self.gateway.session.calls[-1]["arguments"])
 
@@ -149,6 +150,19 @@ class GatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(gateway.BackendError, "not retried"):
             self.gateway.call("ios__collect_failure_bundle", {"run_key": "private key"})
         self.assertEqual(["collect_failure_bundle"], calls)
+
+    def test_environment_mutations_are_not_replayed_after_session_loss(self):
+        for tool in ("device_state", "open_link", "clipboard", "qa_session"):
+            calls = []
+
+            def lose_session(name, arguments):
+                calls.append(name)
+                raise gateway.SessionLost("lost")
+
+            self.backend.call = lose_session
+            with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+                self.gateway.call("ios__" + tool, {"state_key": "private key"})
+            self.assertEqual([tool], calls)
 
 
 class FlakyBackend(FakeBackend):

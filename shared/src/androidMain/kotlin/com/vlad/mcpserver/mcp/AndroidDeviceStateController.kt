@@ -1,389 +1,222 @@
 package com.vlad.mcpserver.mcp
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.AudioManager
-import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import android.view.Surface
+import android.util.AtomicFile
+import android.util.Log
 import android.view.WindowManager
 import com.vlad.mcpserver.McpTouchAccessibilityService
-import java.util.Locale
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.*
+import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.add
 
-/**
- * QA environment state: dark mode, rotation, font scale, animation scales,
- * media volume and a screen wake lock. Reads do not require permissions;
- * writes use WRITE_SETTINGS/WRITE_SECURE_SETTINGS and fail with an actionable
- * message when the QA build has not been granted those permissions.
- */
-class AndroidDeviceStateController(private val context: Context) {
-
-    private data class Snapshot(
-        val autoRotate: Int,
-        val userRotation: Int,
-        val fontScale: Float,
-        val nightMode: String?,
-        val animatorScale: Float,
-        val transitionScale: Float,
-        val windowScale: Float,
-        val volume: Int,
-        val keepAwake: Boolean
-    )
-
-    private var saved: Snapshot? = null
+/** One device-wide journal; recovery survives server/process restarts without automatic replay. */
+class AndroidDeviceStateController private constructor(private val context: Context) {
+    private val journal = AtomicFile(File(context.noBackupFilesDir, "device-state-recovery.json"))
     private var wakeLock: PowerManager.WakeLock? = null
+    private val recovery = StateRecovery(::load, ::save, ::preflight, ::read, ::writeAndVerify) { message, error ->
+        Log.e("TesterState", message, error)
+    }
 
-    fun readText(): String {
-        val audio = audioManager()
-        val volume = audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: -1
-        val maxVolume = audio?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: -1
-        val metrics = context.resources.displayMetrics
-        val configuration = context.resources.configuration
-        val currentPackage = runCatching {
-            McpTouchAccessibilityService.instance()?.rootInActiveWindow?.packageName?.toString()
-        }.getOrNull()
-        val accessibility = runCatching {
-            Settings.Secure.getString(
-                context.contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            ).orEmpty().contains(context.packageName)
-        }.getOrDefault(false)
-        return buildString {
-            appendLine("Platform: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            appendLine("Manufacturer/Model: ${Build.MANUFACTURER} ${Build.MODEL}")
-            appendLine("Locale: ${Locale.getDefault().toLanguageTag()}")
-            appendLine("Dark mode: ${darkMode()} (secure=${secureNightMode() ?: "unset"})")
-            appendLine("Rotation: ${rotationName()} (${rotation()})")
-            appendLine("Font scale: ${"%.2f".format(configuration.fontScale)}")
-            appendLine("Display: ${metrics.widthPixels}x${metrics.heightPixels} @ ${metrics.densityDpi}dpi")
-            appendLine("Media volume: $volume/$maxVolume")
-            appendLine("Screen on: ${screenOn()}")
-            appendLine("Accessibility service: $accessibility")
-            appendLine("Foreground package: ${currentPackage ?: "unknown"}")
-            appendLine("Animations: ${animationsEnabled()}")
-            appendLine("Keep awake: ${wakeLock?.isHeld == true}")
-            appendLine("WRITE_SETTINGS granted: ${Settings.System.canWrite(context)}")
-            append("Snapshot available: ${saved != null}")
+    fun hasSnapshot(): Boolean = recovery.pending()
+    fun status(owner: String): ToolResult = recovery.status(owner)
+    suspend fun restore(owner: String): ToolResult = withContext(NonCancellable) {
+        withTimeoutOrNull(5_000) { recovery.restore(owner) } ?: ToolResult(
+            "Restoration budget exhausted; pending fields retained.", isError = true,
+            structuredContent = buildJsonObject { put("reason", "restore_timeout"); put("pending_cleanup", true) })
+    }
+
+    fun owner(key: String?): String {
+        require(key != null && Regex("[A-Za-z0-9_-]{32,128}").matches(key)) {
+            "state_key must be a random URL-safe secret, 32-128 characters."
         }
+        return RunStore.hash("recovery:$key")
     }
 
-    fun hasSnapshot(): Boolean = saved != null
-
-    fun snapshot(): String {
-        saved = Snapshot(
-            autoRotate = Settings.System.getInt(
-                context.contentResolver,
-                Settings.System.ACCELEROMETER_ROTATION,
-                1
-            ),
-            userRotation = Settings.System.getInt(
-                context.contentResolver,
-                Settings.System.USER_ROTATION,
-                0
-            ),
-            fontScale = Settings.System.getFloat(
-                context.contentResolver,
-                Settings.System.FONT_SCALE,
-                1.0f
-            ),
-            nightMode = runCatching {
-                Settings.Secure.getString(context.contentResolver, "ui_night_mode")
-            }.getOrNull(),
-            animatorScale = Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1.0f
-            ),
-            transitionScale = Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.TRANSITION_ANIMATION_SCALE,
-                1.0f
-            ),
-            windowScale = Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.WINDOW_ANIMATION_SCALE,
-                1.0f
-            ),
-            volume = audioManager()?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0,
-            keepAwake = wakeLock?.isHeld == true
-        )
-        return readText()
-    }
-
-    fun setRotation(value: String): String {
-        requireSystemWrite()
-        when (value.lowercase()) {
-            "auto" -> check(Settings.System.putInt(
-                context.contentResolver,
-                Settings.System.ACCELEROMETER_ROTATION,
-                1
-            )) { "System rejected auto rotation." }
-            "portrait" -> setFixedRotation(0)
-            "landscape" -> setFixedRotation(1)
-            "reverse_portrait" -> setFixedRotation(2)
-            "reverse_landscape" -> setFixedRotation(3)
-            else -> error("rotation must be auto, portrait, landscape, reverse_portrait or reverse_landscape")
+    suspend fun set(owner: String, arguments: JsonObject): ToolResult {
+        val fields = arguments.filterKeys { it in FIELDS }
+        require(fields.isNotEmpty()) { "Provide at least one device-state field." }
+        val values = fields.mapValues { (field, value) ->
+            val primitive = value as? JsonPrimitive ?: error("$field has an invalid type.")
+            when (field) {
+                "rotation" -> {
+                    require(primitive.isString)
+                    val rotation = listOf("portrait", "landscape", "reverse_portrait", "reverse_landscape")
+                        .indexOf(primitive.content)
+                    require(rotation >= 0 || primitive.content == "auto") { "Invalid rotation." }
+                    buildJsonObject {
+                        put("auto", if (rotation < 0) 1 else 0)
+                        put("user", if (rotation < 0) systemInt(Settings.System.USER_ROTATION, 0) else rotation)
+                    }
+                }
+                "font_scale" -> {
+                    val scale = primitive.floatOrNull
+                    require(!primitive.isString && scale != null && scale.isFinite() && scale in .85f..2f) {
+                        "font_scale must be 0.85-2.0."
+                    }
+                    JsonPrimitive(scale)
+                }
+                "volume" -> {
+                    val percent = primitive.intOrNull
+                    require(!primitive.isString && percent != null && percent in 0..100) { "volume must be 0-100." }
+                    JsonPrimitive((percent / 100f * audio().getStreamMaxVolume(AudioManager.STREAM_MUSIC)).roundToInt())
+                }
+                "animations" -> {
+                    require(!primitive.isString && primitive.booleanOrNull != null)
+                    val scale = if (primitive.boolean) 1f else 0f
+                    buildJsonObject { ANIMATIONS.forEach { put(it, scale) } }
+                }
+                "keep_awake" -> {
+                    require(!primitive.isString && primitive.booleanOrNull != null)
+                    primitive
+                }
+                else -> primitive
+            }
         }
-        return "Rotation requested: ${value.lowercase()} (display now ${rotationName()}; may take a moment)."
-    }
-
-    fun setDarkMode(value: String): String {
-        val mode = when (value.lowercase()) {
-            "on" -> "yes"
-            "off" -> "no"
-            "auto" -> "auto"
-            else -> error("dark_mode must be on, off or auto")
-        }
-        requireSecureWrite()
-        val ok = Settings.Secure.putString(context.contentResolver, "ui_night_mode", mode)
-        if (!ok) error("The system rejected the dark mode change.")
-        val readback = secureNightMode() ?: "unset"
-        return "Dark mode requested: ${value.lowercase()} (secure=$readback, app config=${darkMode()}). " +
-            "Some Android versions need 'adb shell cmd uimode night ${if (mode == "yes") "yes" else "no"}' " +
-            "or a configuration change before the UI follows."
-    }
-
-    fun setFontScale(value: Float): String {
-        requireSystemWrite()
-        val scale = value.coerceIn(0.85f, 2.0f)
-        check(Settings.System.putFloat(context.contentResolver, Settings.System.FONT_SCALE, scale)) {
-            "System rejected font scale."
-        }
-        return "Font scale set to ${"%.2f".format(scale)}."
-    }
-
-    fun setAnimations(enabled: Boolean): String {
-        val scale = if (enabled) 1.0f else 0.0f
-        requireSecureWrite()
-        check(Settings.Global.putFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            scale
-        )) { "System rejected animator scale." }
-        check(Settings.Global.putFloat(
-            context.contentResolver,
-            Settings.Global.TRANSITION_ANIMATION_SCALE,
-            scale
-        )) { "System rejected transition scale." }
-        check(Settings.Global.putFloat(
-            context.contentResolver,
-            Settings.Global.WINDOW_ANIMATION_SCALE,
-            scale
-        )) { "System rejected window scale." }
-        return "Animations ${if (enabled) "enabled" else "disabled"}."
-    }
-
-    fun setVolume(percent: Int): String {
-        val audio = audioManager() ?: error("AudioManager is unavailable")
-        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val value = (percent.coerceIn(0, 100) / 100f * max).roundToInt().coerceIn(0, max)
-        audio.setStreamVolume(AudioManager.STREAM_MUSIC, value, 0)
-        return "Media volume set to ${percent.coerceIn(0, 100)}% ($value/$max)."
-    }
-
-    @Suppress("DEPRECATION")
-    fun setKeepAwake(enabled: Boolean): String {
-        if (enabled) {
-            if (wakeLock?.isHeld != true) {
-                val power = context.getSystemService(PowerManager::class.java)
-                    ?: error("PowerManager is unavailable")
-                wakeLock = power.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                    "Tester:QA"
-                ).apply { acquire(30L * 60L * 1000L) }
-            }
-            return "Keep awake enabled."
-        }
-        wakeLock?.let { if (it.isHeld) it.release() }
-        wakeLock = null
-        return "Keep awake disabled."
-    }
-
-    fun restore(): ToolResult {
-        val snapshot = saved ?: return ToolResult(
-            "No device-state snapshot is available.", isError = true,
-            structuredContent = buildJsonObject {
-                put("reason", "no_snapshot")
-                put("retryable", false)
-            }
-        )
-        val results = mutableListOf<String>()
-        runCatching {
-            if (snapshot.autoRotate == 1) {
-                requireSystemWrite()
-                check(Settings.System.putInt(
-                    context.contentResolver,
-                    Settings.System.ACCELEROMETER_ROTATION,
-                    1
-                )) { "System rejected rotation restoration." }
-            } else {
-                requireSystemWrite()
-                setFixedRotation(snapshot.userRotation)
-            }
-            check(Settings.System.getInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION) == snapshot.autoRotate) {
-                "Rotation policy readback did not match."
-            }
-        }.onSuccess { results += "rotation" }.onFailure { results += "rotation failed: ${it.message}" }
-        runCatching {
-            requireSystemWrite()
-            check(Settings.System.putFloat(
-                context.contentResolver,
-                Settings.System.FONT_SCALE,
-                snapshot.fontScale
-            )) { "System rejected font restoration." }
-            check(Settings.System.getFloat(context.contentResolver, Settings.System.FONT_SCALE) == snapshot.fontScale) {
-                "Font setting readback did not match."
-            }
-        }.onSuccess { results += "font_scale" }.onFailure { results += "font failed: ${it.message}" }
-        runCatching {
-            requireSecureWrite()
-            check(Settings.Secure.putString(context.contentResolver, "ui_night_mode", snapshot.nightMode)) {
-                "System rejected dark-mode restoration."
-            }
-            check(Settings.Secure.getString(context.contentResolver, "ui_night_mode") == snapshot.nightMode) {
-                "Dark-mode setting readback did not match."
-            }
-        }.onSuccess { results += "dark_mode" }.onFailure { results += "dark mode failed: ${it.message}" }
-        runCatching {
-            requireSecureWrite()
-            check(Settings.Global.putFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                snapshot.animatorScale
-            )) { "System rejected animator restoration." }
-            check(Settings.Global.putFloat(
-                context.contentResolver,
-                Settings.Global.TRANSITION_ANIMATION_SCALE,
-                snapshot.transitionScale
-            )) { "System rejected transition restoration." }
-            check(Settings.Global.putFloat(
-                context.contentResolver,
-                Settings.Global.WINDOW_ANIMATION_SCALE,
-                snapshot.windowScale
-            )) { "System rejected window-scale restoration." }
-            check(Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE) == snapshot.animatorScale &&
-                Settings.Global.getFloat(context.contentResolver, Settings.Global.TRANSITION_ANIMATION_SCALE) == snapshot.transitionScale &&
-                Settings.Global.getFloat(context.contentResolver, Settings.Global.WINDOW_ANIMATION_SCALE) == snapshot.windowScale) {
-                "Animation setting readback did not match."
-            }
-        }.onSuccess { results += "animations" }.onFailure { results += "animations failed: ${it.message}" }
-        runCatching {
-            val audio = audioManager() ?: error("AudioManager is unavailable")
-            audio.setStreamVolume(AudioManager.STREAM_MUSIC, snapshot.volume, 0)
-            check(audio.getStreamVolume(AudioManager.STREAM_MUSIC) == snapshot.volume) { "Media volume was not restored." }
-        }
-            .onSuccess { results += "volume" }.onFailure { results += "volume failed: ${it.message}" }
-        runCatching { setKeepAwake(snapshot.keepAwake) }
-            .onSuccess { results += "keep_awake" }.onFailure { results += "wake lock failed: ${it.message}" }
-        val failed = results.any { it.contains("failed") }
-        // Keep the snapshot when something failed so restore can be retried after granting access.
-        if (!failed) saved = null
-        return ToolResult(
-            "Restored: ${results.joinToString(", ")}." +
-                if (failed) " Snapshot kept; fix the failures and call device_state action=restore again." else "",
-            isError = failed,
-            structuredContent = buildJsonObject {
-                put("reason", if (failed) "partial_restore" else "restored")
-                put("snapshot_retained", failed)
-                put("retryable", failed)
-                putJsonArray("fields") { results.forEach { add(it) } }
-            }
-        )
-    }
-
-    fun release() {
-        wakeLock?.let { if (it.isHeld) it.release() }
-        wakeLock = null
+        return recovery.set(owner, JsonObject(values))
     }
 
     fun canWriteSecureSettings(): Boolean =
-        context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
+        context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
-    private fun requireSecureWrite() {
-        if (!canWriteSecureSettings()) {
-            error(
-                "WRITE_SECURE_SETTINGS is not granted (needed for dark mode and animations). Run once: " +
-                    "adb shell pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS"
-            )
+    @Suppress("DEPRECATION")
+    fun readText(): String = buildString {
+        appendLine("Platform: Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
+        appendLine("Manufacturer/Model: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        appendLine("Locale (Tester, not target app): ${context.resources.configuration.locales.toLanguageTags()}")
+        appendLine("Foreground package: ${McpTouchAccessibilityService.instance()?.rootInActiveWindow?.packageName ?: "unknown"}")
+        val metrics = context.resources.displayMetrics
+        appendLine("Display: ${metrics.widthPixels}x${metrics.heightPixels} @ ${metrics.densityDpi}dpi")
+        appendLine("Effective rotation: ${context.getSystemService(WindowManager::class.java).defaultDisplay.rotation}")
+        appendLine("Screen on: ${context.getSystemService(PowerManager::class.java).isInteractive}")
+        appendLine("Accessibility service: ${McpTouchAccessibilityService.instance() != null}")
+        appendLine("Media volume: ${audio().getStreamVolume(AudioManager.STREAM_MUSIC)}/${audio().getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
+        for (field in FIELDS - "dark_mode") appendLine("$field: ${read(field)}")
+        appendLine("Effective font scale: ${context.resources.configuration.fontScale}")
+        appendLine("Effective dark mode: ${isDark()}")
+        appendLine("WRITE_SETTINGS granted: ${Settings.System.canWrite(context)}")
+        appendLine("WRITE_SECURE_SETTINGS granted: ${canWriteSecureSettings()}")
+        append("Pending device recovery: ${hasSnapshot()}")
+    }
+
+    private fun preflight(field: String) {
+        require(field in FIELDS) { "Unsupported state field." }
+        if (field == "dark_mode") error(
+            "Global dark mode is unsupported: writing ui_night_mode does not prove effective UI state. Use an explicitly authorized host adapter.")
+        if (field in setOf("rotation", "font_scale")) check(Settings.System.canWrite(context)) {
+            "WRITE_SETTINGS required; explicitly grant Modify system settings to Tester."
+        }
+        if (field == "animations") check(canWriteSecureSettings()) {
+            "WRITE_SECURE_SETTINGS required; provision explicitly through ADB."
+        }
+        if (field == "volume") check(!audio().isVolumeFixed) { "Device policy fixes media volume." }
+    }
+
+    private fun read(field: String): JsonElement = when (field) {
+        "rotation" -> buildJsonObject {
+            put("auto", systemValue(Settings.System.ACCELEROMETER_ROTATION, integer = true))
+            put("user", systemValue(Settings.System.USER_ROTATION, integer = true))
+        }
+        "font_scale" -> systemValue(Settings.System.FONT_SCALE)
+        "animations" -> buildJsonObject { ANIMATIONS.forEach {
+            val raw = Settings.Global.getString(context.contentResolver, it)
+            put(it, if (raw == null) JsonNull else JsonPrimitive(raw.toFloat()))
+        } }
+        "volume" -> JsonPrimitive(audio().getStreamVolume(AudioManager.STREAM_MUSIC))
+        "keep_awake" -> JsonPrimitive(wakeLock?.isHeld == true)
+        else -> error("Unsupported state field.")
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun writeAndVerify(field: String, value: JsonElement) {
+        when (field) {
+            "rotation" -> {
+                val values = value.jsonObject
+                check(Settings.System.putString(context.contentResolver, Settings.System.USER_ROTATION,
+                    values.getValue("user").jsonPrimitive.contentOrNull)) { "Rotation value rejected." }
+                check(Settings.System.putString(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION,
+                    values.getValue("auto").jsonPrimitive.contentOrNull)) { "Rotation policy rejected." }
+            }
+            "font_scale" -> check(Settings.System.putString(context.contentResolver, Settings.System.FONT_SCALE,
+                value.jsonPrimitive.contentOrNull)) { "Font scale rejected." }
+            "animations" -> value.jsonObject.forEach { (key, scale) ->
+                check(Settings.Global.putString(context.contentResolver, key, scale.jsonPrimitive.contentOrNull)) {
+                    "Animation setting rejected."
+                }
+            }
+            "volume" -> audio().setStreamVolume(AudioManager.STREAM_MUSIC, value.jsonPrimitive.int, 0)
+            "keep_awake" -> {
+                if (value.jsonPrimitive.boolean && wakeLock?.isHeld != true) {
+                    wakeLock = context.getSystemService(PowerManager::class.java).newWakeLock(
+                        PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "Tester:QA"
+                    ).apply { acquire(30 * 60 * 1000L) }
+                } else if (!value.jsonPrimitive.boolean) {
+                    wakeLock?.let { if (it.isHeld) it.release() }
+                    wakeLock = null
+                }
+            }
+            else -> error("Unsupported state field.")
+        }
+        repeat(20) {
+            val settingMatches = read(field) == value
+            val effectiveMatches = when (field) {
+                "rotation" -> (value.jsonObject.getValue("auto").jsonPrimitive.intOrNull ?: 1) == 1 ||
+                    context.getSystemService(WindowManager::class.java).defaultDisplay.rotation ==
+                    (value.jsonObject.getValue("user").jsonPrimitive.intOrNull ?: 0)
+                "font_scale" -> abs(context.resources.configuration.fontScale - (value.jsonPrimitive.floatOrNull ?: 1f)) < .01f
+                else -> true
+            }
+            if (settingMatches && effectiveMatches) return
+            delay(100)
+        }
+        error("Effective $field readback did not match; cleanup is required.")
+    }
+
+    private fun load(): JsonObject? = try {
+        val raw = Json.parseToJsonElement(journal.openRead().use { it.readBytes().toString(Charsets.UTF_8) })
+        if (raw is JsonNull) null else raw.jsonObject
+    } catch (missing: java.io.FileNotFoundException) {
+        if (journal.baseFile.exists()) throw missing else null
+    }
+
+    private fun save(state: JsonObject?) {
+        val stream = journal.startWrite()
+        try {
+            stream.write((state ?: JsonNull).toString().toByteArray())
+            stream.fd.sync()
+            journal.finishWrite(stream)
+            check(load() == state) { "Device recovery journal verification failed; no new state write may proceed." }
+        } catch (error: Exception) {
+            journal.failWrite(stream)
+            throw error
         }
     }
 
-    private fun requireSystemWrite() {
-        if (!Settings.System.canWrite(context)) {
-            error(
-                "WRITE_SETTINGS is not granted. Enable 'Modify system settings' for Tester " +
-                    "in Android settings, or run: adb shell appops set ${context.packageName} " +
-                    "android:write_settings allow"
-            )
-        }
+    private fun systemInt(key: String, default: Int) = Settings.System.getInt(context.contentResolver, key, default)
+    private fun systemValue(key: String, integer: Boolean = false): JsonElement {
+        val raw = Settings.System.getString(context.contentResolver, key) ?: return JsonNull
+        return if (integer) JsonPrimitive(raw.toInt()) else JsonPrimitive(raw.toFloat())
     }
+    private fun audio(): AudioManager = checkNotNull(context.getSystemService(AudioManager::class.java))
+    private fun isDark() = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+        Configuration.UI_MODE_NIGHT_YES
 
-    private fun setFixedRotation(value: Int) {
-        check(Settings.System.putInt(
-            context.contentResolver,
-            Settings.System.ACCELEROMETER_ROTATION,
-            0
-        )) { "System rejected rotation lock." }
-        check(Settings.System.putInt(
-            context.contentResolver,
-            Settings.System.USER_ROTATION,
-            value.coerceIn(0, 3)
-        )) { "System rejected rotation value." }
+    companion object {
+        private val FIELDS = setOf("rotation", "font_scale", "animations", "volume", "keep_awake", "dark_mode")
+        private val ANIMATIONS = listOf(Settings.Global.ANIMATOR_DURATION_SCALE,
+            Settings.Global.TRANSITION_ANIMATION_SCALE, Settings.Global.WINDOW_ANIMATION_SCALE)
+        private var instance: AndroidDeviceStateController? = null
+        @Synchronized fun get(context: Context): AndroidDeviceStateController =
+            instance ?: AndroidDeviceStateController(context.applicationContext).also { instance = it }
     }
-
-    private fun rotation(): Int = runCatching {
-        val manager = context.getSystemService(WindowManager::class.java)
-        manager.defaultDisplay.rotation
-    }.getOrDefault(0)
-
-    private fun rotationName(): String = when (rotation()) {
-        Surface.ROTATION_90 -> "landscape"
-        Surface.ROTATION_180 -> "reverse_portrait"
-        Surface.ROTATION_270 -> "reverse_landscape"
-        else -> "portrait"
-    }
-
-    private fun secureNightMode(): String? = runCatching {
-        Settings.Secure.getString(context.contentResolver, "ui_night_mode")
-    }.getOrNull()
-
-    private fun darkMode(): String {
-        val mode = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        return when (mode) {
-            Configuration.UI_MODE_NIGHT_YES -> "on"
-            Configuration.UI_MODE_NIGHT_NO -> "off"
-            else -> "undefined"
-        }
-    }
-
-    private fun animationsEnabled(): Boolean {
-        val animator = Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1.0f
-        )
-        val transition = Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.TRANSITION_ANIMATION_SCALE,
-            1.0f
-        )
-        val window = Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.WINDOW_ANIMATION_SCALE,
-            1.0f
-        )
-        return animator > 0f || transition > 0f || window > 0f
-    }
-
-    private fun screenOn(): Boolean =
-        context.getSystemService(PowerManager::class.java)?.isInteractive == true
-
-    private fun audioManager(): AudioManager? = context.getSystemService(AudioManager::class.java)
 }

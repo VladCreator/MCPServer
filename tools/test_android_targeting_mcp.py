@@ -9,6 +9,7 @@ disposable emulator. Never use these checks on a personal device.
 import os
 import time
 import unittest
+import secrets
 from unittest.mock import patch
 
 import test_android_agent_mcp as native
@@ -145,11 +146,12 @@ class AndroidTargetingTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("TESTER_FIXTURE_SETTINGS_PROVISIONED") == "1",
                          "Disposable device settings permissions not provisioned")
     def test_rotation_invalidates_references_and_reports_real_rotation(self):
+        state_key = secrets.token_urlsafe(32)
         before = self.ok("observe_screen", {})["structuredContent"]
         ref = next(n["element_ref"] for n in before["nodes"] if n.get("resource_id", "").endswith(":id/open"))
         try:
             desired = "landscape" if before["rotation"] in (0, 2) else "portrait"
-            self.ok("device_state", {"action": "set", "rotation": desired})
+            self.ok("device_state", {"action": "set", "rotation": desired, "state_key": state_key})
             for _ in range(20):
                 time.sleep(.2)
                 after = self.ok("observe_screen", {})["structuredContent"]
@@ -158,7 +160,7 @@ class AndroidTargetingTests(unittest.TestCase):
             self.assertNotEqual(before["rotation"], after["rotation"])
             self.rejects("click_element", {"element_ref": ref}, "stale_reference")
         finally:
-            self.ok("device_state", {"action": "restore"})
+            self.ok("device_state", {"action": "restore", "state_key": state_key})
             self.idle()
 
     def test_scoped_route_uses_same_native_resolution(self):

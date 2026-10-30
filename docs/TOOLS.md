@@ -1,7 +1,7 @@
-# Supported tools — Tester 0.2.0
+# Supported tools — Tester 0.2.1
 
-Tester exposes **37 tools** over MCP on Android, including combined waits,
-durable routes, private evidence and owned artifact access.
+Tester exposes **40 tools** over MCP on Android, including combined waits,
+durable routes, private evidence, owned recovery and explicit environment controls.
 The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
 `read_file`, `create_notification`, `take_photo`, `get_app_version`,
 `get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
@@ -43,7 +43,7 @@ requirements of each tool.
 | `input_text` | `text` (string, required, max 5000 chars); optional `submit`; optional `index`, `match_text`, `resource_id`, `content_desc` | **MCP Touch Service** enabled; target must be editable | Yes | Text describing the field and whether submit was pressed. |
 | `scroll` | `direction` (`up`, `down`, `left`, `right`, required); optional `index`, `text`, `resource_id`, `content_desc` | **MCP Touch Service** enabled | Yes | Text with the scrolling method used. |
 | `global_action` | `action`: `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen` (required) | **MCP Touch Service** enabled | Yes | Text confirming the action. |
-| `qa_session` | `action`: `begin`, `step`, `status`, `end`; `test_case`, `title`, `expected`, `actual`, `status`, `result`, `notes` | App sandbox for reports | No | Session text; end writes JSON + Markdown. |
+| `qa_session` | `action`: `begin`, `step`, `status`, `end`; `test_case`, `title`, `expected`, `actual`, `status`, `result`, `notes`, optional cleanup `state_key` | App sandbox for reports | No | Session text; end writes JSON + Markdown; owned pending cleanup needs key and makes report FAIL if restoration fails. |
 | `ui_find` | Selector: `text`, `text_exact`, `resource_id`, `content_desc`, `class_name`, `index`, `within`, `visibility`; `include_invisible`, `limit`, `nth` (absolute `match_index`) | **MCP Touch Service** enabled | No | Structured JSON: count, observation metadata, matches with visibility/flags and references where a bounded tree path is available. |
 | `ui_wait` | `condition`: `visible`, `absent`, `text`, `idle`; selector; `expected`, `text_mode`, `ignore_case`, `timeout_ms`, `interval_ms`, `quiet_ms`, `package_name` | **MCP Touch Service** enabled | No | Text plus structured predicate result; every condition checks foreground/window. |
 | `ui_assert` | `condition`: `visible`, `absent`, `text`, `count`; selector; `expected`, `text_mode`, `ignore_case`, `package_name`, `timeout_ms`, `max_dimension` | **MCP Touch Service** enabled | No | Text plus structured predicate result; failure includes screenshot + tree excerpt when capture is available. |
@@ -51,16 +51,19 @@ requirements of each tool.
 | `audio_instruction` | `action`: `speak`, `play`, `stop`, `set_volume`; `text`, `path`, `language`, `rate`, `volume`, `loop`, `wait` | Device TTS/audio; path inside sandbox | Yes | Text; TTS defaults to en-US. |
 | `audio_state` | none | — | No | Volume, music active, TTS/player state. |
 | `get_device_state` | none | — | No | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
-| `device_state` | `action`: `set`, `restore`; `rotation`, `dark_mode`, `font_scale`, `animations`, `volume`, `keep_awake` | `WRITE_SETTINGS`/`WRITE_SECURE_SETTINGS` for some fields | Yes | Applied/restored fields or actionable error. |
+| `device_state` | `action`: `set`, `restore`, `status`; required secret `state_key`; `rotation`, `font_scale`, `animations`, `volume`, `keep_awake` | `WRITE_SETTINGS` for rotation/font; `WRITE_SECURE_SETTINGS` for animations | Yes | Only touched originals persisted before writes; effective readback, owned recovery and pending failed fields. `dark_mode` explicitly unsupported. |
 | `ui_diff` | `action`: `save_baseline`, `compare`; `name`, `threshold`, `max_dimension` | **MCP Touch Service**; baseline in app sandbox | No | Diff percentage + PASS/FAIL; failure image. |
 | `run_route` | `yaml`, optional `parameters`, `mode`, `run_key`, `submission_id`, `disconnect_policy`, `queue_timeout_ms`, `privacy_sensitive` | Android; **MCP Touch Service** | Yes, once for expanded route | Durable run identity and redacted timeline; synchronous call also returns live outputs. See [YAML routes](YAML_ROUTES.md). |
 | `wait_for_state` | `all` (1–10 predicates), `package_name`, `timeout_ms`, `interval_ms` | **MCP Touch Service** | No | One shared deadline, per-condition outcomes/timestamps and failed indices; unstable polls cannot pass. |
 | `get_run` | `run_id`, `run_key` | Approved session and recovery key | No | Durable redacted status/timeline; no replay. |
 | `cancel_run` | `run_id`, `run_key` | Approved session and recovery key | No | Cooperative cancellation; pending/unknown outcomes remain explicit. |
-| `get_build_identity` | `package_name` | Installed/visible package | No | Package/version; SHA and CI artifact explicitly unknown, never inferred from install dates. |
+| `get_build_identity` | `package_name` | Installed/visible package | No | Package/version and optional schema-1 manifest SHA/artifact, labeled app-reported/unverified; absent metadata stays unknown. |
 | `collect_failure_bundle` | `run_id`, `run_key`, approved `package_name`, optional `include_screenshot` | Owned run; accessibility/log permissions per source | Yes | Bounded redacted manifest and artifact ID; unavailable sources explicit, partial failures return `isError`. |
 | `export_run` | `run_id`, `run_key`, `format`: `json`/`markdown` | Owned run | No | Redacted report artifact ID. |
 | `get_artifact` | `run_id`, `run_key`, `artifact_id` | Artifact belongs to owned run | Yes | Stored JSON/Markdown or explicitly approved unmasked image; no arbitrary paths. |
+| `open_link` | Required `package_name`, `uri`; `wait_ms` (250–30000, default 5000) | Accessibility; one exported browsable target handler | Yes | Explicit app launch and foreground/quiet readiness; no arbitrary extras/flags or dangerous system/file URI schemes. |
+| `clipboard` | `action`: `write`, `read_owned`, `clear_owned`; `text` for write (max 5000) | Tester foreground; same approved session/process owns read/clear | Yes | Plain-text write-first access, never unrelated clipboard snapshots; text omitted from command history. |
+| `get_test_environment` | `package_name` | Installed/visible target; app-locale access can be denied | No | Manifest permission flags, inspectable locale override and explicit unsupported setup controls; no privileged mutations. |
 
 ## Approval behavior
 
@@ -68,7 +71,7 @@ Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
 `global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
 `device_state`, `run_route`, `observe_screen`, `collect_failure_bundle` and
-`get_artifact` (19 of 37).
+`get_artifact`, `open_link` and `clipboard` (21 of 40).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
@@ -77,7 +80,7 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 `get_device_info`, `create_notification`, `list_apps`, `health_check`,
 `get_app_version`, `get_capabilities`, `qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `audio_state`,
 `get_device_state`, `ui_diff`, `wait_for_state`, `get_run`, `cancel_run`,
-`get_build_identity` and `export_run` run without an extra approval.
+`get_build_identity`, `export_run` and `get_test_environment` run without an extra approval.
 
 Run recovery keys are bearer capabilities, not client names: another approved
 session must explicitly possess the key. Private run/evidence tool payloads and
@@ -86,6 +89,13 @@ free text and log message bodies. Images are omitted by default; unmasked captur
 requires admitting the run with `privacy_sensitive:false` and explicitly requesting
 it in collection. Direct synchronous responses can still contain approved live UI
 text. See [P2 behavior and limits](P2_0.2.0.md).
+
+Since 0.2.1, environment tool payloads/results (`device_state`, `qa_session`,
+`open_link`, `clipboard`) are also omitted from command history/gateway reports.
+This does not redact caller-authored QA step text from explicit QA reports.
+The gateway does not replay environment mutations after session loss. Retain
+`state_key` before setup; recovery requires it even in a new approved session.
+See [P3 controls and recovery](P3_0.2.1.md) for the deliberate migration and limits.
 
 ## Requirements
 
@@ -101,9 +111,9 @@ text. See [P2 behavior and limits](P2_0.2.0.md).
 - **TTS/audio**: `audio_instruction` uses the device TTS/audio; no extra permission. Audio
   paths must be inside the app sandbox.
 - **Device state**: `device_state` needs `WRITE_SETTINGS` for rotation/font and
-  `WRITE_SECURE_SETTINGS` for dark mode/animations. On Android, the reliable dark-mode
-  path is `adb shell cmd uimode night yes|no`; the app's secure-setting write may need a
-  configuration change before the UI follows.
+  `WRITE_SECURE_SETTINGS` for animations. Global dark-mode setting-only writes are
+  rejected because they do not prove the visible UI changed. Device policies can
+  also block volume/wake-lock operations. Setup never grants its own privileges.
 - **Visual baselines**: `ui_diff` stores JPEG baselines under `files/qa/baselines`.
 - **Launch app**: `package_name` must match
   `^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$` and the app must have a

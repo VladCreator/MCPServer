@@ -1,10 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:label="Tester QA Fixture" android:allowBackup="false" android:supportsRtl="true">
+        <meta-data android:name="com.vlad.tester.provenance.schema" android:value="1" />
+        <meta-data android:name="com.vlad.tester.provenance.sha" android:value="abcdef0123456789abcdef0123456789abcdef01" />
+        <meta-data android:name="com.vlad.tester.provenance.artifact" android:value="synthetic-fixture-not-ci" />
         <activity android:name=".FixtureActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tester-fixture" android:host="route" android:path="/cards" />
             </intent-filter>
         </activity>
     </application>

@@ -289,7 +289,7 @@ class McpDispatcher(
 
     companion object {
         val PRIVATE_HISTORY_TOOLS = setOf("run_route", "get_run", "cancel_run", "collect_failure_bundle",
-            "export_run", "get_artifact", "wait_for_state")
+            "export_run", "get_artifact", "wait_for_state", "device_state", "qa_session", "open_link", "clipboard")
         const val LATEST_PROTOCOL_VERSION = "2025-06-18"
         val SUPPORTED_PROTOCOL_VERSIONS = listOf(
             "2025-06-18",
@@ -297,7 +297,7 @@ class McpDispatcher(
             "2024-11-05"
         )
         const val SERVER_NAME = "Tester"
-        const val SERVER_VERSION = "0.2.0"
+        const val SERVER_VERSION = "0.2.1"
         private const val MAX_LOGGED_ARGUMENTS = 2_000
         private const val MAX_LOGGED_RESULT = 2_000
     }

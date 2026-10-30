@@ -27,8 +27,8 @@ android {
         applicationId = "com.vlad.mcpserver"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 12
-        versionName = "0.2.0"
+        versionCode = 13
+        versionName = "0.2.1"
     }
     packaging {
         resources {

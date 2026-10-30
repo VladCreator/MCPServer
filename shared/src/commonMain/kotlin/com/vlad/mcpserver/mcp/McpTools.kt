@@ -6,6 +6,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.jsonObject
 
 /**
  * JSON Schema description of a tool exposed through MCP.
@@ -380,6 +381,7 @@ object McpTools {
             putJsonObject("status") { put("type", "string"); putJsonArray("enum") { add("pass"); add("fail"); add("blocked"); add("info") } }
             putJsonObject("result") { put("type", "string"); put("description", "Final result for end, e.g. PASS/FAIL/BLOCKED") }
             putJsonObject("notes") { put("type", "string") }
+            putJsonObject("state_key") { put("type", "string"); put("description", "Recovery key for end cleanup if device_state changed fields; never recorded in reports.") }
         },
         requirement = "App sandbox for reports"
     )
@@ -508,10 +510,13 @@ object McpTools {
     val deviceState: ToolDefinition = ToolDefinition(
         name = "device_state",
         description = "Change or restore QA environment: rotation/auto-rotate, dark mode, font scale, animation " +
-            "scales, media volume and keep-awake. Some fields need WRITE_SETTINGS/WRITE_SECURE_SETTINGS.",
-        required = listOf("action"),
-        inputSchema = schema(listOf("action")) {
-            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add("set"); add("restore") } }
+            "scales, media volume and keep-awake. Persists only touched fields, verifies effective values, " +
+            "and retains failed restoration. Required secret state_key allows recovery after reconnect/restart. " +
+            "Global dark mode is explicitly unsupported.",
+        required = listOf("action", "state_key"),
+        inputSchema = schema(listOf("action", "state_key")) {
+            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add("set"); add("restore"); add("status") } }
+            putJsonObject("state_key") { put("type", "string"); put("description", "Required random URL-safe recovery secret, 32-128 characters; retain before set, never log it.") }
             putJsonObject("rotation") {
                 put("type", "string")
                 putJsonArray("enum") { add("auto"); add("portrait"); add("landscape"); add("reverse_portrait"); add("reverse_landscape") }
@@ -652,7 +657,39 @@ object McpTools {
     )
     val getBuildIdentity = ToolDefinition(
         name = "get_build_identity",
-        description = "Read installed package/version identity. SHA and CI artifact remain explicitly unknown without a provenance contract. Install dates never prove a fix.",
+        description = "Read installed package/version and optional schema-1 manifest provenance. App-reported SHA/artifact are unverified, not independent CI evidence. Missing provenance stays unknown.",
+        required = listOf("package_name"),
+        inputSchema = schema(listOf("package_name")) { putJsonObject("package_name") { put("type", "string") } }
+    )
+
+    val openLink = ToolDefinition(
+        name = "open_link",
+        description = "Open a hierarchical HTTP(S)/custom URI in one explicitly named app. Resolves exactly one " +
+            "exported browsable handler, uses no arbitrary extras/flags and verifies foreground/quiet readiness. " +
+            "A dispatched launch timeout is not safe to retry blindly. URIs are omitted from history.",
+        required = listOf("package_name", "uri"),
+        inputSchema = schema(listOf("package_name", "uri")) {
+            putJsonObject("package_name") { put("type", "string") }
+            putJsonObject("uri") { put("type", "string"); put("description", "Max 2048 characters; no credentials, file/content/intent/data/system schemes.") }
+            putJsonObject("wait_ms") { put("type", "integer"); put("description", "250-30000, default 5000") }
+        }, sensitive = true, requirement = "Accessibility for verified readiness; installed visible target with unique browsable handler"
+    )
+    val clipboard = ToolDefinition(
+        name = "clipboard",
+        description = "Consented write-first plain-text clipboard operations while Tester is foreground. " +
+            "read_owned/clear_owned only access the clip written by this process; never snapshot/read/restore " +
+            "unrelated clipboard contents. Text and results omitted from history.",
+        required = listOf("action"),
+        inputSchema = schema(listOf("action")) {
+            putJsonObject("action") { put("type", "string"); putJsonArray("enum") { add("write"); add("read_owned"); add("clear_owned") } }
+            putJsonObject("text") { put("type", "string"); put("description", "Plain text, max 5000; required for write") }
+        }, sensitive = true, requirement = "Tester foreground; Android focus/policy restrictions apply"
+    )
+    val getTestEnvironment = ToolDefinition(
+        name = "get_test_environment",
+        description = "Inspect target manifest permission flags and inspectable app locale override. Report " +
+            "app-ops/effective-locale limitations and unsupported permission/locale/location/reset/time adapters. " +
+            "Does not grant permissions or modify target data.",
         required = listOf("package_name"),
         inputSchema = schema(listOf("package_name")) { putJsonObject("package_name") { put("type", "string") } }
     )
@@ -694,7 +731,10 @@ object McpTools {
         collectFailureBundle,
         exportRun,
         getArtifact,
-        getBuildIdentity
+        getBuildIdentity,
+        openLink,
+        clipboard,
+        getTestEnvironment
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
@@ -713,7 +753,8 @@ object McpTools {
         getScreenTree,
         takeScreenshot,
         getLogs,
-        qaSession,
+        qaSession.copy(inputSchema = JsonObject(qaSession.inputSchema + ("properties" to
+            JsonObject(qaSession.inputSchema.getValue("properties").jsonObject - "state_key")))),
         audioInstruction,
         audioState,
         getDeviceState

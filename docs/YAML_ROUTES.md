@@ -196,5 +196,6 @@ See [P2](P2_0.2.0.md) for evidence and artifact policies.
 Container scoping and standalone session-bound references are implemented in 0.1.7;
 saved routes intentionally use stable selectors, not transient references.
 Standalone combined waits are available through `wait_for_state`; no YAML extension
-is required. Saved route catalogs, build provenance and owned state restoration
-remain later milestones in [`AGENT_QUALITY_IMPLEMENTATION_PLAN.md`](AGENT_QUALITY_IMPLEMENTATION_PLAN.md).
+is required. P3 adds standalone owned environment recovery and app-reported build
+provenance; see [P3](P3_0.2.1.md). Saved route catalogs and scenario setup/cleanup
+remain P4 in [`AGENT_QUALITY_IMPLEMENTATION_PLAN.md`](AGENT_QUALITY_IMPLEMENTATION_PLAN.md).

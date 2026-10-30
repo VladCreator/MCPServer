@@ -15,10 +15,10 @@ import urllib.request
 from pathlib import Path
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
-GATEWAY_VERSION = "0.2.0"
+GATEWAY_VERSION = "0.2.1"
 PRIVATE_HISTORY_TOOLS = {
     "run_route", "get_run", "cancel_run", "collect_failure_bundle",
-    "export_run", "get_artifact", "wait_for_state",
+    "export_run", "get_artifact", "wait_for_state", "device_state", "qa_session", "open_link", "clipboard",
 }
 
 
@@ -494,7 +494,7 @@ class Gateway:
             try:
                 result = backend.call(tool, arguments)
             except SessionLost:
-                if tool in {"run_route", "collect_failure_bundle"}:
+                if tool in {"run_route", "collect_failure_bundle", "device_state", "open_link", "clipboard", "qa_session"}:
                     raise BackendError(
                         f"{prefix}: session lost during {tool}; execution outcome is unknown. "
                         "Tool was not retried because actions or capture may already have executed."

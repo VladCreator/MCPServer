@@ -46,7 +46,8 @@ class FixtureActivity : ComponentActivity() {
         }
         column.addView(label("Synthetic $mode fixture"))
         if (mode == "cards") {
-            val status = label(savedInstanceState?.getString("status") ?: "No project opened").apply { id = R.id.status }
+            val status = label(savedInstanceState?.getString("status") ?:
+                if (intent.data != null) "Deep link opened" else "No project opened").apply { id = R.id.status }
             column.addView(status)
             val actions = label(savedInstanceState?.getString("actions") ?: "0").apply { id = R.id.action_count }
             column.addView(actions)

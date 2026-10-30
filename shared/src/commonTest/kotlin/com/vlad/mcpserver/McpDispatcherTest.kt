@@ -76,7 +76,7 @@ class McpDispatcherTest {
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
 
-        assertEquals(37, tools.size)
+        assertEquals(40, tools.size)
         assertTrue(tools.contains("run_route"))
         assertTrue(tools.contains("get_capabilities"))
         assertTrue(tools.contains("observe_screen"))
@@ -155,7 +155,32 @@ class McpDispatcherTest {
     }
 
     @Test
+    fun environmentSecretsAndResultsNeverEnterHistory() = runTest {
+        val records = mutableListOf<com.vlad.mcpserver.mcp.ToolCallRecord>()
+        val dispatcher = McpDispatcher(executor = FakeExecutor(ToolResult("private live content")),
+            onToolCall = { records += it })
+        val session = initializedSession(dispatcher)
+        for ((tool, args) in listOf(
+            "device_state" to """{"action":"status","state_key":"private state key"}""",
+            "qa_session" to """{"action":"end","state_key":"private state key"}""",
+            "open_link" to """{"package_name":"com.synthetic.fixture","uri":"synthetic://route?token=private"}""",
+            "clipboard" to """{"action":"write","text":"private clipboard"}"""
+        )) dispatcher.handle(session, """{"jsonrpc":"2.0","id":9,"method":"tools/call",
+            "params":{"name":"$tool","arguments":$args}}""")
+        assertEquals(4, records.size)
+        records.forEach {
+            assertEquals("[private tool payload omitted]", it.arguments)
+            assertFalse("private live content" in it.message)
+        }
+        assertEquals(listOf("action", "state_key"), McpTools.deviceState.required)
+        assertTrue(McpTools.openLink.sensitive)
+        assertTrue(McpTools.clipboard.sensitive)
+    }
+
+    @Test
     fun iosToolSurfaceIsExplicitAndEnglishNamed() = runTest {
+        assertFalse("state_key" in McpTools.iosAvailable().first { it.name == "qa_session" }
+            .inputSchema.getValue("properties").jsonObject)
         assertEquals(
             listOf(
                 "get_device_info",

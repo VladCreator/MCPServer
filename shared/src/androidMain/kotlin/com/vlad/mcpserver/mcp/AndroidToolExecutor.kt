@@ -65,8 +65,9 @@ class AndroidToolExecutor(
 ) : ToolExecutor {
 
     private val audio = AndroidAudioController(context)
-    private val deviceState = AndroidDeviceStateController(context)
+    private val deviceState = AndroidDeviceStateController.get(context)
     private val qa = QaSessionManager(context)
+    private val environment = AndroidEnvironmentTools(context)
     private val durableDelegate = lazy { DurableRoutes(context, routeExecutionMutex) }
     private val durable by durableDelegate
     private val startedAt = SystemClock.elapsedRealtime()
@@ -98,7 +99,7 @@ class AndroidToolExecutor(
                     return@withContext ToolResult("Invalid route: ${error.message}", isError = true)
                 }
             } else null
-            val approvalArguments = if (route == null) JsonObject(arguments.filterKeys { it != "run_key" }) else buildJsonObject {
+            val approvalArguments = if (route == null) JsonObject(arguments.filterKeys { it !in setOf("run_key", "state_key") }) else buildJsonObject {
                 put("route_id", route.id)
                 put("app_id", route.packageName)
                 put("timeout_ms", route.timeoutMs)
@@ -138,7 +139,7 @@ class AndroidToolExecutor(
                     structuredContent = buildJsonObject { put("reason", "consent_denied"); put("retryable", false) })
             }
             if (toolName in ROUTE_SERIALIZED_TOOLS) {
-                if (toolName in setOf("wait_for_state", "collect_failure_bundle")) {
+                if (toolName in setOf("wait_for_state", "collect_failure_bundle", "device_state", "open_link", "clipboard")) {
                     var acquired = false
                     try {
                         val ready = withTimeoutOrNull(10_000) {
@@ -204,6 +205,9 @@ class AndroidToolExecutor(
                 "get_run" -> durable.get(arguments)
                 "cancel_run" -> durable.cancel(arguments)
                 "get_build_identity" -> buildIdentity(arguments)
+                "open_link" -> environment.openLink(arguments)
+                "clipboard" -> environment.clipboard(clientId, arguments)
+                "get_test_environment" -> environment.inspect(arguments)
                 "collect_failure_bundle" -> {
                     val run = durable.owned(arguments)
                     val runId = run.string("run_id")!!
@@ -260,12 +264,13 @@ class AndroidToolExecutor(
         val touchTools = setOf(
             "touch_test", "swipe", "get_screen_tree", "take_screenshot", "click_element",
             "input_text", "scroll", "global_action", "ui_find", "ui_wait", "ui_assert",
-            "ui_gesture", "ui_diff", "run_route", "observe_screen", "wait_for_state", "collect_failure_bundle"
+            "ui_gesture", "ui_diff", "run_route", "observe_screen", "wait_for_state", "collect_failure_bundle", "open_link"
         )
         val mutations = setOf(
             "touch_test", "launch_app", "swipe", "click_element", "input_text", "scroll",
             "global_action", "ui_gesture", "run_route", "create_notification", "take_photo",
-            "qa_session", "ui_diff", "audio_instruction", "device_state", "collect_failure_bundle", "export_run", "cancel_run"
+            "qa_session", "ui_diff", "audio_instruction", "device_state", "collect_failure_bundle", "export_run", "cancel_run",
+            "open_link", "clipboard"
         )
         val result = buildJsonObject {
             put("platform", "android")
@@ -295,25 +300,27 @@ class AndroidToolExecutor(
                         put("execution_location", "android_device")
                         put("implemented", true)
                         put("status", if (missing.isNotEmpty()) "blocked" else
-                            if (tool.name in touchTools || tool.name in setOf("device_state", "get_logs", "launch_app", "take_photo")) "conditional"
+                            if (tool.name in touchTools || tool.name in setOf("device_state", "get_logs", "launch_app", "take_photo", "clipboard", "get_test_environment")) "conditional"
                             else "available")
                         putJsonArray("missing_permissions") { missing.forEach { add(it) } }
                         put("requires_confirmation_when_enabled", tool.sensitive)
                         put("target_app_dependency", when (tool.name) {
                             "get_logs" -> "Other-app logs require READ_LOGS and OS/user log-access approval."
                             "launch_app", "get_app_version", "get_build_identity" -> "Target must be installed and visible to Android package queries."
+                            "get_test_environment" -> "Package visibility; app locale override may require READ_APP_SPECIFIC_LOCALES."
+                            "clipboard" -> "Tester foreground; only process-owned plain text, never unrelated content."
                             in touchTools -> "Target must expose an accessible window; secure screens block capture."
                             else -> "none"
                         })
                         put("mutation", tool.name in mutations)
                         put("reversibility", when (tool.name) {
-                            "device_state" -> "snapshot_restore; partial failures possible"
+                            "device_state" -> "owned_durable_touched_fields; failed restore remains pending"
                             "audio_instruction" -> "manual_restore"
                             in mutations -> "not_guaranteed"
                             else -> "not_applicable"
                         })
                         put("potentially_destructive", tool.name in setOf(
-                            "click_element", "input_text", "ui_gesture", "touch_test", "global_action", "run_route"
+                            "click_element", "input_text", "ui_gesture", "touch_test", "global_action", "run_route", "open_link", "clipboard"
                         ))
                         tool.requirement?.let { put("requirement", it) }
                     })
@@ -321,12 +328,15 @@ class AndroidToolExecutor(
             }
             putJsonObject("device_state_requirements") {
                 put("rotation_font_scale", "WRITE_SETTINGS")
-                put("dark_mode_animations", "WRITE_SECURE_SETTINGS; effective dark-mode application is OS-dependent")
+                put("animations", "WRITE_SECURE_SETTINGS")
+                put("dark_mode", "unsupported; setting-only writes do not establish effective UI state")
                 put("volume_keep_awake", "System policy may reject changes; restore requires a snapshot")
+                put("ownership", "Required random state_key; retain for process/reconnection recovery")
+                put("pending_recovery", deviceState.hasSnapshot())
             }
             putJsonArray("unsupported_controls") {
-                listOf("permission_grant_revoke", "global_locale", "mock_location", "clipboard",
-                    "other_app_data_reset", "device_time", "connectivity").forEach { add(it) }
+                listOf("permission_grant_revoke", "global_locale", "target_locale_mutation", "mock_location",
+                    "other_app_data_reset", "device_time", "connectivity", "global_dark_mode", "arbitrary_launch_arguments").forEach { add(it) }
             }
         }
         return ToolResult(result.toString(), structuredContent = result)
@@ -946,7 +956,7 @@ class AndroidToolExecutor(
     }
 
 
-    private fun qaSession(arguments: JsonObject): ToolResult {
+    private suspend fun qaSession(arguments: JsonObject): ToolResult {
         val action = arguments.string("action")?.lowercase()
             ?: return ToolResult("Missing required argument: action", isError = true)
         return when (action) {
@@ -954,7 +964,7 @@ class AndroidToolExecutor(
                 val testCase = arguments.string("test_case")
                     ?: return ToolResult("Missing required argument: test_case", isError = true)
                 val platform = arguments.string("platform") ?: "android"
-                val device = deviceState.snapshot()
+                val device = deviceState.readText()
                 qa.begin(testCase, platform, device, arguments.string("notes").orEmpty())
             }
             "step" -> qa.step(
@@ -966,7 +976,10 @@ class AndroidToolExecutor(
             )
             "status" -> qa.status()
             "end" -> {
-                val restore = if (deviceState.hasSnapshot()) deviceState.restore() else ToolResult("No state changes to restore.")
+                val restore = if (!deviceState.hasSnapshot()) ToolResult("No state changes to restore.")
+                    else if (arguments.string("state_key") == null)
+                        targetingError("state_key_required", "Pending state recovery requires its state_key; nothing restored.")
+                    else deviceState.restore(deviceState.owner(arguments.string("state_key")))
                 val notes = listOfNotNull(
                     arguments.string("notes"),
                     "Device restore: ${restore.text}"
@@ -1240,65 +1253,16 @@ class AndroidToolExecutor(
         }
     }
 
-    private fun setDeviceState(arguments: JsonObject): ToolResult {
+    private suspend fun setDeviceState(arguments: JsonObject): ToolResult {
         val action = arguments.string("action")?.lowercase()
             ?: return ToolResult("Missing required argument: action", isError = true)
-        if (action == "restore") return deviceState.restore()
+        val owner = deviceState.owner(arguments.string("state_key"))
+        if (action == "restore") return deviceState.restore(owner)
+        if (action == "status") return deviceState.status(owner)
         if (action != "set") {
-            return ToolResult("action must be set or restore.", isError = true)
+            return ToolResult("action must be set, restore or status.", isError = true)
         }
-        if (!deviceState.hasSnapshot()) deviceState.snapshot()
-        val applied = mutableListOf<String>()
-        val failed = mutableListOf<String>()
-
-        arguments.string("rotation")?.let { value ->
-            runCatching { deviceState.setRotation(value) }
-                .onSuccess { applied += it }
-                .onFailure { failed += "rotation: ${it.message}" }
-        }
-        arguments.string("dark_mode")?.let { value ->
-            runCatching { deviceState.setDarkMode(value) }
-                .onSuccess { applied += it }
-                .onFailure { failed += "dark_mode: ${it.message}" }
-        }
-        arguments.float("font_scale")?.let { value ->
-            runCatching { deviceState.setFontScale(value) }
-                .onSuccess { applied += it }
-                .onFailure { failed += "font_scale: ${it.message}" }
-        }
-        arguments.optionalBool("animations")?.let { value ->
-            runCatching { deviceState.setAnimations(value) }
-                .onSuccess { applied += it }
-                .onFailure { failed += "animations: ${it.message}" }
-        }
-        arguments.int("volume")?.let { value ->
-            runCatching { deviceState.setVolume(value) }
-                .onSuccess { applied += it }
-                .onFailure { failed += "volume: ${it.message}" }
-        }
-        arguments.optionalBool("keep_awake")?.let { value ->
-            runCatching { deviceState.setKeepAwake(value) }
-                .onSuccess { applied += it }
-                .onFailure { failed += "keep_awake: ${it.message}" }
-        }
-
-        if (applied.isEmpty() && failed.isEmpty()) {
-            return ToolResult(
-                "Provide at least one field: rotation, dark_mode, font_scale, animations, volume or keep_awake.",
-                isError = true
-            )
-        }
-        val text = buildString {
-            if (applied.isNotEmpty()) appendLine("Applied: ${applied.joinToString(" ")}")
-            if (failed.isNotEmpty()) append("Failed: ${failed.joinToString("; ")}")
-        }.trimEnd()
-        return ToolResult(text, isError = failed.isNotEmpty(), structuredContent = buildJsonObject {
-            put("reason", if (failed.isEmpty()) "applied" else "partial_set")
-            put("snapshot_retained", deviceState.hasSnapshot())
-            put("retryable", failed.isNotEmpty())
-            putJsonArray("applied") { applied.forEach { add(it) } }
-            putJsonArray("failed") { failed.forEach { add(it) } }
-        })
+        return deviceState.set(owner, arguments)
     }
 
     private suspend fun uiDiff(arguments: JsonObject): ToolResult {
@@ -1555,6 +1519,21 @@ class AndroidToolExecutor(
     )
 
     private fun validateTargeting(toolName: String, arguments: JsonObject) {
+        val environmentFields = when (toolName) {
+            "device_state" -> setOf("action", "state_key", "rotation", "dark_mode", "font_scale", "animations", "volume", "keep_awake")
+            "open_link" -> setOf("package_name", "uri", "wait_ms")
+            "clipboard" -> setOf("action", "text")
+            "get_test_environment", "get_build_identity" -> setOf("package_name")
+            else -> null
+        }
+        if (environmentFields != null) require(arguments.keys.all { it in environmentFields }) {
+            "Unsupported environment argument; arbitrary intents, flags, shell and privileged adapters are unavailable."
+        }
+        arguments["state_key"]?.let {
+            require(it is JsonPrimitive && it.isString && Regex("[A-Za-z0-9_-]{32,128}").matches(it.content)) {
+                "state_key must be a random URL-safe secret, 32-128 characters."
+            }
+        }
         if (toolName in setOf("run_route", "get_run", "cancel_run", "collect_failure_bundle",
                 "export_run", "get_artifact", "get_build_identity", "wait_for_state")) {
             for (name in listOf("mode", "run_key", "submission_id", "disconnect_policy", "run_id",
@@ -1846,18 +1825,24 @@ class AndroidToolExecutor(
         val pkg = arguments.string("package_name")
             ?: return targetingError("invalid_package", "package_name is required.")
         if (!PACKAGE_NAME_REGEX.matches(pkg)) return targetingError("invalid_package", "Invalid package name.")
-        val info = try { context.packageManager.getPackageInfo(pkg, 0) }
+        val info = try { context.packageManager.getPackageInfo(pkg, PackageManager.GET_META_DATA) }
         catch (_: PackageManager.NameNotFoundException) {
             return targetingError("package_unavailable", "Package is not installed or visible.")
         }
+        val metadata = info.applicationInfo?.metaData
+        val provenance = BuildProvenance.parse(
+            if (metadata?.containsKey(BuildProvenance.PREFIX + "schema") == true)
+                metadata.getInt(BuildProvenance.PREFIX + "schema", -1) else null,
+            metadata?.getString(BuildProvenance.PREFIX + "sha")
+                ?: if (metadata?.containsKey(BuildProvenance.PREFIX + "sha") == true) "" else null,
+            metadata?.getString(BuildProvenance.PREFIX + "artifact")
+                ?: if (metadata?.containsKey(BuildProvenance.PREFIX + "artifact") == true) "" else null)
         val data = buildJsonObject {
             put("package_name", pkg); put("version_code", info.longVersionCode)
             put("version_name", info.versionName ?: "unknown")
-            put("sha", JsonNull); put("ci_artifact", JsonNull)
-            put("provenance_status", "unknown")
-            put("provenance_reason", "No target-app provenance contract is implemented; install dates do not establish a fix.")
+            provenance.forEach { (key, value) -> put(key, value) }
         }
-        return ToolResult(data.toString(), structuredContent = data)
+        return ToolResult(data.toString(), isError = provenance.string("provenance_status") == "invalid_contract", structuredContent = data)
     }
 
     private suspend fun collectFailureBundle(owner: String, runId: String, pkg: String, includeScreenshot: Boolean): ToolResult {
@@ -2018,7 +2003,7 @@ class AndroidToolExecutor(
             "touch_test", "launch_app", "swipe", "get_screen_tree", "take_screenshot", "observe_screen",
             "click_element", "input_text", "scroll", "global_action", "ui_find", "ui_wait",
             "ui_assert", "ui_gesture", "device_state", "get_device_state", "ui_diff", "take_photo",
-            "qa_session", "audio_instruction", "wait_for_state", "collect_failure_bundle"
+            "qa_session", "audio_instruction", "wait_for_state", "collect_failure_bundle", "open_link", "clipboard"
         )
         const val MAX_FILE_BYTES = 64 * 1024
         const val CHANNEL_ID = "mcp_tools"

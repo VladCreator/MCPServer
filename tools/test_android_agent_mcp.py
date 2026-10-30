@@ -94,9 +94,9 @@ class AndroidAgentContractTests(unittest.TestCase):
         result = self.call("get_capabilities", {})
         self.assertFalse(result["isError"])
         capabilities = result["structuredContent"]
-        self.assertEqual("0.2.0", capabilities["server_version"])
+        self.assertEqual("0.2.1", capabilities["server_version"])
         tools = capabilities["tools"]
-        self.assertEqual(37, len(tools))
+        self.assertEqual(40, len(tools))
         self.assertTrue(all(t["execution_location"] == "android_device" for t in tools))
         self.assertTrue(all("missing_permissions" in t and "reversibility" in t for t in tools))
         self.assertIn("device_time", capabilities["unsupported_controls"])

@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.2.0** (Android P2 durable runs/evidence; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.2.1** (Android P3 environment controls/recovery; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -42,7 +42,7 @@ Current version: **0.2.0** (Android P2 durable runs/evidence; iOS embedded QA se
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 37 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 40 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
@@ -59,6 +59,11 @@ Current version: **0.2.0** (Android P2 durable runs/evidence; iOS embedded QA se
   recovery-key-protected run lookup/cancellation, redacted failure bundles and
   owned JSON/Markdown artifacts. Disconnections do not replay actions; process
   restarts mark unfinished runs interrupted. See [`docs/P2_0.2.0.md`](docs/P2_0.2.0.md).
+- **Explicit environment controls (0.2.1)**: owned durable touched-field restoration,
+  package-targeted `open_link`, foreground write-first `clipboard`, permission/locale
+  inspection and app-reported build provenance. `device_state` now requires a
+  caller-retained recovery key; global dark-mode writes fail explicitly.
+  See [`docs/P3_0.2.1.md`](docs/P3_0.2.1.md).
 
 The [agent-first implementation plan](docs/AGENT_QUALITY_IMPLEMENTATION_PLAN.md)
 prioritizes tool correctness, reliable observations, evidence, environment setup
@@ -227,7 +232,7 @@ icon in the header (**Tools**).
 | `input_text` | Available (accessibility) | Sets the text of an editable field (focused field or selector via `match_text`/`index`/`resource_id`/`content_desc`); optional `submit`. |
 | `scroll` | Available (accessibility) | Scrolls `up`/`down`/`left`/`right` on the largest or selected scrollable element. |
 | `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. |
-| `qa_session` | Available (QA pack) | Begin/step/status/end a QA case and write JSON/Markdown reports with device snapshot. |
+| `qa_session` | Available (QA pack) | Begin/step/status/end a QA case; end restores owned touched fields using `state_key` and fails the report if cleanup fails. |
 | `ui_find` | Available (QA pack) | Find all matching elements with flags/bounds; returns JSON count and matches; `match_index` equals the `nth` used by `click_element`. |
 | `observe_screen` | Available (Android) | Correlated accessibility observation with session-bound references and optional window screenshot; explicit timestamps, instability and capture errors. |
 | `ui_wait` | Available (QA pack) | Wait for visible/absent/text/idle with timeout; `idle` with `package_name` also waits for that app to be in front (no false positive during launch). |
@@ -236,15 +241,19 @@ icon in the header (**Tools**).
 | `audio_instruction` | Available (QA pack) | TTS/audio instructions for the tester, stop, volume; English by default. |
 | `audio_state` | Available (QA pack) | Volume, music active, TTS speaking, QA player playing. |
 | `get_device_state` | Available (QA pack) | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
-| `device_state` | Available (QA pack) | Set/restore rotation, dark mode, font scale, animations, volume, keep-awake. |
+| `device_state` | Conditional (Android) | Set/status/restore owned rotation, font scale, animations, volume, keep-awake using required `state_key`; effective readback and durable pending cleanup. Global dark mode unsupported. |
 | `ui_diff` | Available (QA pack) | Save visual baseline / compare current screen with diff percentage. |
+| `open_link` | Conditional (Android) | Open an approved URI in one explicit app and verify foreground readiness; no arbitrary intents/flags. |
+| `clipboard` | Conditional (Android) | Foreground consented write/read-owned/clear-owned plain text; never snapshot unrelated clipboard contents. |
+| `get_test_environment` | Available (Android) | Inspect target permission flags and available app-locale override; explain unsupported privileged setup. |
 
 Recommended navigation loop for agents: `get_screen_tree` → `click_element` /
 `input_text` / `scroll` → `get_screen_tree` again; use `take_screenshot` only when
 the tree is empty or ambiguous.
 
 Sensitive tools (`read_file`, `take_photo`, `touch_test`, `launch_app`, all
-screen navigation tools, `ui_gesture`, `audio_instruction` and `device_state`) wait for an explicit
+screen navigation tools, `ui_gesture`, `audio_instruction`, `device_state`,
+`open_link` and `clipboard`) wait for an explicit
 **Approve tool** action in the dashboard before running. The **Confirm sensitive
 tools** switch in Settings disables this gate. Tools that cannot run in the current
 state return `isError: true` with an actionable message instead of a fake success.
