@@ -390,7 +390,7 @@ object McpTools {
             "content description, resource id, class, bounds and flags. match_index is the value to pass as nth to " +
             "click_element (it stays absolute when nth is given here). Use instead of pulling the whole tree.",
         inputSchema = schema(emptyList()) {
-            qaSelectorProperties()
+            qaSelectorProperties(includeIndex = false)
             putJsonObject("nth") { put("type", "integer"); put("description", "Skip this many leading matches") }
             putJsonObject("include_invisible") { put("type", "boolean"); put("description", "Include invisible nodes (default false)") }
             putJsonObject("limit") { put("type", "integer"); put("description", "Max matches (default 20, max 100)") }
@@ -555,6 +555,12 @@ object McpTools {
                 put("type", "object")
                 put("description", "Typed values for declared route parameters")
             }
+            putJsonObject("mode") { put("type", "string"); putJsonArray("enum") { add("sync"); add("async") } }
+            putJsonObject("run_key") { put("type", "string"); put("description", "Secret caller-generated random URL-safe recovery key, 32-128 characters; required for async/reliable retry. Never log it.") }
+            putJsonObject("submission_id") { put("type", "string"); put("description", "Stable deduplication ID, 1-80 safe characters; required for async. Same key/ID with a different plan is rejected.") }
+            putJsonObject("disconnect_policy") { put("type", "string"); put("description", "Async requires continue_until_terminal; accepted runs never replay on reconnect.") }
+            putJsonObject("queue_timeout_ms") { put("type", "integer"); put("description", "Lock queue deadline, 250-30000, default 10000; separate from route execution and approval.") }
+            putJsonObject("privacy_sensitive") { put("type", "boolean"); put("description", "Default true: omit route failure images and disallow unmasked evidence images. Set false only for approved non-sensitive synthetic data.") }
         },
         sensitive = true,
         requirement = "Android; MCP Touch Service; one approval for the complete route"
@@ -565,6 +571,90 @@ object McpTools {
         description = "Read Android tool support, current permission blockers, execution location and " +
             "mutation/restoration classifications. Conditional support is not permission to execute.",
         inputSchema = schema(emptyList()) {}
+    )
+
+    val waitForState = ToolDefinition(
+        name = "wait_for_state",
+        description = "Wait for all of 1-10 predicates using one foreground window per poll and one deadline. " +
+            "Supports foreground, visible, absent, text and idle. Returns every predicate, failed indices and timestamps; " +
+            "a measured match is not a promise of future stability. No action retries.",
+        required = listOf("all"),
+        inputSchema = schema(listOf("all")) {
+            putJsonObject("all") {
+                put("type", "array")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        qaSelectorProperties()
+                        putJsonObject("condition") { put("type", "string"); putJsonArray("enum") {
+                            add("foreground"); add("visible"); add("absent"); add("text"); add("idle")
+                        } }
+                        textComparisonProperties()
+                        putJsonObject("quiet_ms") { put("type", "integer") }
+                    }
+                    put("additionalProperties", false)
+                }
+            }
+            putJsonObject("package_name") { put("type", "string"); put("description", "Expected foreground; otherwise bind to initial/first app") }
+            putJsonObject("timeout_ms") { put("type", "integer"); put("description", "250-30000, default 5000") }
+            putJsonObject("interval_ms") { put("type", "integer"); put("description", "100-2000, default 200") }
+        },
+        requirement = "MCP Touch Service"
+    )
+
+    val getRun = ToolDefinition(
+        name = "get_run",
+        description = "Read a durable redacted route timeline. Requires run_id and secret run_key, even after reconnect. Never replays steps.",
+        required = listOf("run_id", "run_key"),
+        inputSchema = schema(listOf("run_id", "run_key")) { runOwnershipProperties() }
+    )
+    val cancelRun = ToolDefinition(
+        name = "cancel_run",
+        description = "Cancel an owned run cooperatively. Already dispatched actions cannot be undone. " +
+            "cancellation_pending means it has not yet released device ownership; inspect get_run.",
+        required = listOf("run_id", "run_key"),
+        inputSchema = schema(listOf("run_id", "run_key")) { runOwnershipProperties() }
+    )
+    val collectFailureBundle = ToolDefinition(
+        name = "collect_failure_bundle",
+        description = "Capture bounded owned-run evidence: redacted observation geometry, device/build metadata, " +
+            "filtered log/crash summaries and explicit source failures. All free text/log messages are omitted. " +
+            "Screenshots are omitted by default; include_screenshot explicitly requests an UNMASKED window image " +
+            "and must only be used with non-sensitive synthetic data. Original run failure is preserved.",
+        required = listOf("run_id", "run_key", "package_name"),
+        inputSchema = schema(listOf("run_id", "run_key", "package_name")) {
+            runOwnershipProperties()
+            putJsonObject("package_name") { put("type", "string") }
+            putJsonObject("include_screenshot") { put("type", "boolean"); put("description", "Default false; explicit unmasked capture, no reliable masking") }
+        },
+        sensitive = true,
+        requirement = "Owned run; screenshot requires accessibility and non-secure window; other-app logs need READ_LOGS and OS approval"
+    )
+    val exportRun = ToolDefinition(
+        name = "export_run",
+        description = "Export an owned redacted run as bounded JSON or Markdown artifact. Returns opaque artifact_id, never an arbitrary path.",
+        required = listOf("run_id", "run_key"),
+        inputSchema = schema(listOf("run_id", "run_key")) {
+            runOwnershipProperties()
+            putJsonObject("format") { put("type", "string"); putJsonArray("enum") { add("json"); add("markdown") } }
+        }
+    )
+    val getArtifact = ToolDefinition(
+        name = "get_artifact",
+        description = "Read an artifact scoped to a run and recovery key. Returns JSON/Markdown text or an explicitly captured image. Max 2 MiB.",
+        required = listOf("run_id", "run_key", "artifact_id"),
+        inputSchema = schema(listOf("run_id", "run_key", "artifact_id")) {
+            runOwnershipProperties()
+            putJsonObject("artifact_id") { put("type", "string") }
+        },
+        sensitive = true,
+        requirement = "Run recovery key and owned artifact ID"
+    )
+    val getBuildIdentity = ToolDefinition(
+        name = "get_build_identity",
+        description = "Read installed package/version identity. SHA and CI artifact remain explicitly unknown without a provenance contract. Install dates never prove a fix.",
+        required = listOf("package_name"),
+        inputSchema = schema(listOf("package_name")) { putJsonObject("package_name") { put("type", "string") } }
     )
 
     val all: List<ToolDefinition> = listOf(
@@ -597,7 +687,14 @@ object McpTools {
         uiDiff,
         runRoute,
         getCapabilities,
-        observeScreen
+        observeScreen,
+        waitForState,
+        getRun,
+        cancelRun,
+        collectFailureBundle,
+        exportRun,
+        getArtifact,
+        getBuildIdentity
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
@@ -626,14 +723,19 @@ object McpTools {
 
     fun isSensitive(name: String): Boolean = all.firstOrNull { it.name == name }?.sensitive == true
 
-    private fun kotlinx.serialization.json.JsonObjectBuilder.qaSelectorProperties() {
+    private fun kotlinx.serialization.json.JsonObjectBuilder.qaSelectorProperties(includeIndex: Boolean = true) {
         targetingProperties()
-        putJsonObject("index") { put("type", "integer"); put("description", "Index from the last get_screen_tree") }
+        if (includeIndex) putJsonObject("index") { put("type", "integer"); put("description", "Index from the last get_screen_tree") }
         putJsonObject("text") { put("type", "string"); put("description", "Visible text (partial, case-insensitive)") }
         putJsonObject("resource_id") { put("type", "string"); put("description", "View id, full or suffix") }
         putJsonObject("content_desc") { put("type", "string"); put("description", "Content description (partial)") }
         putJsonObject("class_name") { put("type", "string"); put("description", "Simple or full class name") }
         putJsonObject("text_exact") { put("type", "boolean"); put("description", "Require exact text (default false)") }
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.runOwnershipProperties() {
+        putJsonObject("run_id") { put("type", "string") }
+        putJsonObject("run_key") { put("type", "string"); put("description", "Secret recovery key from submission; never log it") }
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.textComparisonProperties() {

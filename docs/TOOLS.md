@@ -1,7 +1,7 @@
-# Supported tools — Tester 0.1.7
+# Supported tools — Tester 0.2.0
 
-Tester exposes **30 tools** over MCP on Android (17 device tools + 10 QA-pack tools,
-YAML route execution, capability discovery and correlated observation).
+Tester exposes **37 tools** over MCP on Android, including combined waits,
+durable routes, private evidence and owned artifact access.
 The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
 `read_file`, `create_notification`, `take_photo`, `get_app_version`,
 `get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
@@ -53,14 +53,22 @@ requirements of each tool.
 | `get_device_state` | none | — | No | Theme, rotation, font scale, volume, locale, accessibility, foreground package. |
 | `device_state` | `action`: `set`, `restore`; `rotation`, `dark_mode`, `font_scale`, `animations`, `volume`, `keep_awake` | `WRITE_SETTINGS`/`WRITE_SECURE_SETTINGS` for some fields | Yes | Applied/restored fields or actionable error. |
 | `ui_diff` | `action`: `save_baseline`, `compare`; `name`, `threshold`, `max_dimension` | **MCP Touch Service**; baseline in app sandbox | No | Diff percentage + PASS/FAIL; failure image. |
-| `run_route` | `yaml` (required), `parameters` (object, optional) | Android; **MCP Touch Service** | Yes, once for expanded route | JSON step results/timings; stops at first failure. See [YAML routes](YAML_ROUTES.md). |
+| `run_route` | `yaml`, optional `parameters`, `mode`, `run_key`, `submission_id`, `disconnect_policy`, `queue_timeout_ms`, `privacy_sensitive` | Android; **MCP Touch Service** | Yes, once for expanded route | Durable run identity and redacted timeline; synchronous call also returns live outputs. See [YAML routes](YAML_ROUTES.md). |
+| `wait_for_state` | `all` (1–10 predicates), `package_name`, `timeout_ms`, `interval_ms` | **MCP Touch Service** | No | One shared deadline, per-condition outcomes/timestamps and failed indices; unstable polls cannot pass. |
+| `get_run` | `run_id`, `run_key` | Approved session and recovery key | No | Durable redacted status/timeline; no replay. |
+| `cancel_run` | `run_id`, `run_key` | Approved session and recovery key | No | Cooperative cancellation; pending/unknown outcomes remain explicit. |
+| `get_build_identity` | `package_name` | Installed/visible package | No | Package/version; SHA and CI artifact explicitly unknown, never inferred from install dates. |
+| `collect_failure_bundle` | `run_id`, `run_key`, approved `package_name`, optional `include_screenshot` | Owned run; accessibility/log permissions per source | Yes | Bounded redacted manifest and artifact ID; unavailable sources explicit, partial failures return `isError`. |
+| `export_run` | `run_id`, `run_key`, `format`: `json`/`markdown` | Owned run | No | Redacted report artifact ID. |
+| `get_artifact` | `run_id`, `run_key`, `artifact_id` | Artifact belongs to owned run | Yes | Stored JSON/Markdown or explicitly approved unmasked image; no arbitrary paths. |
 
 ## Approval behavior
 
 Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
 `global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
-`device_state`, `run_route` and `observe_screen` (17 of 30).
+`device_state`, `run_route`, `observe_screen`, `collect_failure_bundle` and
+`get_artifact` (19 of 37).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
@@ -68,7 +76,16 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 
 `get_device_info`, `create_notification`, `list_apps`, `health_check`,
 `get_app_version`, `get_capabilities`, `qa_session`, `ui_find`, `ui_wait`, `ui_assert`, `audio_state`,
-`get_device_state` and `ui_diff` run without an extra approval.
+`get_device_state`, `ui_diff`, `wait_for_state`, `get_run`, `cancel_run`,
+`get_build_identity` and `export_run` run without an extra approval.
+
+Run recovery keys are bearer capabilities, not client names: another approved
+session must explicitly possess the key. Private run/evidence tool payloads and
+results are omitted from native history and gateway reports. Evidence omits all
+free text and log message bodies. Images are omitted by default; unmasked capture
+requires admitting the run with `privacy_sensitive:false` and explicitly requesting
+it in collection. Direct synchronous responses can still contain approved live UI
+text. See [P2 behavior and limits](P2_0.2.0.md).
 
 ## Requirements
 

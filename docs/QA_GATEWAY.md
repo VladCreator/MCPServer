@@ -1,8 +1,16 @@
-# Unified QA Gateway — 0.1.7
+# Unified QA Gateway — 0.2.0
 
 Android 0.1.7 dynamically exposes `android__observe_screen`; its structured
 observation and optional image are forwarded unchanged. Element references remain
 owned by the native Android connection: reconnecting does not transfer them.
+
+Android 0.2.0 adds native durable runs and evidence tools. The gateway forwards
+their structured results unchanged; it does not execute routes on the host.
+`run_route` and `collect_failure_bundle` are never retried automatically after
+session loss. Recover with a new approved connection and the original run ID/key,
+not another unkeyed submission. Run/evidence arguments, results and failure
+details are omitted from gateway history so recovery keys do not enter reports.
+See [P2](P2_0.2.0.md) for privacy, retention and interruption semantics.
 
 The QA Gateway is a **stdio MCP server on the Mac** that presents Android and iOS
 QA backends through one tool list and one gateway QA report.

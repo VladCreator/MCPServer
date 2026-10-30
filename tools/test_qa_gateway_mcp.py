@@ -101,7 +101,7 @@ class GatewayTests(unittest.TestCase):
         result = self.gateway.call("ios__run_route", arguments)
         self.assertFalse(result["isError"])
         self.assertEqual(("run_route", arguments), self.backend.calls[-1])
-        self.assertEqual("[route payload omitted]", self.gateway.session.calls[-1]["arguments"])
+        self.assertEqual("[private tool payload omitted]", self.gateway.session.calls[-1]["arguments"])
 
     def test_route_failure_is_recorded_as_failure(self):
         self.gateway.qa_session({"action": "begin", "test_case": "route"})
@@ -131,6 +131,24 @@ class GatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(gateway.BackendError, "not retried"):
             self.gateway.call("ios__run_route", {"yaml": "route"})
         self.assertEqual(["run_route"], calls)
+
+    def test_run_recovery_arguments_are_not_persisted(self):
+        self.gateway.qa_session({"action": "begin", "test_case": "recovery"})
+        for tool in ("get_run", "cancel_run", "collect_failure_bundle", "export_run", "get_artifact"):
+            self.gateway.call("ios__" + tool, {"run_id": "id", "run_key": "private key"})
+            self.assertEqual("[private tool payload omitted]", self.gateway.session.calls[-1]["arguments"])
+
+    def test_failure_bundle_is_not_recaptured_after_session_loss(self):
+        calls = []
+
+        def lose_session(tool, arguments):
+            calls.append(tool)
+            raise gateway.SessionLost("lost")
+
+        self.backend.call = lose_session
+        with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+            self.gateway.call("ios__collect_failure_bundle", {"run_key": "private key"})
+        self.assertEqual(["collect_failure_bundle"], calls)
 
 
 class FlakyBackend(FakeBackend):

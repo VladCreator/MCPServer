@@ -76,7 +76,7 @@ class McpDispatcherTest {
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
 
-        assertEquals(30, tools.size)
+        assertEquals(37, tools.size)
         assertTrue(tools.contains("run_route"))
         assertTrue(tools.contains("get_capabilities"))
         assertTrue(tools.contains("observe_screen"))
@@ -130,9 +130,28 @@ class McpDispatcherTest {
         )!!.jsonObject
         assertNull(response["error"])
         assertEquals("run_route", executor.lastTool)
-        assertEquals("[route payload omitted]", loggedArguments)
+        assertEquals("[private tool payload omitted]", loggedArguments)
         assertFalse(loggedMessage.contains("private"))
         assertTrue(response.toString().contains("private result"))
+    }
+
+    @Test
+    fun recoveryKeysAndArtifactsNeverEnterToolHistory() = runTest {
+        val records = mutableListOf<com.vlad.mcpserver.mcp.ToolCallRecord>()
+        val dispatcher = McpDispatcher(executor = FakeExecutor(ToolResult("private artifact")),
+            onToolCall = { records += it })
+        val session = initializedSession(dispatcher)
+        for (tool in listOf("get_run", "cancel_run", "collect_failure_bundle", "export_run", "get_artifact")) {
+            dispatcher.handle(session, """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{
+                "name":"$tool","arguments":{"run_id":"run","run_key":"private recovery key",
+                "artifact_id":"artifact","package_name":"com.synthetic.fixture"}}}""")
+        }
+        assertEquals(5, records.size)
+        records.forEach {
+            assertEquals("[private tool payload omitted]", it.arguments)
+            assertFalse("private artifact" in it.message)
+            assertFalse("recovery key" in it.message)
+        }
     }
 
     @Test

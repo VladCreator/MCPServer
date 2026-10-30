@@ -229,9 +229,10 @@ internal object YamlRouteParser {
 internal class YamlRouteRunner {
     suspend fun run(
         route: YamlRoute,
+        runId: String = UUID.randomUUID().toString(),
+        onStep: (JsonObject) -> Unit = {},
         execute: suspend (RouteStep) -> ToolResult
     ): ToolResult {
-        val runId = UUID.randomUUID().toString()
         val startedAt = System.currentTimeMillis()
         val start = TimeSource.Monotonic.markNow()
         val records = mutableListOf<JsonObject>()
@@ -247,6 +248,10 @@ internal class YamlRouteRunner {
                 val stepWallTime = System.currentTimeMillis()
                 activeStartedAt = stepWallTime
                 activeOffsetMs = start.elapsedNow().inWholeMilliseconds
+                onStep(buildJsonObject {
+                    put("id", step.id); put("tool", step.tool); put("status", "dispatched")
+                    put("started_at_ms", stepWallTime)
+                })
                 val result = try {
                     if (step.tool == "delay") {
                         delay(step.arguments.getValue("milliseconds").jsonPrimitive.long)
@@ -263,7 +268,7 @@ internal class YamlRouteRunner {
                 }
                 failed = result.isError
                 if (result.imageBase64 != null) image = result
-                records += buildJsonObject {
+                val record = buildJsonObject {
                     put("id", step.id)
                     put("tool", step.tool)
                     put("status", if (failed) "failed" else "completed")
@@ -273,13 +278,15 @@ internal class YamlRouteRunner {
                     put("output", result.text.take(8000))
                     result.structuredContent?.let { put("result", it) }
                 }
+                records += record
+                onStep(record)
             }
             true
         } == true
         if (!completed) failed = true
         val finishedCount = records.size
         route.steps.drop(finishedCount).forEachIndexed { index, step ->
-            records += buildJsonObject {
+            val record = buildJsonObject {
                 put("id", step.id)
                 put("tool", step.tool)
                 put("status", if (!completed && index == 0) "timed_out" else "skipped")
@@ -289,6 +296,8 @@ internal class YamlRouteRunner {
                     if (step.tool == "delay") put("requested_delay_ms", step.arguments.getValue("milliseconds"))
                 }
             }
+            records += record
+            onStep(record)
         }
         return ToolResult(
             text = buildJsonObject {

@@ -212,10 +212,10 @@ class McpDispatcher(
         val record = ToolCallRecord(
             clientId = session.client.id,
             toolName = toolName,
-            arguments = if (toolName == "run_route") "[route payload omitted]" else arguments.toString().take(MAX_LOGGED_ARGUMENTS),
+            arguments = if (toolName in PRIVATE_HISTORY_TOOLS) "[private tool payload omitted]" else arguments.toString().take(MAX_LOGGED_ARGUMENTS),
             outcome = if (result.isError) ToolCallOutcome.FAILED else ToolCallOutcome.SUCCESS,
-            message = if (toolName == "run_route") {
-                if (result.isError) "Route failed; see tool response." else "Route completed; see tool response."
+            message = if (toolName in PRIVATE_HISTORY_TOOLS) {
+                if (result.isError) "Private tool failed; see tool response." else "Private tool returned; see tool response."
             } else result.text.take(MAX_LOGGED_RESULT),
             timestamp = nowMillis()
         )
@@ -288,6 +288,8 @@ class McpDispatcher(
         (this as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
     companion object {
+        val PRIVATE_HISTORY_TOOLS = setOf("run_route", "get_run", "cancel_run", "collect_failure_bundle",
+            "export_run", "get_artifact", "wait_for_state")
         const val LATEST_PROTOCOL_VERSION = "2025-06-18"
         val SUPPORTED_PROTOCOL_VERSIONS = listOf(
             "2025-06-18",
@@ -295,7 +297,7 @@ class McpDispatcher(
             "2024-11-05"
         )
         const val SERVER_NAME = "Tester"
-        const val SERVER_VERSION = "0.1.7"
+        const val SERVER_VERSION = "0.2.0"
         private const val MAX_LOGGED_ARGUMENTS = 2_000
         private const val MAX_LOGGED_RESULT = 2_000
     }

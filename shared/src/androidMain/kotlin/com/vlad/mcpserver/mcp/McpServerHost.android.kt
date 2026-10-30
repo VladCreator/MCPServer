@@ -130,11 +130,13 @@ private class AndroidMcpServerHost(
     private var engine: EmbeddedServer<*, *>? = null
     private var reaper: Job? = null
 
+    private val executor = AndroidToolExecutor(context) { clientId, toolName, arguments ->
+        requestToolApproval(clientId, toolName, arguments)
+    }
+
     private val dispatcher = McpDispatcher(
         tools = McpTools.available(),
-        executor = AndroidToolExecutor(context) { clientId, toolName, arguments ->
-            requestToolApproval(clientId, toolName, arguments)
-        },
+        executor = executor,
         onToolCall = { record -> eventFlow.tryEmit(ServerEvent.ToolCalled(record)) }
     )
 
@@ -183,6 +185,7 @@ private class AndroidMcpServerHost(
     }
 
     override fun close() {
+        executor.stopRuns()
         reaper?.cancel()
         reaper = null
         val current = engine
@@ -264,6 +267,7 @@ private class AndroidMcpServerHost(
     }
 
     private suspend fun stopInternal() {
+        executor.stopRuns()
         reaper?.cancel()
         reaper = null
         val current = synchronized(this) { engine.also { engine = null } }

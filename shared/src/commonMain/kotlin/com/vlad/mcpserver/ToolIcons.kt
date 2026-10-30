@@ -59,6 +59,8 @@ fun toolIcon(name: String): ImageVector = when (name) {
     "global_action" -> Icons.Rounded.Navigation
     "ui_find" -> Icons.Rounded.Search
     "observe_screen" -> Icons.Rounded.Search
+    "wait_for_state", "get_run", "cancel_run", "collect_failure_bundle", "export_run",
+    "get_artifact", "get_build_identity" -> Icons.Rounded.Search
     "ui_wait" -> Icons.Rounded.Timer
     "ui_assert" -> Icons.Rounded.Rule
     "ui_diff" -> Icons.Rounded.Compare

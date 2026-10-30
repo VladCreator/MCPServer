@@ -87,7 +87,7 @@ Empty arguments use `{}`.
 | `back` | `{}`; one Android Back action. |
 | `delay` | Required integer `milliseconds`, 0..5000. No implicit idle wait before/after. |
 | `wait` | Required `condition: visible/absent/text/idle`; selector except for idle; optional `expected` and `timeout_ms` (250..30000). Idle waits specifically for `app_id`. |
-| `assert` | Required `condition: visible/absent/text/count`; selector; optional `expected` and `timeout_ms` (250..30000). Failure uses the existing assertion screenshot/tree evidence. |
+| `assert` | Required `condition: visible/absent/text/count`; selector; optional `expected` and `timeout_ms` (250..30000). Failure returns native predicate/tree evidence; privacy-sensitive routes suppress images. |
 
 Wait/assert selectors support `resource_id`, `text`, `content_desc`, `class_name`
 and optional `text_exact`, `within`, `visibility`. Since 0.1.6, `text` conditions use the same native predicate
@@ -117,8 +117,8 @@ calls, connectivity changes and state mutations are intentionally unsupported.
 
 ## Execution and consent
 
-- One approval covers the complete expanded route, including any assertion failure
-  evidence. The dashboard shows scrollable expanded arguments, not just a truncated
+- One approval covers the complete expanded route and its privacy/evidence policy.
+  The dashboard shows scrollable expanded arguments, not just a truncated
   YAML preview. The existing confirmation setting still applies.
 - A device-scoped lock prevents Tester UI/state operations from interleaving with
   a route, across clients. It cannot stop a person, the OS or another app from
@@ -135,26 +135,66 @@ calls, connectivity changes and state mutations are intentionally unsupported.
 - There are no hidden idle waits between tap, delay and Back. Explicit waits before
   that timing window remain useful to establish a repeatable starting screen.
 
+## Durable runs (0.2.0)
+
+`mode` defaults to `sync`. To return immediately after acceptance, use:
+
+```json
+{
+  "yaml": "<complete YAML file contents>",
+  "mode": "async",
+  "run_key": "<caller-generated URL-safe secret, 32-128 characters>",
+  "submission_id": "navigation-attempt-001",
+  "disconnect_policy": "continue_until_terminal",
+  "queue_timeout_ms": 10000,
+  "privacy_sensitive": true
+}
+```
+
+Generate and retain the key before submission; never commit it. The same key and
+submission ID recover the same retained run without approval or execution again.
+A different immutable plan under that pair is rejected. Submission IDs have
+1–80 URL-safe characters. Sync generates omitted IDs/keys, but that cannot recover
+a lost initial response: supply both explicitly when retry safety matters.
+
+Use `get_run`/`cancel_run` with `run_id` and `run_key`. A new approved MCP session
+can recover the original run only with that bearer key. Accepted execution
+continues after transport disconnect; stopping Tester cancels active jobs.
+Process restart marks unfinished runs `interrupted`, never resumes them, and marks
+dispatched steps as outcome-unknown and remaining steps skipped. Inspect the target
+before submitting a new attempt; this is deduplication, not exactly-once execution.
+
+Queue waiting has a separate 250–30000 ms limit (default 10000); the route deadline
+starts after lock acquisition. Cancellation is cooperative and cannot undo actions.
+Recovery/deduplication lasts only while a run is retained: at most 64 runs, 8
+active/pending; expired terminal runs are pruned on admission after 7 days.
+
 ## Results, history and limitations
 
 The MCP text result contains JSON with schema version, run ID, route ID, execution
 location, status, wall-clock start time, monotonic duration and ordered step records.
-Step statuses are `completed`, `failed`, `timed_out` or `skipped`. Executed steps
-include tool output, start time and duration; delay steps also include the requested
-delay. Assertion failure images are preserved in the MCP image block.
+Durable steps include `pending`, `dispatched`, `completed`, `failed`, `timed_out`,
+`interrupted` or `skipped`. Synchronous responses include live tool outputs and
+timings; persisted/get/export results retain redacted statuses/timings, not free
+text or parameter values. Dispatch is persisted before side effects.
 
 Timings measure tool execution, not exact render completion. Android scheduling and
 gesture dispatch add jitter. A timeout does not establish that the current action
-had no effect. If a client cancels/disconnects before receiving the result, there
-is no durable run-status lookup in this first version.
+had no effect. Use the original run ID/key after a lost response rather than replay.
 
 Native command history omits route payloads and result content; gateway reports
 omit route arguments and record success/failure and overall call duration. The
-calling client receives step outputs and assertion evidence, which may contain
-sensitive UI data; use non-sensitive test accounts. This version does not provide
-screenshot masking or general failure-bundle redaction.
+calling client receives approved live UI text, which may contain sensitive data.
+`privacy_sensitive` defaults to true: assertion images and bundle screenshots are
+suppressed. There is no reliable image masking. Unmasked bundle capture requires
+`privacy_sensitive:false` at admission, explicit `include_screenshot:true` and
+sensitive-tool consent. Automatic failure bundles remain metadata-only.
+Non-sensitive routes also permit unmasked assertion images in the synchronous
+response; that policy is shown during expanded-route approval.
+See [P2](P2_0.2.0.md) for evidence and artifact policies.
 
 Container scoping and standalone session-bound references are implemented in 0.1.7;
 saved routes intentionally use stable selectors, not transient references.
-Combined waits, route storage, build provenance and owned state restoration remain
-later milestones in [`AGENT_QUALITY_IMPLEMENTATION_PLAN.md`](AGENT_QUALITY_IMPLEMENTATION_PLAN.md).
+Standalone combined waits are available through `wait_for_state`; no YAML extension
+is required. Saved route catalogs, build provenance and owned state restoration
+remain later milestones in [`AGENT_QUALITY_IMPLEMENTATION_PLAN.md`](AGENT_QUALITY_IMPLEMENTATION_PLAN.md).

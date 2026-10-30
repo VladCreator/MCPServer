@@ -47,6 +47,34 @@ class YamlRouteTest {
     }
 
     @Test
+    fun recordsDispatchBeforeExecutionAndCompletionBeforeFollowingStep() = runTest {
+        val route = YamlRouteParser.parse(source("- tap: {resource_id: open}\n- tap: {resource_id: next}"))
+        val events = mutableListOf<String>()
+        YamlRouteRunner().run(route, "known-run", onStep = {
+            events += "${it.getValue("id").jsonPrimitive.content}:${it.getValue("status").jsonPrimitive.content}"
+        }) { step ->
+            assertEquals("${step.id}:dispatched", events.last())
+            events += "${step.id}:side_effect"
+            ToolResult("sensitive live output")
+        }
+        assertEquals(listOf("step_1:dispatched", "step_1:side_effect", "step_1:completed",
+            "step_2:dispatched", "step_2:side_effect", "step_2:completed"), events)
+    }
+
+    @Test
+    fun failedPersistenceCallbackPreventsDispatch() = runTest {
+        var actions = 0
+        assertFailsWith<IllegalStateException> {
+            YamlRouteRunner().run(YamlRouteParser.parse(source("- tap: {resource_id: open}")),
+                onStep = { error("Storage unavailable") }) {
+                actions++
+                ToolResult("must not execute")
+            }
+        }
+        assertEquals(0, actions)
+    }
+
+    @Test
     fun scopedSelectorsRemainNativeAndRejectEphemeralReferences() {
         val route = YamlRouteParser.parse(source(
             "- tap: {resource_id: open, within: {resource_id: project_beta}, visibility: fully_visible}\n" +

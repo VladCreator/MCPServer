@@ -15,7 +15,11 @@ import urllib.request
 from pathlib import Path
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
-GATEWAY_VERSION = "0.1.7"
+GATEWAY_VERSION = "0.2.0"
+PRIVATE_HISTORY_TOOLS = {
+    "run_route", "get_run", "cancel_run", "collect_failure_bundle",
+    "export_run", "get_artifact", "wait_for_state",
+}
 
 
 RECONNECT_INTERVAL_S = 2.0
@@ -326,10 +330,10 @@ class GatewaySession:
         self.calls.append({
             "backend": backend,
             "tool": tool,
-            "arguments": "[route payload omitted]" if tool == "run_route" else truncate(arguments, 1000),
+            "arguments": "[private tool payload omitted]" if tool in PRIVATE_HISTORY_TOOLS else truncate(arguments, 1000),
             "ok": ok,
             "duration_ms": duration_ms,
-            "error": error,
+            "error": "[private tool failure omitted]" if error and tool in PRIVATE_HISTORY_TOOLS else error,
             "at": iso_now(),
         })
 
@@ -490,10 +494,10 @@ class Gateway:
             try:
                 result = backend.call(tool, arguments)
             except SessionLost:
-                if tool == "run_route":
+                if tool in {"run_route", "collect_failure_bundle"}:
                     raise BackendError(
-                        f"{prefix}: session lost during route; execution outcome is unknown. "
-                        "Route was not retried because actions may already have executed."
+                        f"{prefix}: session lost during {tool}; execution outcome is unknown. "
+                        "Tool was not retried because actions or capture may already have executed."
                     ) from None
                 if not backend.connect():
                     raise BackendError(backend.error or f"{prefix}: reconnect failed")

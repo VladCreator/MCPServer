@@ -4,6 +4,7 @@
     <item name="open" type="id" />
     <item name="field" type="id" />
     <item name="status" type="id" />
+    <item name="action_count" type="id" />
     <item name="clipped" type="id" />
     <item name="web" type="id" />
 </resources>

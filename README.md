@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.1.7** (Android P1 observation/targeting; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.2.0** (Android P2 durable runs/evidence; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -42,7 +42,7 @@ Current version: **0.1.7** (Android P1 observation/targeting; iOS embedded QA se
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 30 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 37 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
@@ -55,6 +55,10 @@ Current version: **0.1.7** (Android P1 observation/targeting; iOS embedded QA se
 - **Observation and targeting (0.1.7)**: `observe_screen`, container-scoped selectors,
   short-lived session-bound element references, explicit visibility geometry and
   an isolated synthetic QA fixture. See [`docs/P1_0.1.7.md`](docs/P1_0.1.7.md).
+- **Durable automation (0.2.0)**: combined waits, asynchronous route execution,
+  recovery-key-protected run lookup/cancellation, redacted failure bundles and
+  owned JSON/Markdown artifacts. Disconnections do not replay actions; process
+  restarts mark unfinished runs interrupted. See [`docs/P2_0.2.0.md`](docs/P2_0.2.0.md).
 
 The [agent-first implementation plan](docs/AGENT_QUALITY_IMPLEMENTATION_PLAN.md)
 prioritizes tool correctness, reliable observations, evidence, environment setup

@@ -23,16 +23,24 @@ import com.vlad.mcpserver.CameraCapture
 import com.vlad.mcpserver.getLocalIpAddress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.putJsonObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -59,6 +67,8 @@ class AndroidToolExecutor(
     private val audio = AndroidAudioController(context)
     private val deviceState = AndroidDeviceStateController(context)
     private val qa = QaSessionManager(context)
+    private val durableDelegate = lazy { DurableRoutes(context, routeExecutionMutex) }
+    private val durable by durableDelegate
     private val startedAt = SystemClock.elapsedRealtime()
     private data class ReferencedNode(
         val node: AccessibilityNodeInfo, val path: List<Int>, val fingerprint: String
@@ -88,10 +98,16 @@ class AndroidToolExecutor(
                     return@withContext ToolResult("Invalid route: ${error.message}", isError = true)
                 }
             } else null
-            val approvalArguments = if (route == null) arguments else buildJsonObject {
+            val approvalArguments = if (route == null) JsonObject(arguments.filterKeys { it != "run_key" }) else buildJsonObject {
                 put("route_id", route.id)
                 put("app_id", route.packageName)
                 put("timeout_ms", route.timeoutMs)
+                put("mode", arguments.string("mode") ?: "sync")
+                put("disconnect_policy", "continue_until_terminal")
+                put("failure_evidence", if (arguments.optionalBool("privacy_sensitive") == false)
+                    "automatic bundle metadata only; direct assertion failure images may be unmasked"
+                    else "bounded metadata; all free text/log messages redacted; screenshots omitted")
+                put("privacy_sensitive", arguments.optionalBool("privacy_sensitive") ?: true)
                 putJsonArray("steps") {
                     route.steps.forEach { step ->
                         add(buildJsonObject {
@@ -102,21 +118,45 @@ class AndroidToolExecutor(
                     }
                 }
             }
+            if (route != null) {
+                return@withContext try {
+                    durable.submit(route, arguments,
+                        approve = { consent(clientId, toolName, approvalArguments) },
+                        failureEvidence = { runId ->
+                            collectFailureBundle(clientId, runId, route.packageName, includeScreenshot = false)
+                        }
+                    ) { step -> executeRouteStep(clientId, route, step,
+                        privacySensitive = arguments.optionalBool("privacy_sensitive") ?: true) }
+                } catch (error: IllegalArgumentException) {
+                    targetingError("invalid_run", error.message ?: "Invalid run submission.")
+                } catch (error: IllegalStateException) {
+                    targetingError("run_unavailable", error.message ?: "Run store unavailable.")
+                }
+            }
             if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, approvalArguments)) {
                 return@withContext ToolResult("User rejected the tool call.", isError = true,
                     structuredContent = buildJsonObject { put("reason", "consent_denied"); put("retryable", false) })
             }
-            if (route != null) {
-                return@withContext routeExecutionMutex.withLock {
-                    YamlRouteRunner().run(route) { step -> executeRouteStep(clientId, route, step) }
-                }
-            }
             if (toolName in ROUTE_SERIALIZED_TOOLS) {
+                if (toolName in setOf("wait_for_state", "collect_failure_bundle")) {
+                    var acquired = false
+                    try {
+                        val ready = withTimeoutOrNull(10_000) {
+                            routeExecutionMutex.lock()
+                            acquired = true
+                            true
+                        } == true
+                        if (!ready) return@withContext targetingError("queue_timeout", "Device busy; nothing was executed.")
+                        return@withContext executeTool(clientId, toolName, arguments)
+                    } finally { if (acquired) routeExecutionMutex.unlock() }
+                }
                 routeExecutionMutex.withLock { executeTool(clientId, toolName, arguments) }
             } else executeTool(clientId, toolName, arguments)
         }
 
-    private suspend fun executeRouteStep(clientId: String, route: YamlRoute, step: RouteStep): ToolResult {
+    private suspend fun executeRouteStep(
+        clientId: String, route: YamlRoute, step: RouteStep, privacySensitive: Boolean
+    ): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val waitsForApp = step.tool == "ui_wait" && step.arguments.string("condition") == "idle"
         if (step.tool != "launch_app" && !waitsForApp &&
@@ -134,7 +174,8 @@ class AndroidToolExecutor(
                 return ToolResult("Route stopped: selector must match exactly one visible element.", isError = true)
             }
         }
-        val result = executeTool(clientId, step.tool, step.arguments)
+        val result = if (step.tool == "ui_assert") uiAssert(step.arguments, includeImage = !privacySensitive)
+            else executeTool(clientId, step.tool, step.arguments)
         if (!result.isError && step.tool in setOf("ui_wait", "ui_assert") &&
             service.rootInActiveWindow?.packageName?.toString() != route.packageName
         ) {
@@ -159,6 +200,25 @@ class AndroidToolExecutor(
                 "get_capabilities" -> capabilities()
                 "get_screen_tree" -> screenTree(arguments)
                 "observe_screen" -> observeScreen(clientId, arguments)
+                "wait_for_state" -> waitForState(arguments)
+                "get_run" -> durable.get(arguments)
+                "cancel_run" -> durable.cancel(arguments)
+                "get_build_identity" -> buildIdentity(arguments)
+                "collect_failure_bundle" -> {
+                    val run = durable.owned(arguments)
+                    val runId = run.string("run_id")!!
+                    val pkg = arguments.string("package_name")
+                        ?: return targetingError("invalid_package", "package_name is required.")
+                    if (run.string("target_package") != pkg) return targetingError(
+                        "wrong_package", "Evidence must target the package approved for this run."
+                    )
+                    if (arguments.bool("include_screenshot") && run["privacy_sensitive"] != JsonPrimitive(false)) {
+                        return targetingError("privacy_policy", "Privacy-sensitive runs cannot capture unmasked images.")
+                    }
+                    collectFailureBundle(clientId, runId, pkg, arguments.bool("include_screenshot"))
+                }
+                "export_run" -> exportRun(arguments)
+                "get_artifact" -> readArtifact(arguments)
                 "take_screenshot" -> screenshot(arguments)
                 "click_element" -> clickElement(clientId, arguments)
                 "input_text" -> inputText(clientId, arguments)
@@ -200,12 +260,12 @@ class AndroidToolExecutor(
         val touchTools = setOf(
             "touch_test", "swipe", "get_screen_tree", "take_screenshot", "click_element",
             "input_text", "scroll", "global_action", "ui_find", "ui_wait", "ui_assert",
-            "ui_gesture", "ui_diff", "run_route", "observe_screen"
+            "ui_gesture", "ui_diff", "run_route", "observe_screen", "wait_for_state", "collect_failure_bundle"
         )
         val mutations = setOf(
             "touch_test", "launch_app", "swipe", "click_element", "input_text", "scroll",
             "global_action", "ui_gesture", "run_route", "create_notification", "take_photo",
-            "qa_session", "ui_diff", "audio_instruction", "device_state"
+            "qa_session", "ui_diff", "audio_instruction", "device_state", "collect_failure_bundle", "export_run", "cancel_run"
         )
         val result = buildJsonObject {
             put("platform", "android")
@@ -241,7 +301,7 @@ class AndroidToolExecutor(
                         put("requires_confirmation_when_enabled", tool.sensitive)
                         put("target_app_dependency", when (tool.name) {
                             "get_logs" -> "Other-app logs require READ_LOGS and OS/user log-access approval."
-                            "launch_app", "get_app_version" -> "Target must be installed and visible to Android package queries."
+                            "launch_app", "get_app_version", "get_build_identity" -> "Target must be installed and visible to Android package queries."
                             in touchTools -> "Target must expose an accessible window; secure screens block capture."
                             else -> "none"
                         })
@@ -1010,7 +1070,7 @@ class AndroidToolExecutor(
         }
     }
 
-    private suspend fun uiAssert(arguments: JsonObject): ToolResult {
+    private suspend fun uiAssert(arguments: JsonObject, includeImage: Boolean = true): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val condition = arguments.string("condition")?.lowercase()
             ?: return ToolResult("Missing required argument: condition", isError = true)
@@ -1059,7 +1119,7 @@ class AndroidToolExecutor(
 
         val maxDimension = (arguments.int("max_dimension") ?: DEFAULT_ASSERT_SCREENSHOT_DIMENSION)
             .coerceIn(MIN_SCREENSHOT_DIMENSION, MAX_SCREENSHOT_DIMENSION)
-        val shot = captureScreenshot(service, maxDimension).getOrNull()
+        val shot = if (includeImage) captureScreenshot(service, maxDimension).getOrNull() else null
         val tree = ScreenNavigator.dumpTree(service, ASSERT_TREE_NODES)?.take(ASSERT_TREE_CHARS)
         val text = buildString {
             appendLine("ASSERTION FAILED: condition=$condition expected=${expected ?: selector.toString()}")
@@ -1495,6 +1555,19 @@ class AndroidToolExecutor(
     )
 
     private fun validateTargeting(toolName: String, arguments: JsonObject) {
+        if (toolName in setOf("run_route", "get_run", "cancel_run", "collect_failure_bundle",
+                "export_run", "get_artifact", "get_build_identity", "wait_for_state")) {
+            for (name in listOf("mode", "run_key", "submission_id", "disconnect_policy", "run_id",
+                    "artifact_id", "package_name", "format")) arguments[name]?.let {
+                require(it is JsonPrimitive && it.isString && it.content.isNotBlank()) { "$name must be a nonempty string." }
+            }
+            for (name in listOf("privacy_sensitive", "include_screenshot")) arguments[name]?.let {
+                require(it is JsonPrimitive && !it.isString && it.booleanOrNull != null) { "$name must be a boolean." }
+            }
+            for (name in listOf("queue_timeout_ms", "timeout_ms", "interval_ms")) arguments[name]?.let {
+                require(it is JsonPrimitive && !it.isString && it.longOrNull != null) { "$name must be an integer." }
+            }
+        }
         arguments["within"]?.let {
             require(it is JsonObject && it.isNotEmpty()) { "within must be a nonempty container selector." }
             require(it.keys.all { key -> key in setOf("text", "text_exact", "resource_id", "content_desc", "class_name") }) {
@@ -1662,6 +1735,264 @@ class AndroidToolExecutor(
             imageMimeType = if (shot?.isSuccess == true) "image/jpeg" else null, structuredContent = payload)
     }
 
+    private suspend fun waitForState(arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val predicates = (arguments["all"] as? JsonArray)?.map {
+            it as? JsonObject ?: return targetingError("invalid_condition", "all entries must be objects.")
+        } ?: return targetingError("invalid_condition", "all must be an array.")
+        if (predicates.size !in 1..10) return targetingError("invalid_condition", "Provide 1-10 predicates.")
+        val allowed = setOf("condition", "text", "text_exact", "resource_id", "content_desc", "class_name",
+            "within", "visibility", "expected", "text_mode", "ignore_case", "quiet_ms")
+        for (predicate in predicates) {
+            if (predicate.keys.any { it !in allowed } ||
+                predicate.string("condition") !in setOf("foreground", "visible", "absent", "text", "idle")) {
+                return targetingError("invalid_condition", "Unsupported combined predicate or field.")
+            }
+            if (predicate.any { (key, value) -> when (key) {
+                    "within" -> value !is JsonObject
+                    "text_exact", "ignore_case" -> value !is JsonPrimitive || value.isString ||
+                        value.content !in setOf("true", "false")
+                    "quiet_ms" -> value !is JsonPrimitive || value.isString ||
+                        value.content.toIntOrNull()?.let { it in 200..5000 } != true
+                    else -> value !is JsonPrimitive || !value.isString
+                } }) return targetingError("invalid_condition", "Predicate field has an invalid type or range.")
+            try { validateTargeting("wait_for_state", predicate) } catch (error: IllegalArgumentException) {
+                return targetingError("invalid_condition", error.message ?: "Invalid predicate.")
+            }
+            val condition = predicate.string("condition")
+            if (condition !in setOf("foreground", "idle") && qaSelector(predicate).isEmpty) {
+                return targetingError("invalid_condition", "Element predicates require a selector.")
+            }
+            if (condition == "text" && predicate.rawString("expected") == null && predicate.string("text") == null) {
+                return targetingError("invalid_condition", "Text predicate needs expected or a text selector.")
+            }
+            if (predicate.string("text_mode") !in setOf(null, "exact", "contains")) {
+                return targetingError("invalid_condition", "text_mode must be exact or contains.")
+            }
+        }
+        val started = SystemClock.elapsedRealtime()
+        val startAt = System.currentTimeMillis()
+        val timeout = (arguments.int("timeout_ms") ?: 5000).coerceIn(250, 30_000)
+        val interval = (arguments.int("interval_ms") ?: 200).coerceIn(100, 2000)
+        val deadline = started + timeout
+        var target = arguments.string("package_name") ?: service.rootInActiveWindow?.packageName?.toString()
+        var hash: Int? = null
+        var changedAt = started
+        var results = emptyList<JsonObject>()
+        var passed: Boolean
+        var unstablePoll = false
+        do {
+            val root = service.rootInActiveWindow
+            val pkg = root?.packageName?.toString()
+            if (target == null && pkg != null) target = pkg
+            val now = SystemClock.elapsedRealtime()
+            val generation = service.windowGeneration.get()
+            val treeHash = if (predicates.any { it.string("condition") == "idle" } && root != null)
+                ScreenNavigator.snapshot(root, MAX_TREE_NODES).nodes.joinToString { fingerprint(it.node) }.hashCode() else null
+            if (treeHash != hash || root == null || pkg != target) {
+                hash = treeHash; changedAt = now
+            }
+            results = predicates.mapIndexed { index, predicate ->
+                val condition = predicate.string("condition")!!
+                val outcome = when (condition) {
+                    "foreground" -> PredicateOutcome(root != null && pkg == target, when {
+                        root == null -> "no_window"; pkg != target -> "wrong_package"; else -> "matched"
+                    }, emptyList())
+                    "idle" -> {
+                        val ready = root != null && pkg == target && now - changedAt >=
+                            (predicate.int("quiet_ms") ?: 700).coerceIn(200, 5000)
+                        PredicateOutcome(ready, when {
+                            root == null -> "no_window"; pkg != target -> "wrong_package"; !ready -> "not_idle"; else -> "matched"
+                        }, emptyList())
+                    }
+                    else -> {
+                        val matches = ScreenNavigator.findAll(service, qaSelector(predicate), MAX_QA_MATCHES, root)
+                        UiPredicate.evaluate(condition, matches.map { if (it.isPassword) null else it.text?.toString() },
+                            predicate.rawString("expected"), root != null, pkg, target,
+                            truncated = matches.size >= MAX_QA_MATCHES,
+                            contains = predicate.string("text_mode") == "contains", ignoreCase = predicate.bool("ignore_case"))
+                    }
+                }
+                JsonObject(outcome.structured(condition, predicate.rawString("expected"), now - started) +
+                    mapOf("predicate_index" to JsonPrimitive(index), "observed_at_ms" to JsonPrimitive(System.currentTimeMillis())))
+            }
+            val changedDuringPoll = generation != service.windowGeneration.get() ||
+                root?.windowId != service.rootInActiveWindow?.windowId
+            unstablePoll = changedDuringPoll
+            if (changedDuringPoll) results = results.map { result ->
+                JsonObject(result + buildJsonObject { put("passed", false); put("reason", "unstable_observation") })
+            }
+            passed = !changedDuringPoll && results.all { it["passed"] == JsonPrimitive(true) }
+            val terminal = results.any { it.string("reason") in setOf("ambiguous_match", "truncated_count") }
+            if (passed || terminal || SystemClock.elapsedRealtime() >= deadline) break
+            delay(minOf(interval.toLong(), (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1)))
+        } while (true)
+        val payload = buildJsonObject {
+            put("passed", passed); put("reason", if (passed) "matched" else "conditions_not_met")
+            put("capture_started_at_ms", startAt); put("capture_finished_at_ms", System.currentTimeMillis())
+            put("elapsed_ms", SystemClock.elapsedRealtime() - started)
+            put("target_package", target ?: "unknown")
+            put("foreground_package", service.rootInActiveWindow?.packageName?.toString() ?: "unknown"); put("atomic", false)
+            put("unstable", unstablePoll)
+            put("conditions", JsonArray(results))
+            putJsonArray("failed_conditions") {
+                results.forEachIndexed { index, result -> if (result["passed"] != JsonPrimitive(true)) add(index) }
+            }
+        }
+        return ToolResult(payload.toString(), isError = !passed, structuredContent = payload)
+    }
+
+    private fun buildIdentity(arguments: JsonObject): ToolResult {
+        val pkg = arguments.string("package_name")
+            ?: return targetingError("invalid_package", "package_name is required.")
+        if (!PACKAGE_NAME_REGEX.matches(pkg)) return targetingError("invalid_package", "Invalid package name.")
+        val info = try { context.packageManager.getPackageInfo(pkg, 0) }
+        catch (_: PackageManager.NameNotFoundException) {
+            return targetingError("package_unavailable", "Package is not installed or visible.")
+        }
+        val data = buildJsonObject {
+            put("package_name", pkg); put("version_code", info.longVersionCode)
+            put("version_name", info.versionName ?: "unknown")
+            put("sha", JsonNull); put("ci_artifact", JsonNull)
+            put("provenance_status", "unknown")
+            put("provenance_reason", "No target-app provenance contract is implemented; install dates do not establish a fix.")
+        }
+        return ToolResult(data.toString(), structuredContent = data)
+    }
+
+    private suspend fun collectFailureBundle(owner: String, runId: String, pkg: String, includeScreenshot: Boolean): ToolResult {
+        require(PACKAGE_NAME_REGEX.matches(pkg)) { "Invalid package_name." }
+        val started = System.currentTimeMillis()
+        val sources = mutableListOf<JsonObject>()
+        fun source(name: String, status: String, data: JsonObject = buildJsonObject {}) {
+            sources += buildJsonObject {
+                put("source", name); put("status", status); put("observed_at_ms", System.currentTimeMillis())
+                put("data", data)
+            }
+        }
+        suspend fun captureSource(name: String, block: suspend () -> Unit) {
+            try {
+                if (withTimeoutOrNull(2500) { block(); true } != true) source(name, "timed_out")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                android.util.Log.w("TesterEvidence", "Unable to collect source $name", error)
+                source(name, "failed", buildJsonObject { put("reason", "source_collection_failed") })
+            }
+        }
+        val service = touchService()
+        val root = service?.rootInActiveWindow
+        if (service == null) source("observation", "denied")
+        else if (root == null) source("observation", "failed")
+        else if (root.packageName?.toString() != pkg) source("observation", "failed",
+            buildJsonObject { put("reason", "wrong_package") })
+        else {
+            captureSource("observation") {
+                val observation = observeScreen(owner, buildJsonObject { put("max_nodes", 200) })
+                check(!observation.isError) { "Observed window became unavailable." }
+                val raw = observation.structuredContent!!
+                check(raw.string("foreground_package") == pkg) { "Observed package changed." }
+                val safeNodes = raw.getValue("nodes").jsonArray.map { node ->
+                    JsonObject(node.jsonObject.filterKeys { it in setOf("node_index", "path", "bounds", "visible_bounds",
+                        "accessibility_visible", "viewport_intersecting", "fully_visible", "enabled", "editable", "scrollable") })
+                }
+                source("observation", if (raw["unstable"] == JsonPrimitive(true)) "failed" else "redacted",
+                    JsonObject(raw.filterKeys { it !in setOf("nodes") } +
+                    ("nodes" to JsonArray(safeNodes))))
+            }
+        }
+        source("device_state", "collected", buildJsonObject {
+            put("api_level", Build.VERSION.SDK_INT)
+            put("rotation", service?.let { observationWindow(it, root).rotation } ?: -1)
+            put("snapshot_available", deviceState.hasSnapshot())
+            put("screen_interactive", context.getSystemService(android.os.PowerManager::class.java).isInteractive)
+        })
+        captureSource("build_identity") {
+            val identity = buildIdentity(buildJsonObject { put("package_name", pkg) })
+            source("build_identity", if (identity.isError) "failed" else "collected",
+                identity.structuredContent?.let { JsonObject(it.filterKeys { field -> field != "version_name" }) }
+                    ?: buildJsonObject {})
+        }
+        for (buffer in listOf("main", "crash")) {
+            val name = if (buffer == "main") "recent_logs" else "crash_buffer"
+            captureSource(name) {
+                val logResult = FailureLogSummary.collect(context, pkg, buffer)
+                source(name, logResult.string("status")!!, logResult)
+            }
+        }
+        if (!includeScreenshot) source("screenshot", "redacted", buildJsonObject {
+            put("reason", "privacy_default; reliable image masking is unavailable")
+        })
+        else if (service == null) source("screenshot", "denied")
+        else if (root == null || root.packageName?.toString() != pkg) source("screenshot", "failed")
+        else {
+            captureSource("screenshot") {
+                val active = service.rootInActiveWindow
+                check(active?.windowId == root.windowId && active?.packageName?.toString() == pkg) {
+                    "Window changed before evidence capture."
+                }
+                val shot = captureScreenshot(service, 900, root.windowId)
+                if (shot.isFailure) source("screenshot", "failed", buildJsonObject { put("reason", "capture_denied_or_unavailable") })
+                else {
+                    val image = shot.getOrThrow()
+                    val id = durable.store.artifact(runId, "image/jpeg", image.jpegBytes)
+                    source("screenshot", "collected", buildJsonObject {
+                        put("artifact_id", id); put("width", image.width); put("height", image.height)
+                        put("redacted", false); put("explicit_unmasked_capture", true)
+                    })
+                }
+            }
+        }
+        val run = durable.store.update(runId) { it }
+        val manifest = buildJsonObject {
+            put("run_id", runId); put("capture_started_at_ms", started)
+            put("capture_finished_at_ms", System.currentTimeMillis())
+            put("text_policy", "all_free_text_omitted")
+            put("primary_run_status", run.getValue("status"))
+            put("primary_steps", run.getValue("steps"))
+            put("sources", JsonArray(sources))
+        }
+        val artifact = durable.store.artifact(runId, "application/json", manifest.toString().toByteArray())
+        val data = JsonObject(manifest + ("artifact_id" to JsonPrimitive(artifact)))
+        val incomplete = sources.any { it.string("status") in setOf("failed", "denied", "unsupported", "timed_out") }
+        durable.store.update(runId) { run -> JsonObject(run + buildJsonObject {
+            put("failure_bundle", artifact)
+            put("evidence_status", if (incomplete) "partial" else "collected")
+        }) }
+        return ToolResult(data.toString(), isError = incomplete, structuredContent = data)
+    }
+
+    private fun exportRun(arguments: JsonObject): ToolResult {
+        val run = durable.owned(arguments)
+        val format = arguments.string("format") ?: "json"
+        require(format in setOf("json", "markdown")) { "format must be json or markdown." }
+        val content = if (format == "json") run.toString() else buildString {
+            appendLine("# Tester run ${run.string("run_id")}")
+            appendLine("\nStatus: ${run.string("status")}\n\nFree text and step arguments are redacted.\n")
+            appendLine("| Step | Tool | Status | Duration (ms) |")
+            appendLine("| --- | --- | --- | --- |")
+            run.getValue("steps").jsonArray.forEach { raw ->
+                val step = raw.jsonObject
+                appendLine("| ${step.string("id")} | ${step.string("tool")} | ${step.string("status")} | ${step.string("duration_ms") ?: ""} |")
+            }
+        }
+        val id = durable.store.artifact(run.string("run_id")!!,
+            if (format == "json") "application/json" else "text/markdown", content.toByteArray())
+        val data = buildJsonObject { put("artifact_id", id); put("format", format); put("size_bytes", content.toByteArray().size) }
+        return ToolResult(data.toString(), structuredContent = data)
+    }
+
+    private fun readArtifact(arguments: JsonObject): ToolResult {
+        val run = durable.owned(arguments)
+        val id = arguments.string("artifact_id") ?: error("artifact_id is required.")
+        val artifact = durable.store.readArtifact(run.string("run_id")!!, id)
+            ?: return targetingError("artifact_unavailable", "Artifact unavailable for this run.")
+        if (artifact.first == "image/jpeg") return ToolResult("Unmasked image explicitly captured for owned run.",
+            imageBase64 = java.util.Base64.getEncoder().encodeToString(artifact.second), imageMimeType = artifact.first)
+        return ToolResult(artifact.second.toString(Charsets.UTF_8))
+    }
+
+    fun stopRuns() { if (durableDelegate.isInitialized()) durable.stop() }
+
     private fun JsonObject.optionalBool(key: String): Boolean? {
         val value = (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() ?: return null
         return when (value) {
@@ -1687,7 +2018,7 @@ class AndroidToolExecutor(
             "touch_test", "launch_app", "swipe", "get_screen_tree", "take_screenshot", "observe_screen",
             "click_element", "input_text", "scroll", "global_action", "ui_find", "ui_wait",
             "ui_assert", "ui_gesture", "device_state", "get_device_state", "ui_diff", "take_photo",
-            "qa_session", "audio_instruction"
+            "qa_session", "audio_instruction", "wait_for_state", "collect_failure_bundle"
         )
         const val MAX_FILE_BYTES = 64 * 1024
         const val CHANNEL_ID = "mcp_tools"

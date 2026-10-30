@@ -93,6 +93,7 @@ class AndroidTargetingTests(unittest.TestCase):
         self.assert_text("field", "Reference input", within={"resource_id": "project_beta"})
         self.ok("input_text", {"text": "Beta input", "resource_id": "field",
                               "within": {"resource_id": "project_beta"}})
+        self.idle()
         found = self.ok("ui_find", {"resource_id": "open",
                                   "within": {"resource_id": "project_beta"}})["structuredContent"]
         self.ok("ui_gesture", {"type": "tap", "element_ref": found["matches"][0]["element_ref"]})

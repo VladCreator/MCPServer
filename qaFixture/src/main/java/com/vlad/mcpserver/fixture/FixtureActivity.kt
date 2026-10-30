@@ -48,6 +48,8 @@ class FixtureActivity : ComponentActivity() {
         if (mode == "cards") {
             val status = label(savedInstanceState?.getString("status") ?: "No project opened").apply { id = R.id.status }
             column.addView(status)
+            val actions = label(savedInstanceState?.getString("actions") ?: "0").apply { id = R.id.action_count }
+            column.addView(actions)
             for ((name, containerId) in listOf("Alpha" to R.id.project_alpha, "Beta" to R.id.project_beta)) {
                 column.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -60,7 +62,10 @@ class FixtureActivity : ComponentActivity() {
                         setText("$name input")
                         importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
                     })
-                    addView(button("Open") { status.text = "Opened $name" }.apply { id = R.id.open })
+                    addView(button("Open") {
+                        status.text = "Opened $name"
+                        actions.text = (actions.text.toString().toInt() + 1).toString()
+                    }.apply { id = R.id.open })
                 })
             }
             column.addView(FrameLayout(this).apply {
@@ -111,6 +116,7 @@ class FixtureActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         findViewById<TextView>(R.id.status)?.let { outState.putString("status", it.text.toString()) }
+        findViewById<TextView>(R.id.action_count)?.let { outState.putString("actions", it.text.toString()) }
         super.onSaveInstanceState(outState)
     }
 }
