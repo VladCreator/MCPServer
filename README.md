@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.2.2** (Android P4 saved scenarios and CI; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.2.3** (P5 authenticated loopback run Viewer; recording deferred; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -70,6 +70,10 @@ Current version: **0.2.2** (Android P4 saved scenarios and CI; iOS embedded QA s
   [`tools/tester_ci.py`](tools/tester_ci.py) submits to the native engine, preserves
   recovery ownership before dispatch and exits nonzero for failed/unfinished cleanup.
   See [`docs/P4_0.2.2.md`](docs/P4_0.2.2.md).
+- **Optional run Viewer (0.2.3)**: authenticated, expiring loopback-only host page
+  for one owned native timeline and existing artifacts, with pause/revoke/stop.
+  Uses the existing APIs; no recording, live screen capture, microphone or cloud
+  upload. See [`docs/P5_0.2.3.md`](docs/P5_0.2.3.md).
 
 The [agent-first implementation plan](docs/AGENT_QUALITY_IMPLEMENTATION_PLAN.md)
 prioritizes tool correctness, reliable observations, evidence, environment setup

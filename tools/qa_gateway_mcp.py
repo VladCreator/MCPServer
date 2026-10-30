@@ -16,7 +16,7 @@ import urllib.request
 from pathlib import Path
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
-GATEWAY_VERSION = "0.2.2"
+GATEWAY_VERSION = "0.2.3"
 PRIVATE_HISTORY_TOOLS = {
     "run_route", "get_run", "cancel_run", "collect_failure_bundle",
     "export_run", "get_artifact", "wait_for_state", "device_state", "qa_session", "open_link", "clipboard", "route_policy",

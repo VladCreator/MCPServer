@@ -73,7 +73,7 @@ class Client:
         if not self.session:
             self.rpc("initialize", {
                 "protocolVersion": "2025-06-18", "capabilities": {},
-                "clientInfo": {"name": "Tester CI", "version": "0.2.2"},
+                "clientInfo": {"name": "Tester CI", "version": "0.2.3"},
             })
         if not self.session:
             raise ClientError("Server did not establish an approved MCP session.")

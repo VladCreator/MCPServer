@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tester Run Viewer</title>
+  <link rel="stylesheet" href="/viewer.css">
+  <script src="/viewer.js" defer></script>
+</head>
+<body>
+  <h1>Tester Run Viewer</h1>
+  <p>One owned native timeline. No live screen, recording, microphone or new capture.</p>
+  <section id="login">
+    <label>Viewer access token <input id="token" type="password" autocomplete="off" spellcheck="false"></label>
+    <button id="connect">Connect</button>
+  </section>
+  <p id="message" role="status">Authentication required.</p>
+  <section id="controls" hidden>
+    <button id="refresh">Refresh</button>
+    <button id="pause">Pause polling</button>
+    <button id="revoke">Revoke access</button>
+    <button id="stop">Stop Viewer</button>
+    <p>Stop/revoke only affects the Viewer, not the native run or its recovery key.</p>
+    <button id="json">Download JSON</button>
+    <button id="markdown">Download timeline</button>
+    <button id="junit">Download JUnit</button>
+    <label>Existing artifact ID <input id="artifact" autocomplete="off" spellcheck="false"></label>
+    <button id="download">Download existing artifact (native consent may be required)</button>
+  </section>
+  <section id="result" hidden>
+    <h2 id="verdict"></h2>
+    <pre id="metadata"></pre>
+    <table><thead><tr><th>Step</th><th>Phase</th><th>Tool</th><th>Status</th><th>Offset ms</th><th>Duration ms</th></tr></thead>
+      <tbody id="steps"></tbody>
+    </table>
+  </section>
+</body>
+</html>

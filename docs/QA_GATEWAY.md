@@ -1,4 +1,4 @@
-# Unified QA Gateway — 0.2.2
+# Unified QA Gateway — 0.2.3
 
 Android 0.1.7 dynamically exposes `android__observe_screen`; its structured
 observation and optional image are forwarded unchanged. Element references remain
@@ -28,6 +28,11 @@ The gateway never retries policy mutation or run submission after session loss.
 Gateway call entries reference a validated native `run_id` without copying keys,
 policy contents or native step reports; `get_run`/`export_run` remain canonical.
 The standalone [CI CLI](P4_0.2.2.md) connects directly to native HTTP MCP.
+
+The optional [P5 Viewer](P5_0.2.3.md) also connects directly to native HTTP MCP
+using one retained run key and an approved session. It does not expose gateway
+credentials, execute UI actions or create a competing run timeline. Start it
+explicitly on the host; it never binds to LAN interfaces or starts with the gateway.
 
 The QA Gateway is a **stdio MCP server on the Mac** that presents Android and iOS
 QA backends through one tool list and one gateway QA report.

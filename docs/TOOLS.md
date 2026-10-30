@@ -1,4 +1,4 @@
-# Supported tools — Tester 0.2.2
+# Supported tools — Tester 0.2.3
 
 Tester exposes **43 tools** over MCP on Android, including combined waits,
 durable scenarios, reviewed route discovery, scoped CI consent, private evidence,
@@ -20,6 +20,11 @@ mcp__android__read_file
 
 The in-app **Tools** sheet (grid icon in the header) shows the same catalog with the
 requirements of each tool.
+
+P5 adds an optional [authenticated loopback host Viewer](P5_0.2.3.md) consuming
+`get_run`, `export_run` and existing `get_artifact`; it does not add another MCP
+tool or grant run ownership. Android remains at 43 tools. Recording, live capture,
+microphone and privileged advanced adapters remain unavailable.
 
 ## Catalog
 

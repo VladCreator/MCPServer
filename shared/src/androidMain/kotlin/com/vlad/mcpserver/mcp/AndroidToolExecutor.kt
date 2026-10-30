@@ -422,6 +422,14 @@ class AndroidToolExecutor(
                 put("subscenarios", "unsupported"); put("action_retries", false)
                 put("exports", JsonArray(listOf("json", "markdown", "junit").map(::JsonPrimitive)))
             }
+            putJsonObject("visibility") {
+                put("viewer", "optional_host_loopback; tools/tester_viewer.py; one owned redacted run; authenticated; expiring/revocable")
+                put("timeline_source", "get_run; existing export_run/get_artifact; no separate native run report")
+                put("execution_location", "host; not a new on-device MCP tool")
+                put("recording", "unsupported; explicitly deferred")
+                put("live_capture", false); put("microphone_capture", false)
+                put("advanced_adapters", "unconfigured; existing unsupported-control requirements still apply")
+            }
             putJsonArray("unsupported_controls") {
                 listOf("permission_grant_revoke", "global_locale", "target_locale_mutation", "mock_location",
                     "other_app_data_reset", "device_time", "connectivity", "global_dark_mode", "arbitrary_launch_arguments").forEach { add(it) }
