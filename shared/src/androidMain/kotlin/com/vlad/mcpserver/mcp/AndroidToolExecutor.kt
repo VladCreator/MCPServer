@@ -423,6 +423,7 @@ class AndroidToolExecutor(
                 put("exports", JsonArray(listOf("json", "markdown", "junit").map(::JsonPrimitive)))
             }
             putJsonObject("visibility") {
+                put("local_evidence", "Android dashboard QA Evidence; saved QA reports/media and retained native runs/artifacts; explicit user sharing")
                 put("viewer", "optional_host_loopback; tools/tester_viewer.py; one owned redacted run; authenticated; expiring/revocable")
                 put("timeline_source", "get_run; existing export_run/get_artifact; no separate native run report")
                 put("execution_location", "host; not a new on-device MCP tool")

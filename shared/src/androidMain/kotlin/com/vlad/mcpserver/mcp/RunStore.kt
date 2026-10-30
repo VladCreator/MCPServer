@@ -107,6 +107,22 @@ internal class RunStore private constructor(context: Context) :
             if (it.moveToFirst()) it.getString(0) to it.getBlob(1) else null
         }
 
+    // Local dashboard access only; these methods are never exposed through MCP.
+    @Synchronized internal fun localRuns(): List<JsonObject> = rows(readableDatabase)
+
+    @Synchronized internal fun localArtifacts(): List<LocalArtifact> =
+        readableDatabase.rawQuery("SELECT id,run_id,mime,created,length(body) FROM artifacts", null).use {
+            buildList {
+                while (it.moveToNext()) add(LocalArtifact(
+                    it.getString(0), it.getString(1), it.getString(2), it.getLong(3), it.getLong(4)
+                ))
+            }
+        }
+
+    internal data class LocalArtifact(
+        val id: String, val runId: String, val mime: String, val created: Long, val size: Long
+    )
+
     private fun rows(db: SQLiteDatabase): List<JsonObject> =
         db.rawQuery("SELECT body FROM runs", null).use { cursor ->
             buildList { while (cursor.moveToNext()) add(Json.parseToJsonElement(cursor.getString(0)).jsonObject) }

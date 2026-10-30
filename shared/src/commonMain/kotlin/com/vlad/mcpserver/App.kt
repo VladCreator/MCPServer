@@ -250,13 +250,28 @@ fun App(viewModel: AppViewModel = viewModel()) {
                         }
                     }
 
-                    if (executionLogs.isNotEmpty()) {
-                        item(key = "activity") {
-                            ActivityCard(
-                                logs = executionLogs,
-                                showAll = showAllLogs,
-                                onToggleAll = { showAllLogs = !showAllLogs }
-                            )
+                    item(key = "activity-evidence") {
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            if (maxWidth >= 640.dp) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    ActivityCard(
+                                        logs = executionLogs,
+                                        showAll = showAllLogs,
+                                        onToggleAll = { showAllLogs = !showAllLogs },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    QaEvidenceCard(Modifier.weight(1f))
+                                }
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    ActivityCard(
+                                        logs = executionLogs,
+                                        showAll = showAllLogs,
+                                        onToggleAll = { showAllLogs = !showAllLogs }
+                                    )
+                                    QaEvidenceCard(Modifier.fillMaxWidth())
+                                }
+                            }
                         }
                     }
                 }
@@ -909,12 +924,13 @@ private fun AgentRow(title: String, subtitle: String, dotSize: Int = 6) {
 private fun ActivityCard(
     logs: List<ToolExecutionLog>,
     showAll: Boolean,
-    onToggleAll: () -> Unit
+    onToggleAll: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
     val visible = if (showAll) logs else logs.take(4)
     OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.outlinedCardColors(containerColor = colors.surface)
     ) {
@@ -940,6 +956,9 @@ private fun ActivityCard(
                         )
                     }
                 }
+            }
+            if (logs.isEmpty()) {
+                Text("No activity yet.", style = MaterialTheme.typography.bodySmall)
             }
             if (showAll) {
                 Text(

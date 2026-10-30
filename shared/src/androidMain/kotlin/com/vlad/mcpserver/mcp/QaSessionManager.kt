@@ -184,6 +184,7 @@ class QaSessionManager(private val context: Context) {
             current = null
             ToolResult(
                 "QA session ${session.id} closed: $finalResult. " +
+                    "View or share these reports in Tester's QA Evidence dashboard section (tap Refresh).\n" +
                     "JSON: ${jsonFile.path}\nMarkdown: ${markdownFile.path}"
             )
         }.getOrElse { error ->
