@@ -16,6 +16,40 @@ View/Open and Share sit beside each filename; the source and local time appear
 underneath the name. Compact rows include file-type icons for images, videos,
 PDFs, structured data and text reports.
 
+## Flow correlation
+
+On Android, each new `qa_session begin` and each admitted native `run_route`
+receives a stable local **Flow #N**. IDs are per test/run, not per connection:
+one agent can have many flows. Retrying a deduplicated native submission keeps
+its ID; a route inside a manual QA session gets a separate run ID.
+
+Connected agents show the IDs they originated. Within each expanded day,
+Activity and QA Evidence group records by the same flow ID. Each agent has its
+own manual QA session; its tool calls between begin/end belong to that session.
+Native run operations use their explicitly owned run instead, including async
+runs and later artifact exports. Run steps remain in the native run timeline,
+not duplicated as individual Activity calls.
+
+Saved QA report pairs, camera photos and visual baselines created within a manual
+session are linked automatically. Native reports and retained artifacts use the
+run's ID. Inline images are still not automatically saved. Old records and files
+without known provenance appear as **Unlinked**; Tester does not infer a link
+from matching timestamps or filenames. Overwriting a baseline outside a session
+removes its old link.
+Connection/authentication and separate dashboard approval events also remain
+Unlinked when they do not carry a verified test/run association.
+
+Links survive process restart for retained history/evidence. Active manual QA
+sessions are still in-memory and are not resumed after restart. Flow metadata
+does not extend the existing retention of runs or Activity. Flow IDs are display
+identifiers, not credentials: run-key checks, approvals and sharing confirmation
+are unchanged. Client connection IDs stay in local metadata and are not added to
+exported reports. The flow list stores correlation metadata (not report bodies);
+it lasts until app data is cleared. IDs are local to that app installation.
+
+Evidence icons have theme-aware colored backgrounds: images, video/audio, PDFs,
+and text/data documents have distinct treatments.
+
 ## What appears
 
 - Existing JSON/Markdown `qa_session` reports in private `files/qa/reports`.

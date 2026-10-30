@@ -26,7 +26,8 @@ data class ToolExecutionLog(
     val toolName: String,
     val arguments: String,
     val status: String, // "SUCCESS", "FAILED", "WARNING"
-    val result: String?
+    val result: String?,
+    val flowId: Long? = null
 )
 
 /**
@@ -82,6 +83,13 @@ class AppDatabase(dbPath: String) {
             """.trimIndent()
         ).use { it.step() }
 
+        val hasFlowId = connection.prepare("PRAGMA table_info(command_history)").use { statement ->
+            var found = false
+            while (statement.step()) if (statement.getText(1) == "flow_id") found = true
+            found
+        }
+        if (!hasFlowId) connection.prepare("ALTER TABLE command_history ADD COLUMN flow_id INTEGER").use { it.step() }
+
         connection.prepare(
             "CREATE INDEX IF NOT EXISTS idx_command_history_timestamp ON command_history(timestamp)"
         ).use { it.step() }
@@ -112,13 +120,14 @@ class AppDatabase(dbPath: String) {
         toolName: String,
         arguments: String,
         status: String,
-        result: String?
+        result: String?,
+        flowId: Long? = null
     ): Long = mutex.withLock {
         val timestamp = nowMillis()
         connection.prepare(
             """
-            INSERT INTO command_history (timestamp, ai_client_id, tool_name, arguments, status, result)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO command_history (timestamp, ai_client_id, tool_name, arguments, status, result, flow_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """.trimIndent()
         ).use { statement ->
             statement.bindLong(1, timestamp)
@@ -127,6 +136,7 @@ class AppDatabase(dbPath: String) {
             statement.bindText(4, arguments)
             statement.bindText(5, status)
             if (result == null) statement.bindNull(6) else statement.bindText(6, result)
+            if (flowId == null) statement.bindNull(7) else statement.bindLong(7, flowId)
             statement.step()
         }
 
@@ -145,7 +155,7 @@ class AppDatabase(dbPath: String) {
     suspend fun getCommandHistories(limit: Int = 100): List<ToolExecutionLog> = mutex.withLock {
         val list = mutableListOf<ToolExecutionLog>()
         connection.prepare(
-            "SELECT id, timestamp, ai_client_id, tool_name, arguments, status, result " +
+            "SELECT id, timestamp, ai_client_id, tool_name, arguments, status, result, flow_id " +
                 "FROM command_history ORDER BY id DESC LIMIT ?"
         ).use { statement ->
             statement.bindLong(1, limit.toLong())
@@ -158,7 +168,8 @@ class AppDatabase(dbPath: String) {
                         toolName = statement.getText(3),
                         arguments = statement.getText(4),
                         status = statement.getText(5),
-                        result = if (statement.isNull(6)) null else statement.getText(6)
+                        result = if (statement.isNull(6)) null else statement.getText(6),
+                        flowId = if (statement.isNull(7)) null else statement.getLong(7)
                     )
                 )
             }

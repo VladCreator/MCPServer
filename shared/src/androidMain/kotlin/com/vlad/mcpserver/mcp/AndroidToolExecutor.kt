@@ -66,7 +66,8 @@ class AndroidToolExecutor(
 
     private val audio = AndroidAudioController(context)
     private val deviceState = AndroidDeviceStateController.get(context)
-    private val qa = QaSessionManager(context)
+    private val qaSessions = java.util.concurrent.ConcurrentHashMap<String, QaSessionManager>()
+    private val qaLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private val environment = AndroidEnvironmentTools(context)
     private val catalog by lazy { ScenarioCatalog { path -> context.assets.open(path).bufferedReader().use { it.readText() } } }
     private val routePolicies = ScenarioPolicies(SystemClock::elapsedRealtime)
@@ -81,6 +82,33 @@ class AndroidToolExecutor(
     })
 
     override suspend fun execute(
+        clientId: String,
+        toolName: String,
+        arguments: JsonObject
+    ): ToolResult = withContext(Dispatchers.IO) {
+        suspend fun correlated(): ToolResult {
+            val active = qaSessions[clientId]?.activeFlowId()
+            val result = executeUncorrelated(clientId, toolName, arguments)
+            // Only a successful ownership check may associate an explicit run.
+            val explicitRun = toolName in setOf("run_route", "get_run", "cancel_run",
+                "collect_failure_bundle", "export_run", "get_artifact")
+            val runFlow = if (explicitRun) {
+                (result.structuredContent?.get("flow_id") as? JsonPrimitive)?.longOrNull
+                    ?: if (!result.isError && toolName != "run_route")
+                        (durable.owned(arguments)["flow_id"] as? JsonPrimitive)?.longOrNull else null
+            } else null
+            val flowId = result.flowId ?: runFlow ?: if (explicitRun) null else active
+            result.evidencePaths.forEach { QaFlowStore.get(context).bind(it, flowId) }
+            return result.copy(flowId = flowId,
+                structuredContent = if (flowId != null) JsonObject(
+                    (result.structuredContent ?: JsonObject(emptyMap())) + ("flow_id" to JsonPrimitive(flowId))
+                ) else result.structuredContent)
+        }
+        if (toolName == "qa_session") qaLocks.getOrPut(clientId) { Mutex() }.withLock { correlated() }
+        else correlated()
+    }
+
+    private suspend fun executeUncorrelated(
         clientId: String,
         toolName: String,
         arguments: JsonObject
@@ -113,7 +141,7 @@ class AndroidToolExecutor(
             }
             if (route != null) {
                 return@withContext try {
-                    durable.submit(route, arguments,
+                    durable.submit(route, arguments, clientId,
                         approve = {
                             val policy = arguments.string("policy_id")
                             if (policy == null) consent(clientId, toolName, approvalArguments)
@@ -123,8 +151,8 @@ class AndroidToolExecutor(
                         failureEvidence = { runId ->
                             collectFailureBundle(clientId, runId, route.packageName, includeScreenshot = false)
                         }
-                    ) { step, key ->
-                        when (step.tool) {
+                    ) { step, key, flowId ->
+                        val output = when (step.tool) {
                             "device_state" -> deviceState.set(deviceState.owner(key), step.arguments)
                             "restore_state" -> {
                                 val owner = deviceState.owner(key)
@@ -135,6 +163,8 @@ class AndroidToolExecutor(
                             else -> executeRouteStep(clientId, route, step,
                                 privacySensitive = arguments.optionalBool("privacy_sensitive") ?: true)
                         }
+                        output.evidencePaths.forEach { QaFlowStore.get(context).bind(it, flowId) }
+                        output
                     }
                 } catch (error: IllegalArgumentException) {
                     targetingError("invalid_run", error.message ?: "Invalid run submission.")
@@ -307,7 +337,7 @@ class AndroidToolExecutor(
                 "input_text" -> inputText(clientId, arguments)
                 "scroll" -> scroll(clientId, arguments)
                 "global_action" -> globalAction(arguments)
-                "qa_session" -> qaSession(arguments)
+                "qa_session" -> qaSession(clientId, arguments)
                 "ui_find" -> uiFind(clientId, arguments)
                 "ui_wait" -> uiWait(arguments)
                 "ui_assert" -> uiAssert(arguments)
@@ -424,6 +454,7 @@ class AndroidToolExecutor(
             }
             putJsonObject("visibility") {
                 put("local_evidence", "Android dashboard QA Evidence; saved QA reports/media and retained native runs/artifacts; explicit user sharing")
+                put("flow_correlation", "local numeric flow_id per Android QA session/native run; agent, Activity and stored evidence; no new authorization")
                 put("viewer", "optional_host_loopback; tools/tester_viewer.py; one owned redacted run; authenticated; expiring/revocable")
                 put("timeline_source", "get_run; existing export_run/get_artifact; no separate native run report")
                 put("execution_location", "host; not a new on-device MCP tool")
@@ -547,12 +578,14 @@ class AndroidToolExecutor(
             onSuccess = { file ->
                 val bytes = runCatching { file.readBytes() }.getOrNull()
                 if (bytes == null) {
-                    ToolResult("Photo saved to ${file.absolutePath} but could not be read.", isError = true)
+                    ToolResult("Photo saved to ${file.absolutePath} but could not be read.", isError = true,
+                        evidencePaths = listOf(file.absolutePath))
                 } else {
                     ToolResult(
                         text = "Photo captured: ${file.absolutePath} (${bytes.size} bytes)",
                         imageBase64 = java.util.Base64.getEncoder().encodeToString(bytes),
-                        imageMimeType = "image/jpeg"
+                        imageMimeType = "image/jpeg",
+                        evidencePaths = listOf(file.absolutePath)
                     )
                 }
             },
@@ -1053,7 +1086,8 @@ class AndroidToolExecutor(
     }
 
 
-    private suspend fun qaSession(arguments: JsonObject): ToolResult {
+    private suspend fun qaSession(clientId: String, arguments: JsonObject): ToolResult {
+        val qa = qaSessions.getOrPut(clientId) { QaSessionManager(context, clientId) }
         val action = arguments.string("action")?.lowercase()
             ?: return ToolResult("Missing required argument: action", isError = true)
         return when (action) {
@@ -1085,7 +1119,9 @@ class AndroidToolExecutor(
                 ToolResult(
                     "${report.text}\n${restore.text}",
                     isError = report.isError || restore.isError,
-                    structuredContent = restore.structuredContent
+                    structuredContent = JsonObject((restore.structuredContent ?: JsonObject(emptyMap())) +
+                        (report.structuredContent ?: JsonObject(emptyMap()))),
+                    flowId = report.flowId
                 )
             }
             else -> ToolResult("action must be begin, step, status or end.", isError = true)
@@ -1386,7 +1422,8 @@ class AndroidToolExecutor(
                 }
                 ToolResult(
                     "Baseline '$rawName' saved (${shot.width}x${shot.height}, ${shot.jpegBytes.size} bytes): " +
-                        baselineFile.path
+                        baselineFile.path,
+                    evidencePaths = listOf(baselineFile.path)
                 )
             }
             "compare" -> {

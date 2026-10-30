@@ -7,6 +7,7 @@ internal object RunReports {
         "json" -> "application/json" to run.toString()
         "markdown" -> "text/markdown" to buildString {
             appendLine("# Tester run ${run.value("run_id")}")
+            if (run["flow_id"] != null) appendLine("\nFlow: #${run.value("flow_id")}")
             appendLine("\nStatus: ${run.value("status")}; primary: ${run.value("primary_status")}; cleanup: ${run.value("cleanup_status")}")
             appendLine("\nFree text and step arguments are redacted.\n")
             appendLine("| Step | Phase | Tool | Status | Offset (ms) | Duration (ms) |")

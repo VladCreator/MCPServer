@@ -8,7 +8,7 @@ import kotlinx.serialization.json.*
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
+internal class DurableRoutes(private val context: Context, private val deviceLock: Mutex) {
     val store = RunStore.get(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -16,9 +16,10 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
     suspend fun submit(
         route: YamlRoute,
         arguments: JsonObject,
+        clientId: String,
         approve: suspend () -> Boolean,
         failureEvidence: suspend (String) -> Unit,
-        execute: suspend (RouteStep, String) -> ToolResult
+        execute: suspend (RouteStep, String, Long) -> ToolResult
     ): ToolResult {
         val mode = arguments.string("mode") ?: "sync"
         require(mode in setOf("sync", "async")) { "mode must be sync or async." }
@@ -49,7 +50,9 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
                 put("cleanup_status", if (route.schemaVersion == 2) "pending" else "not_configured")
             })
         val id = admitted.string("run_id")!!
-        if (!fresh) return response(admitted, key, true)
+        val flowId = QaFlowStore.get(context).ensure("run", id, clientId)
+        val linked = store.update(id) { JsonObject(it + ("flow_id" to JsonPrimitive(flowId))) }
+        if (!fresh) return response(linked, key, true)
         try {
             if (!approve()) {
                 val denied = transition(id, "rejected", "consent_denied", markUnknown = true)
@@ -84,7 +87,7 @@ internal class DurableRoutes(context: Context, private val deviceLock: Mutex) {
                     }
                     if (running.string("status") != "running") return@async response(running, key)
                     val output = YamlRouteRunner().run(route, id, onStep = { step -> recordStep(id, step) }) { step ->
-                        execute(step, key)
+                        execute(step, key, flowId)
                     }
                     val report = Json.parseToJsonElement(output.text).jsonObject
                     store.update(id) { run -> JsonObject(run + buildJsonObject {

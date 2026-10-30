@@ -25,6 +25,23 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class McpDispatcherTest {
+    @Test
+    fun preservesFlowInPrivateHistoryWithoutLoggingCredentialsOrInternalEvidencePaths() = runTest {
+        var recorded: com.vlad.mcpserver.mcp.ToolCallRecord? = null
+        val dispatcher = McpDispatcher(
+            executor = FakeExecutor(ToolResult("private result", flowId = 42,
+                evidencePaths = listOf("/private/evidence.jpg"))),
+            onToolCall = { recorded = it }
+        )
+        val session = initializedSession(dispatcher)
+        val response = dispatcher.handle(session,
+            """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"qa_session","arguments":{"action":"end","state_key":"secret-state-key"}}}""")!!
+        assertEquals(42L, recorded?.flowId)
+        assertEquals("[private tool payload omitted]", recorded?.arguments)
+        assertFalse(recorded!!.message.contains("private result"))
+        assertFalse(response.toString().contains("/private/evidence.jpg"))
+        assertFalse(response.toString().contains("secret-state-key"))
+    }
 
     @Test
     fun initializeNegotiatesProtocolVersion() = runTest {

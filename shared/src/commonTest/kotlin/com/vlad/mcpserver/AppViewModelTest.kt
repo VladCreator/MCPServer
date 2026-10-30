@@ -25,6 +25,23 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModelTest {
+    @Test
+    fun keepsFlowOnActivityAndLoadsSeparateFlowsForOneAgent() = runTest {
+        val host = FakeMcpServerHost()
+        val flows = listOf(QaFlow(1, "c1", "qa", "test1"), QaFlow(2, "c1", "run", "run1"))
+        val model = AppViewModel(
+            hostFactory = { _, _, _ -> host },
+            databasePathProvider = { null },
+            dispatcher = UnconfinedTestDispatcher(),
+            uiDispatcher = UnconfinedTestDispatcher(),
+            flowLoader = { flows }
+        )
+        host.emit(ServerEvent.ToolCalled(ToolCallRecord(
+            "c1", "qa_session", "[omitted]", ToolCallOutcome.SUCCESS, "private", 123, flowId = 1
+        )))
+        assertEquals(1L, model.executionLogs.value.first().flowId)
+        assertEquals(flows, model.qaFlows.value)
+    }
 
     @Test
     fun photoRemainsVisibleInMemoryWhenHistoryStorageIsUnavailable() = runTest {
@@ -224,7 +241,8 @@ class AppViewModelTest {
             hostFactory = { _, _, _ -> host },
             databasePathProvider = { null },
             dispatcher = UnconfinedTestDispatcher(),
-            uiDispatcher = UnconfinedTestDispatcher()
+            uiDispatcher = UnconfinedTestDispatcher(),
+            flowLoader = { emptyList() }
         )
 
     private fun client(id: String): McpClient =

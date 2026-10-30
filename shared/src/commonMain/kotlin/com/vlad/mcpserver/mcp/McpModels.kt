@@ -50,7 +50,8 @@ data class ToolCallRecord(
     val arguments: String,
     val outcome: ToolCallOutcome,
     val message: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val flowId: Long? = null
 )
 
 /**

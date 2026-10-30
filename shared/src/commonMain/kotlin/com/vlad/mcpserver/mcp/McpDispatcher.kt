@@ -217,7 +217,8 @@ class McpDispatcher(
             message = if (toolName in PRIVATE_HISTORY_TOOLS) {
                 if (result.isError) "Private tool failed; see tool response." else "Private tool returned; see tool response."
             } else result.text.take(MAX_LOGGED_RESULT),
-            timestamp = nowMillis()
+            timestamp = nowMillis(),
+            flowId = result.flowId
         )
         try {
             onToolCall(record)

@@ -45,7 +45,8 @@ class AppViewModel(
         runCatching { getDatabasePath("mcp_server.db") }.getOrNull()
     },
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    private val uiDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+    private val uiDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+    private val flowLoader: suspend () -> List<QaFlow> = { loadQaFlows() }
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -87,6 +88,8 @@ class AppViewModel(
 
     private val executionLogsState = MutableStateFlow<List<ToolExecutionLog>>(emptyList())
     val executionLogs: StateFlow<List<ToolExecutionLog>> = executionLogsState.asStateFlow()
+    private val qaFlowsState = MutableStateFlow<List<QaFlow>>(emptyList())
+    val qaFlows: StateFlow<List<QaFlow>> = qaFlowsState.asStateFlow()
 
     private val toolApprovalsState = MutableStateFlow<List<ToolApprovalRequest>>(emptyList())
     val toolApprovalRequests: StateFlow<List<ToolApprovalRequest>> = toolApprovalsState.asStateFlow()
@@ -259,6 +262,7 @@ class AppViewModel(
             return
         }
         database = opened
+        refreshFlows()
 
         val rawToken = opened.getSetting("bearer_token")
         val storedToken = decodeToken(rawToken)
@@ -356,7 +360,8 @@ class AppViewModel(
                     record.toolName,
                     record.arguments,
                     status,
-                    record.message
+                    record.message,
+                    record.flowId
                 )
                 appendLog(
                     ToolExecutionLog(
@@ -366,9 +371,11 @@ class AppViewModel(
                         toolName = record.toolName,
                         arguments = record.arguments,
                         status = status,
-                        result = record.message
+                        result = record.message,
+                        flowId = record.flowId
                     )
                 )
+                if (record.flowId != null) refreshFlows()
             }
         }
     }
@@ -399,11 +406,12 @@ class AppViewModel(
         toolName: String,
         arguments: String,
         status: String,
-        result: String?
+        result: String?,
+        flowId: Long? = null
     ): Long {
         return try {
             val storage = database ?: error("Activity storage is unavailable")
-            storage.insertCommandHistory(clientId, toolName, arguments, status, result)
+            storage.insertCommandHistory(clientId, toolName, arguments, status, result, flowId)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -414,6 +422,19 @@ class AppViewModel(
                     "The entry is only available in memory."
             }
             0L
+        }
+    }
+
+    private suspend fun refreshFlows() {
+        try {
+            qaFlowsState.value = flowLoader()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.printStackTrace()
+            withContext(uiDispatcher) {
+                storageError = "Unable to load QA flow links: ${error.message ?: error::class.simpleName}"
+            }
         }
     }
 

@@ -118,6 +118,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
     val connectedClients by viewModel.connectedClients.collectAsState()
     val pendingClients by viewModel.pendingClients.collectAsState()
     val executionLogs by viewModel.executionLogs.collectAsState()
+    val qaFlows by viewModel.qaFlows.collectAsState()
     val toolApprovalRequests by viewModel.toolApprovalRequests.collectAsState()
 
     val clipboardManager = LocalClipboardManager.current
@@ -217,6 +218,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                 if (hasAgents) {
                                     ConnectedAgentsCard(
                                         clients = connectedClients,
+                                        flows = qaFlows,
                                         modifier = cardModifier
                                     )
                                 }
@@ -769,7 +771,9 @@ private fun PendingClientsCard(
 }
 
 @Composable
-private fun ConnectedAgentsCard(clients: List<AiClient>, modifier: Modifier = Modifier.fillMaxWidth()) {
+private fun ConnectedAgentsCard(
+    clients: List<AiClient>, flows: List<QaFlow>, modifier: Modifier = Modifier.fillMaxWidth()
+) {
     val colors = MaterialTheme.colorScheme
     OutlinedCard(
         modifier = modifier,
@@ -805,7 +809,7 @@ private fun ConnectedAgentsCard(clients: List<AiClient>, modifier: Modifier = Mo
             }
             val groups = clients.groupBy { it.remoteAddress ?: "Unknown address" }.toList()
             groups.forEachIndexed { index, (address, agents) ->
-                AgentGroup(address = address, agents = agents)
+                AgentGroup(address = address, agents = agents, flows = flows)
                 if (index < groups.lastIndex) {
                     HorizontalDivider(color = colors.outlineVariant)
                 }
@@ -819,13 +823,14 @@ private fun ConnectedAgentsCard(clients: List<AiClient>, modifier: Modifier = Mo
  * agents collapse under an address header that can be expanded.
  */
 @Composable
-private fun AgentGroup(address: String, agents: List<AiClient>) {
+private fun AgentGroup(address: String, agents: List<AiClient>, flows: List<QaFlow>) {
     val colors = MaterialTheme.colorScheme
     if (agents.size == 1) {
         val client = agents.first()
         AgentRow(
             title = client.name,
-            subtitle = listOf(address, client.status).joinToString(" · ")
+            subtitle = listOf(address, client.status).joinToString(" · "),
+            flowIds = flows.filter { it.clientId == client.id }.map { it.id }
         )
         return
     }
@@ -859,6 +864,12 @@ private fun AgentGroup(address: String, agents: List<AiClient>) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                val flowIds = flows.filter { flow -> agents.any { it.id == flow.clientId } }.map { it.id }
+                if (flowIds.isNotEmpty()) {
+                    Text(flowIds.joinToString(" · ") { flowLabel(it) },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.primary)
+                }
             }
             Text(
                 text = agents.size.toString(),
@@ -881,7 +892,8 @@ private fun AgentGroup(address: String, agents: List<AiClient>) {
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 agents.forEach { client ->
-                    AgentRow(title = client.name, subtitle = client.status, dotSize = 4)
+                    AgentRow(title = client.name, subtitle = client.status, dotSize = 4,
+                        flowIds = flows.filter { it.clientId == client.id }.map { it.id })
                 }
             }
         }
@@ -889,7 +901,7 @@ private fun AgentGroup(address: String, agents: List<AiClient>) {
 }
 
 @Composable
-private fun AgentRow(title: String, subtitle: String, dotSize: Int = 6) {
+private fun AgentRow(title: String, subtitle: String, dotSize: Int = 6, flowIds: List<Long> = emptyList()) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -915,6 +927,11 @@ private fun AgentRow(title: String, subtitle: String, dotSize: Int = 6) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (flowIds.isNotEmpty()) {
+                Text(flowIds.joinToString(" · ") { flowLabel(it) },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.primary)
+            }
         }
     }
 }
@@ -959,9 +976,17 @@ private fun ActivityCard(
                         }
                     }
                     if (expanded) {
-                        items(dayLogs, key = { it.id }) { log ->
-                            ActivityRow(log)
-                            HorizontalDivider(color = colors.outlineVariant)
+                        dayLogs.groupBy { it.flowId }.forEach { (flowId, flowLogs) ->
+                            item(key = "flow:$day:$flowId") {
+                                Text("${flowLabel(flowId)} (${flowLogs.size})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.primary,
+                                    modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                            items(flowLogs, key = { it.id }) { log ->
+                                ActivityRow(log)
+                                HorizontalDivider(color = colors.outlineVariant)
+                            }
                         }
                     }
                 }

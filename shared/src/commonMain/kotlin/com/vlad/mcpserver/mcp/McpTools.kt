@@ -32,7 +32,9 @@ data class ToolResult(
     val isError: Boolean = false,
     val imageBase64: String? = null,
     val imageMimeType: String? = null,
-    val structuredContent: JsonObject? = null
+    val structuredContent: JsonObject? = null,
+    val flowId: Long? = null,
+    val evidencePaths: List<String> = emptyList()
 )
 
 interface ToolExecutor {
@@ -368,7 +370,8 @@ object McpTools {
     val qaSession: ToolDefinition = ToolDefinition(
         name = "qa_session",
         description = "QA test session: begin, record a step, check status or end and write a JSON/Markdown report. " +
-            "Use begin before a QA case, step for each action/assertion, and end to produce evidence.",
+            "Use begin before a QA case, step for each action/assertion, and end to produce evidence. " +
+            "On Android, each agent has its own active session; flow_id links dashboard Activity and saved evidence.",
         required = listOf("action"),
         inputSchema = schema(listOf("action")) {
             putJsonObject("action") {

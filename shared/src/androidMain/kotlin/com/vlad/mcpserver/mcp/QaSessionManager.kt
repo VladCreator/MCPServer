@@ -11,12 +11,13 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 /**
  * In-memory QA session plus JSON/Markdown reports in the app sandbox.
- * One session is active at a time; the report is written by end().
+ * One session per agent is active at a time; the report is written by end().
  */
-class QaSessionManager(private val context: Context) {
+class QaSessionManager(private val context: Context, private val clientId: String) {
 
     private data class Step(
         val number: Int,
@@ -30,6 +31,7 @@ class QaSessionManager(private val context: Context) {
 
     private data class Session(
         val id: String,
+        val flowId: Long,
         val testCase: String,
         val platform: String,
         val startedAt: String,
@@ -40,7 +42,9 @@ class QaSessionManager(private val context: Context) {
 
     private var current: Session? = null
 
-    fun begin(testCase: String, platform: String, device: String, notes: String): ToolResult {
+    @Synchronized fun activeFlowId(): Long? = current?.flowId
+
+    @Synchronized fun begin(testCase: String, platform: String, device: String, notes: String): ToolResult {
         current?.let {
             return ToolResult(
                 "QA session ${it.id} is already active. Close it with action=end before starting another.",
@@ -48,9 +52,11 @@ class QaSessionManager(private val context: Context) {
             )
         }
         if (testCase.isBlank()) return ToolResult("Missing required argument: test_case", isError = true)
-        val id = "qa-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val id = "qa-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-" + UUID.randomUUID()
+        val flowId = QaFlowStore.get(context).ensure("qa", id, clientId)
         current = Session(
             id = id,
+            flowId = flowId,
             testCase = testCase.take(200),
             platform = platform.ifBlank { "android" }.take(32),
             startedAt = now(),
@@ -59,11 +65,13 @@ class QaSessionManager(private val context: Context) {
         )
         return ToolResult(
             "QA session $id started for '${testCase.take(200)}' ($platform). " +
-                "Record steps with action=step and close with action=end."
+                "Record steps with action=step and close with action=end.",
+            flowId = flowId,
+            structuredContent = buildJsonObject { put("flow_id", flowId) }
         )
     }
 
-    fun step(
+    @Synchronized fun step(
         title: String,
         expected: String,
         actual: String,
@@ -95,7 +103,7 @@ class QaSessionManager(private val context: Context) {
         )
     }
 
-    fun status(): ToolResult {
+    @Synchronized fun status(): ToolResult {
         val session = current ?: return ToolResult("No active QA session.")
         val pass = session.steps.count { it.status == "pass" }
         val fail = session.steps.count { it.status == "fail" }
@@ -115,7 +123,7 @@ class QaSessionManager(private val context: Context) {
         return ToolResult(text)
     }
 
-    fun end(result: String, notes: String): ToolResult {
+    @Synchronized fun end(result: String, notes: String): ToolResult {
         val session = current ?: return ToolResult(
             "No active QA session. Call qa_session with action=begin first.",
             isError = true
@@ -127,6 +135,7 @@ class QaSessionManager(private val context: Context) {
 
         val json = buildJsonObject {
             put("session", session.id)
+            put("flow_id", session.flowId)
             put("test_case", session.testCase)
             put("platform", session.platform)
             put("started_at", session.startedAt)
@@ -152,6 +161,7 @@ class QaSessionManager(private val context: Context) {
             appendLine("# QA report — ${session.testCase}")
             appendLine()
             appendLine("- Session: ${session.id}")
+            appendLine("- Flow: #${session.flowId}")
             appendLine("- Platform: ${session.platform}")
             appendLine("- Started: ${session.startedAt}")
             appendLine("- Ended: ${now()}")
@@ -181,11 +191,15 @@ class QaSessionManager(private val context: Context) {
         return runCatching {
             jsonFile.writeText(json.toString())
             markdownFile.writeText(markdown)
+            QaFlowStore.get(context).bind(jsonFile.path, session.flowId)
+            QaFlowStore.get(context).bind(markdownFile.path, session.flowId)
             current = null
             ToolResult(
                 "QA session ${session.id} closed: $finalResult. " +
                     "View or share these reports in Tester's QA Evidence dashboard section (tap Refresh).\n" +
-                    "JSON: ${jsonFile.path}\nMarkdown: ${markdownFile.path}"
+                    "JSON: ${jsonFile.path}\nMarkdown: ${markdownFile.path}",
+                flowId = session.flowId,
+                structuredContent = buildJsonObject { put("flow_id", session.flowId) }
             )
         }.getOrElse { error ->
             ToolResult("Unable to write the QA report: ${error.message}", isError = true)

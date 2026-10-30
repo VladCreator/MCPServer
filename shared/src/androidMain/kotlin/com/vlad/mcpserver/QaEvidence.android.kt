@@ -4,9 +4,11 @@ import android.content.ClipData
 import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Code
@@ -184,23 +187,30 @@ actual fun QaEvidenceCard(modifier: Modifier) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    if (expanded) items(evidence, key = { it.id }) { item ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(evidenceIcon(item.mime), contentDescription = item.mime,
-                                modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Column(Modifier.weight(1f)) {
-                                Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text("${item.origin} | ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(item.created))}",
-                                    style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            }
-                            TextButton(onClick = { view(item) }, enabled = !busy,
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                                Text(if (isEvidenceText(item.mime) || item.mime.startsWith("image/")) "View" else "Open")
-                            }
-                            TextButton(onClick = { transfer = EvidenceTransfer(item, share = true) }, enabled = !busy,
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                                Text("Share")
+                    if (expanded) evidence.groupBy { it.flowId }.forEach { (flowId, flowEvidence) ->
+                        item(key = "flow:$day:$flowId") {
+                            Text("${flowLabel(flowId)} (${flowEvidence.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                        items(flowEvidence, key = { it.id }) { item ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                EvidenceFileIcon(item.mime)
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("${item.origin} | ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(item.created))}",
+                                        style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
+                                TextButton(onClick = { view(item) }, enabled = !busy,
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                                    Text(if (isEvidenceText(item.mime) || item.mime.startsWith("image/")) "View" else "Open")
+                                }
+                                TextButton(onClick = { transfer = EvidenceTransfer(item, share = true) }, enabled = !busy,
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                                    Text("Share")
+                                }
                             }
                         }
                     }
@@ -258,6 +268,22 @@ actual fun QaEvidenceCard(modifier: Modifier) {
                 }) { Text("Continue") }
             }
         )
+    }
+}
+
+@Composable
+private fun EvidenceFileIcon(mime: String) {
+    val colors = MaterialTheme.colorScheme
+    val (background, foreground) = when {
+        mime.startsWith("image/") -> colors.tertiaryContainer to colors.onTertiaryContainer
+        mime.startsWith("video/") || mime.startsWith("audio/") -> colors.secondaryContainer to colors.onSecondaryContainer
+        mime == "application/pdf" -> colors.errorContainer to colors.onErrorContainer
+        else -> colors.primaryContainer to colors.onPrimaryContainer
+    }
+    Box(Modifier.size(30.dp).background(background, RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center) {
+        Icon(evidenceIcon(mime), contentDescription = mime,
+            modifier = Modifier.size(18.dp), tint = foreground)
     }
 }
 

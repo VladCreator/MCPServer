@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import com.vlad.mcpserver.mcp.RunReports
 import com.vlad.mcpserver.mcp.RunStore
+import com.vlad.mcpserver.mcp.QaFlowStore
 import com.vlad.mcpserver.mcp.string
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -19,7 +20,7 @@ internal sealed interface EvidenceSource {
 
 internal data class QaEvidence(
     val id: String, val name: String, val mime: String, val created: Long,
-    val origin: String, val source: EvidenceSource
+    val origin: String, val source: EvidenceSource, val flowId: Long? = null
 )
 
 internal class EvidenceFiles(private val roots: List<File>) {
@@ -89,6 +90,9 @@ internal class QaEvidenceRepository(context: Context) {
 
     fun list(): List<QaEvidence> {
         cleanShares()
+        val flowStore = QaFlowStore.get(context)
+        val fileLinks = flowStore.fileLinks()
+        val runLinks = flowStore.list().filter { it.kind == "run" }.associate { it.sourceId to it.id }
         val legacy = files.list() + checkNotNull(context.filesDir.listFiles()) { "Unable to list legacy camera evidence." }
             .filter { it.isFile && Regex("mcp_[0-9]+\\.jpg").matches(it.name) &&
                 it.canonicalFile.parentFile == context.filesDir.canonicalFile }
@@ -100,15 +104,16 @@ internal class QaEvidenceRepository(context: Context) {
                 QaEvidence("run:$id:$format", "run-$id.$ext",
                     if (format == "junit") "application/xml" else if (format == "json") "application/json" else "text/markdown",
                     run["created_at_ms"]?.jsonPrimitive?.longOrNull ?: 0L,
-                    "Run ${run.string("status")}", EvidenceSource.RunReport(run, format))
+                    "Run ${run.string("status")}", EvidenceSource.RunReport(run, format), runLinks[id])
             }
         }
         val artifacts = store.localArtifacts().mapNotNull { artifact ->
             val ext = EvidenceFiles.extension(artifact.mime) ?: return@mapNotNull null
             QaEvidence("artifact:${artifact.id}", "${artifact.id}.$ext", artifact.mime,
-                artifact.created, "Run ${artifact.runId}", EvidenceSource.Artifact(artifact.runId, artifact.id))
+                artifact.created, "Run ${artifact.runId}", EvidenceSource.Artifact(artifact.runId, artifact.id), runLinks[artifact.runId])
         }
-        return (legacy + reports + artifacts).sortedByDescending { it.created }
+        val linkedFiles = legacy.map { it.copy(flowId = fileLinks[it.id]) }
+        return (linkedFiles + reports + artifacts).sortedByDescending { it.created }
     }
 
     fun stage(item: QaEvidence): File {
