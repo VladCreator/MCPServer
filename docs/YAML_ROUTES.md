@@ -81,16 +81,16 @@ Empty arguments use `{}`.
 | Command | Arguments and behavior |
 | --- | --- |
 | `launch_app` | `{}`; launches `app_id` with idle waiting disabled. Add an explicit idle wait when needed. |
-| `tap` | At least one of `resource_id`, `text`, `content_desc`, `class_name`; optional `text_exact`, `long_press` booleans. Requires exactly one visible match. |
-| `input_text` | Required `text`; explicit field selector using `resource_id`, `content_desc` and/or `match_text`. Replaces text, supports an empty string, does not submit. Requires a unique visible match. |
-| `scroll` | Required `direction: up/down/left/right`; optional `resource_id`, `text`, `content_desc`. A supplied selector must be unique; without one, uses the existing primary scrollable-area behavior. |
+| `tap` | At least one of `resource_id`, `text`, `content_desc`, `class_name`, `within`; optional `text_exact`, `long_press`, `visibility`. Requires exactly one match. |
+| `input_text` | Required `text`; explicit field selector using `resource_id`, `content_desc`, `match_text`, `class_name` and/or `within`; optional `text_exact`, `visibility`. Replaces text, supports an empty string, does not submit. Requires a unique match and editable target. |
+| `scroll` | Required `direction: up/down/left/right`; optional selector including `within`, `class_name`, `text_exact`, `visibility`. A supplied selector must be unique; without one, uses the existing primary scrollable-area behavior. |
 | `back` | `{}`; one Android Back action. |
 | `delay` | Required integer `milliseconds`, 0..5000. No implicit idle wait before/after. |
 | `wait` | Required `condition: visible/absent/text/idle`; selector except for idle; optional `expected` and `timeout_ms` (250..30000). Idle waits specifically for `app_id`. |
 | `assert` | Required `condition: visible/absent/text/count`; selector; optional `expected` and `timeout_ms` (250..30000). Failure uses the existing assertion screenshot/tree evidence. |
 
 Wait/assert selectors support `resource_id`, `text`, `content_desc`, `class_name`
-and optional `text_exact`. In 0.1.6, `text` conditions use the same native predicate
+and optional `text_exact`, `within`, `visibility`. Since 0.1.6, `text` conditions use the same native predicate
 as direct MCP calls: a unique candidate's actual text must equal `expected`
 (case-sensitive), or satisfy the text selector when no expectation is supplied.
 The YAML compiler does not rewrite text assertions into visibility checks.
@@ -99,7 +99,20 @@ The YAML compiler does not rewrite text assertions into visibility checks.
 Waits/assertions use the existing default timeout
 (5000 ms) if omitted, bounded by the overall route deadline.
 
-Indices, `nth`, container selectors, subroutes, loops, scripts, arbitrary tool
+Since 0.1.7, `within` scopes matches to an ancestor container, using the same native
+semantics as standalone MCP calls. For example:
+
+```yaml
+- tap:
+    resource_id: open
+    within:
+      resource_id: project_beta
+```
+
+Actions default to `visibility: fully_visible`; checks default to accessibility
+visibility. These policies use reported geometry, not guaranteed overlay detection.
+
+Indices, `nth`, ephemeral `element_ref`, subroutes, loops, scripts, arbitrary tool
 calls, connectivity changes and state mutations are intentionally unsupported.
 
 ## Execution and consent
@@ -141,6 +154,7 @@ calling client receives step outputs and assertion evidence, which may contain
 sensitive UI data; use non-sensitive test accounts. This version does not provide
 screenshot masking or general failure-bundle redaction.
 
-Container-scoped/stale-reference-safe targeting, combined waits, route storage,
-build provenance and state restoration remain separate roadmap milestones in
-[`QA_RELIABILITY_PLAN.md`](QA_RELIABILITY_PLAN.md).
+Container scoping and standalone session-bound references are implemented in 0.1.7;
+saved routes intentionally use stable selectors, not transient references.
+Combined waits, route storage, build provenance and owned state restoration remain
+later milestones in [`AGENT_QUALITY_IMPLEMENTATION_PLAN.md`](AGENT_QUALITY_IMPLEMENTATION_PLAN.md).

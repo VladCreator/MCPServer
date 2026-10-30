@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
-GATEWAY_VERSION = "0.1.6"
+GATEWAY_VERSION = "0.1.7"
 
 
 RECONNECT_INTERVAL_S = 2.0

@@ -1,7 +1,7 @@
-# Supported tools — Tester 0.1.6
+# Supported tools — Tester 0.1.7
 
-Tester exposes **29 tools** over MCP on Android (17 device tools + 10 QA-pack tools,
-YAML route execution and capability discovery).
+Tester exposes **30 tools** over MCP on Android (17 device tools + 10 QA-pack tools,
+YAML route execution, capability discovery and correlated observation).
 The iOS QA service advertises a 13-tool subset: `get_device_info`, `health_check`,
 `read_file`, `create_notification`, `take_photo`, `get_app_version`,
 `get_screen_tree`, `take_screenshot`, `get_logs`, `qa_session`,
@@ -37,13 +37,14 @@ requirements of each tool.
 | `get_app_version` | `package_name` (required) | Installed app or Tester | No | versionName, versionCode and install/update times. |
 | `get_logs` | `package_name`, `level`, `query`, `lines`, `crashes` | `READ_LOGS` via ADB for other apps' logs | Yes | Filtered logcat text. |
 | `get_screen_tree` | `max_nodes` (integer, optional; default 300, range 1–1000) | **MCP Touch Service** enabled | Yes | Indented text tree: index, class, text, content description, resource id, bounds and flags. |
+| `observe_screen` | `include_screenshot` (default false), `max_nodes` (default 300, max 1000), `max_dimension` | Android **MCP Touch Service**; image denied for secure windows | Yes | Structured bounded tree with paths, references, package/window, rotation/dimensions, timestamps, visibility and instability. Optional window image with origin/scale. |
 | `take_screenshot` | `max_dimension` (integer, optional; default 1280, range 320–2400) | **MCP Touch Service** enabled; unavailable on `FLAG_SECURE` screens | Yes | MCP `image` block (`image/jpeg`) plus a scale hint. |
 | `click_element` | One of `index`, `text`, `resource_id`, `content_desc`, `class_name`; optional `text_exact`, `nth`, `long_press` | **MCP Touch Service** enabled | Yes | Text describing the clicked element. |
 | `input_text` | `text` (string, required, max 5000 chars); optional `submit`; optional `index`, `match_text`, `resource_id`, `content_desc` | **MCP Touch Service** enabled; target must be editable | Yes | Text describing the field and whether submit was pressed. |
 | `scroll` | `direction` (`up`, `down`, `left`, `right`, required); optional `index`, `text`, `resource_id`, `content_desc` | **MCP Touch Service** enabled | Yes | Text with the scrolling method used. |
 | `global_action` | `action`: `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen` (required) | **MCP Touch Service** enabled | Yes | Text confirming the action. |
 | `qa_session` | `action`: `begin`, `step`, `status`, `end`; `test_case`, `title`, `expected`, `actual`, `status`, `result`, `notes` | App sandbox for reports | No | Session text; end writes JSON + Markdown. |
-| `ui_find` | Selector: `text`, `text_exact`, `resource_id`, `content_desc`, `class_name`, `index`; `include_invisible`, `limit`, `nth` (absolute `match_index`) | **MCP Touch Service** enabled | No | JSON: count + matches with bounds/flags. |
+| `ui_find` | Selector: `text`, `text_exact`, `resource_id`, `content_desc`, `class_name`, `index`, `within`, `visibility`; `include_invisible`, `limit`, `nth` (absolute `match_index`) | **MCP Touch Service** enabled | No | Structured JSON: count, observation metadata, matches with visibility/flags and references where a bounded tree path is available. |
 | `ui_wait` | `condition`: `visible`, `absent`, `text`, `idle`; selector; `expected`, `text_mode`, `ignore_case`, `timeout_ms`, `interval_ms`, `quiet_ms`, `package_name` | **MCP Touch Service** enabled | No | Text plus structured predicate result; every condition checks foreground/window. |
 | `ui_assert` | `condition`: `visible`, `absent`, `text`, `count`; selector; `expected`, `text_mode`, `ignore_case`, `package_name`, `timeout_ms`, `max_dimension` | **MCP Touch Service** enabled | No | Text plus structured predicate result; failure includes screenshot + tree excerpt when capture is available. |
 | `ui_gesture` | `type`: `tap`, `double_tap`, `multi_tap`, `long_press`, `swipe`, `drag`, `pinch`; coordinates or selector; `count`, `interval_ms`, `duration_ms`, `direction`, `radius` | **MCP Touch Service** enabled | Yes | Text confirming the gesture. |
@@ -59,7 +60,7 @@ requirements of each tool.
 Sensitive tools are `read_file`, `take_photo`, `touch_test`, `launch_app`,
 `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`, `scroll`,
 `global_action`, `swipe`, `get_logs`, `ui_gesture`, `audio_instruction` and
-`device_state` and `run_route` (16 of 29).
+`device_state`, `run_route` and `observe_screen` (17 of 30).
 
 When **Confirm sensitive tools** is enabled (default), the call pauses and the
 dashboard shows **Tool approval**. Approve or reject within 60 seconds. The MCP client
@@ -72,7 +73,7 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 ## Requirements
 
 - **MCP Touch Service**: Android Settings → Accessibility → MCP Touch Service. The app
-  has a shortcut in **Settings → Device access**. Needed by seven tools:
+  has a shortcut in **Settings → Device access**. Core examples:
   `touch_test`, `get_screen_tree`, `take_screenshot`, `click_element`, `input_text`,
   `scroll`, `global_action`.
 - **Camera**: runtime permission; `take_photo` only runs while the Tester app is in
@@ -93,7 +94,63 @@ must keep the call open; set `toolCallTimeoutMs` to at least 120000 in DSH.
 
 ## Recommended UI automation loop
 
-In 0.1.6, text checks require a selector identifying one candidate. `expected`
+### P1 observation and targeting
+
+Prefer `observe_screen` (tree-only by default), then one action using `element_ref`,
+then observe again. `ui_find` also supplies references. References belong to the
+approved client session, expire after 30 seconds, and are replaced by that client's
+next observation/find. Window/content/text/scroll changes and successful actions
+invalidate them conservatively. Resolution checks current window, rotation, screen
+dimensions, generation, node identity, tree path and fingerprint immediately before
+dispatch. Stale/foreign references and ambiguity return an error with
+`action_dispatched=false`; no action is retried.
+
+`click_element`, `input_text`, `scroll` and `ui_gesture` accept `element_ref` instead
+of a selector. Input still uses `text` for the value. Do not mix a reference with
+selector fields or selector gestures with x/y coordinates. Legacy `index` still
+uses the process-global last `get_screen_tree` list: it is **not session-bound**
+and is unsuitable for saved scenarios. Observation `node_index`/`path` and find
+`match_index` are not legacy tree indices.
+
+All selector-based find/wait/assert/action tools accept `within` (an ancestor
+selector with text, text_exact, resource_id, content_desc and/or class_name).
+It matches the ancestor itself, not arbitrary sibling text. For example:
+
+```json
+{"text":"Open","text_exact":true,"within":{"resource_id":"project_beta"}}
+```
+
+Actions require one candidate unless `nth` is explicitly supplied; there is no
+silent exact-match preference. Input also rejects containers with multiple editable
+descendants. A semantic child can resolve to its nearest editable ancestor; the
+result identifies the actual field. Click fallback never uses an unrelated large
+ancestor.
+
+`visibility` supports `accessibility` (find/check default), `intersecting` and
+`fully_visible` (action default). Results expose accessibility visibility, bounds,
+ancestor/viewport intersection, clipping detected from parent-local dimensions,
+fully-visible reported geometry and advisory actionability. Android may already
+clip bounds or omit original geometry: these fields cannot prove full original
+visibility or detect every overlay. `occlusion_known=false` makes this limitation
+explicit. Actions always require a nonempty viewport intersection and an enabled
+target, even with a looser policy.
+
+Observations are **not atomic**: start/tree/end timestamps and instability flags
+describe their capture interval. Unstable observations omit actionable references.
+Paths retain ancestry through omitted non-meaningful nodes; truncation is explicit.
+WebView metadata reports readable accessibility descendants, not DOM access or
+complete content. No guessed-coordinate/OCR/DevTools fallback is attempted.
+
+Optional images use Android's window screenshot API so FLAG_SECURE denial is
+explicit. `screenshot.status=failed` sets `isError=true` while retaining tree
+evidence. Map an image point using `screen_x=origin_x+image_x*scale_x` and the
+corresponding y fields. Tree-only mode does not request image permission/capture.
+Per-call consent UI can itself invalidate a reference; observe again rather than
+replay. Unattended fixture runs require an explicitly configured consent policy.
+
+### Predicate semantics (introduced in P0)
+
+Text checks require a selector identifying one candidate. `expected`
 compares its actual text, exactly and case-sensitively by default. Use
 `text_mode: "contains"` and/or `ignore_case: true` to change the value comparison.
 These options are independent of `text_exact`, which controls selector matching.
@@ -122,9 +179,9 @@ current Settings toggle. Restoration checks stored settings and media volume;
 effective UI configuration changes can still be OS-dependent.
 
 ```
-get_screen_tree
-  → click_element / input_text / scroll
-  → get_screen_tree again
+observe_screen
+  → click_element / input_text / scroll (element_ref)
+  → observe_screen again
 ```
 
 Use `take_screenshot` only when the tree is empty, ambiguous, or the screen is

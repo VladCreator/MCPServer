@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.accessibility.AccessibilityNodeInfo
 import com.vlad.mcpserver.McpTouchAccessibilityService
 import com.vlad.mcpserver.NodeSelector
 import com.vlad.mcpserver.ScreenNavigator
@@ -35,6 +36,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -58,12 +60,23 @@ class AndroidToolExecutor(
     private val deviceState = AndroidDeviceStateController(context)
     private val qa = QaSessionManager(context)
     private val startedAt = SystemClock.elapsedRealtime()
+    private data class ReferencedNode(
+        val node: AccessibilityNodeInfo, val path: List<Int>, val fingerprint: String
+    )
+    private val references = ElementReferences<ReferencedNode>(SystemClock::elapsedRealtime, newId = {
+        UUID.randomUUID().toString()
+    })
 
     override suspend fun execute(
         clientId: String,
         toolName: String,
         arguments: JsonObject
     ): ToolResult = withContext(Dispatchers.IO) {
+            try {
+                validateTargeting(toolName, arguments)
+            } catch (error: IllegalArgumentException) {
+                return@withContext targetingError("invalid_selector", error.message ?: "Invalid selector.")
+            }
             val route = if (toolName == "run_route") {
                 try {
                     val source = arguments["yaml"] as? JsonPrimitive
@@ -95,15 +108,15 @@ class AndroidToolExecutor(
             }
             if (route != null) {
                 return@withContext routeExecutionMutex.withLock {
-                    YamlRouteRunner().run(route) { step -> executeRouteStep(route, step) }
+                    YamlRouteRunner().run(route) { step -> executeRouteStep(clientId, route, step) }
                 }
             }
             if (toolName in ROUTE_SERIALIZED_TOOLS) {
-                routeExecutionMutex.withLock { executeTool(toolName, arguments) }
-            } else executeTool(toolName, arguments)
+                routeExecutionMutex.withLock { executeTool(clientId, toolName, arguments) }
+            } else executeTool(clientId, toolName, arguments)
         }
 
-    private suspend fun executeRouteStep(route: YamlRoute, step: RouteStep): ToolResult {
+    private suspend fun executeRouteStep(clientId: String, route: YamlRoute, step: RouteStep): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val waitsForApp = step.tool == "ui_wait" && step.arguments.string("condition") == "idle"
         if (step.tool != "launch_app" && !waitsForApp &&
@@ -121,7 +134,7 @@ class AndroidToolExecutor(
                 return ToolResult("Route stopped: selector must match exactly one visible element.", isError = true)
             }
         }
-        val result = executeTool(step.tool, step.arguments)
+        val result = executeTool(clientId, step.tool, step.arguments)
         if (!result.isError && step.tool in setOf("ui_wait", "ui_assert") &&
             service.rootInActiveWindow?.packageName?.toString() != route.packageName
         ) {
@@ -130,8 +143,8 @@ class AndroidToolExecutor(
         return result
     }
 
-    private suspend fun executeTool(toolName: String, arguments: JsonObject): ToolResult =
-            when (toolName) {
+    private suspend fun executeTool(clientId: String, toolName: String, arguments: JsonObject): ToolResult {
+        val result = when (toolName) {
                 "get_device_info" -> deviceInfo()
                 "read_file" -> readFile(arguments)
                 "create_notification" -> createNotification(arguments)
@@ -145,16 +158,17 @@ class AndroidToolExecutor(
                 "health_check" -> healthCheck()
                 "get_capabilities" -> capabilities()
                 "get_screen_tree" -> screenTree(arguments)
+                "observe_screen" -> observeScreen(clientId, arguments)
                 "take_screenshot" -> screenshot(arguments)
-                "click_element" -> clickElement(arguments)
-                "input_text" -> inputText(arguments)
-                "scroll" -> scroll(arguments)
+                "click_element" -> clickElement(clientId, arguments)
+                "input_text" -> inputText(clientId, arguments)
+                "scroll" -> scroll(clientId, arguments)
                 "global_action" -> globalAction(arguments)
                 "qa_session" -> qaSession(arguments)
-                "ui_find" -> uiFind(arguments)
+                "ui_find" -> uiFind(clientId, arguments)
                 "ui_wait" -> uiWait(arguments)
                 "ui_assert" -> uiAssert(arguments)
-                "ui_gesture" -> uiGesture(arguments)
+                "ui_gesture" -> uiGesture(clientId, arguments)
                 "audio_instruction" -> audioInstruction(arguments)
                 "audio_state" -> audio.state()
                 "get_device_state" -> ToolResult(deviceState.readText())
@@ -162,6 +176,10 @@ class AndroidToolExecutor(
                 "ui_diff" -> uiDiff(arguments)
                 else -> ToolResult("Tool '$toolName' is not available.", isError = true)
             }
+        if (!result.isError && toolName in setOf("click_element", "input_text", "scroll", "ui_gesture",
+                "touch_test", "launch_app", "swipe", "global_action", "device_state")) references.clear()
+        return result
+    }
 
     private fun deviceInfo(): ToolResult {
         val versionName = runCatching {
@@ -182,7 +200,7 @@ class AndroidToolExecutor(
         val touchTools = setOf(
             "touch_test", "swipe", "get_screen_tree", "take_screenshot", "click_element",
             "input_text", "scroll", "global_action", "ui_find", "ui_wait", "ui_assert",
-            "ui_gesture", "ui_diff", "run_route"
+            "ui_gesture", "ui_diff", "run_route", "observe_screen"
         )
         val mutations = setOf(
             "touch_test", "launch_app", "swipe", "click_element", "input_text", "scroll",
@@ -694,12 +712,8 @@ class AndroidToolExecutor(
     private fun JsonObject.bool(key: String): Boolean =
         (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() == "true"
 
-    private fun JsonObject.selector(textKey: String = "text"): NodeSelector = NodeSelector(
-        index = int("index"),
-        text = string(textKey),
-        resourceId = string("resource_id"),
-        contentDescription = string("content_desc")
-    )
+    private fun JsonObject.selector(textKey: String = "text"): NodeSelector =
+        qaSelector(this, textKey)
 
     private fun describeNode(node: android.view.accessibility.AccessibilityNodeInfo): String {
         val label = node.text?.takeIf { it.isNotBlank() && !node.isPassword }
@@ -755,57 +769,28 @@ class AndroidToolExecutor(
         )
     }
 
-    private suspend fun clickElement(arguments: JsonObject): ToolResult {
+    private suspend fun clickElement(clientId: String, arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val selector = arguments.selector().copy(
             textExact = arguments.bool("text_exact"),
             className = arguments.string("class_name")
         )
-        if (selector.isEmpty) {
+        if (selector.isEmpty && arguments.string("element_ref") == null) {
             return ToolResult("Provide index, text, resource_id, content_desc or class_name.", isError = true)
         }
-        val explicitNth = arguments.int("nth")
-        var note = ""
-        val node = if (selector.index != null) {
-            ScreenNavigator.find(service, selector)
-        } else {
-            // nth uses the same 0-based numbering as ui_find's match_index.
-            val matches = ScreenNavigator.findAll(service, selector.copy(nth = 0), MAX_QA_MATCHES)
-            if (matches.size > 1 && explicitNth == null) {
-                val exact = if (selector.textExact) emptyList() else matches.filter { ScreenNavigator.isExactMatch(it, selector) }
-                if (exact.size == 1) {
-                    note = " (exact match preferred over ${matches.size - 1} partial match(es); use text_exact to be explicit)"
-                    exact.single()
-                } else {
-                    return ToolResult(
-                        "${matches.size} elements match $selector; nothing was clicked. Pass nth (0-based, same as " +
-                            "ui_find match_index), text_exact=true or a more specific selector. Candidates:\n" +
-                            matches.take(MAX_CANDIDATES).withIndex().joinToString("\n") { (i, n) ->
-                                val r = ScreenNavigator.bounds(n)
-                                "nth=$i ${describeNode(n)} bounds=[${r.left},${r.top}][${r.right},${r.bottom}]" +
-                                    " clickable=${ScreenNavigator.hasClickAction(n)}"
-                            },
-                        isError = true
-                    )
-                }
-            } else {
-                matches.getOrNull(explicitNth ?: 0)
-            }
-        } ?: return ToolResult(
-            "No visible element matches $selector${explicitNth?.let { " (nth=$it)" }.orEmpty()}. Call get_screen_tree to refresh.",
-            isError = true
-        )
+        val target = resolveTarget(clientId, service, arguments, selector)
+        val node = target.node ?: return target.error!!
         val longPress = arguments.bool("long_press")
         val description = describeNode(node)
-        val method = ScreenNavigator.click(service, node, longPress)
+        val method = ScreenNavigator.click(service, node, longPress, selector.within)
         return if (method != null) {
-            ToolResult("${if (longPress) "Long-pressed" else "Clicked"} $description via $method$note.")
+            ToolResult("${if (longPress) "Long-pressed" else "Clicked"} $description via $method.")
         } else {
             ToolResult("Unable to click $description: ${tapFailureReason(service)}", isError = true)
         }
     }
 
-    private fun inputText(arguments: JsonObject): ToolResult {
+    private fun inputText(clientId: String, arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val text = (arguments["text"] as? JsonPrimitive)?.contentOrNull
             ?: return ToolResult("Missing required argument: text", isError = true)
@@ -813,13 +798,14 @@ class AndroidToolExecutor(
             return ToolResult("Text is too long (max $MAX_INPUT_CHARS characters).", isError = true)
         }
         val selector = arguments.selector(textKey = "match_text")
-        val matched = if (selector.isEmpty) {
-            null
-        } else {
-            ScreenNavigator.find(service, selector)
-                ?: return ToolResult("No visible element matches $selector.", isError = true)
-        }
-        val field = ScreenNavigator.editableTarget(service, matched)
+        val explicit = !selector.isEmpty || arguments.string("element_ref") != null
+        val target = if (explicit) resolveTarget(clientId, service, arguments, selector) else null
+        if (target?.error != null) return target.error
+        val fields = target?.node?.let(ScreenNavigator::editableTargets)
+        if (fields != null && fields.size > 1) return targetingError(
+            "ambiguous_match", "Container has multiple editable fields; nothing was entered."
+        )
+        val field = if (explicit) fields?.singleOrNull() else ScreenNavigator.editableTarget(service, null)
             ?: return ToolResult(
                 if (selector.isEmpty) {
                     "No focused text field. Pass a selector or click the field first."
@@ -828,6 +814,11 @@ class AndroidToolExecutor(
                 },
                 isError = true
             )
+        if (field == null) return targetingError("no_match", "The matched element is not an editable field.")
+        if (!field.isEnabled || !ScreenNavigator.visibleByPolicy(field,
+                arguments.string("visibility") ?: "fully_visible", service)) {
+            return targetingError("not_actionable", "The field is disabled or fails the visibility policy.")
+        }
         if (!ScreenNavigator.setText(field, text)) {
             return ToolResult("The field rejected the text.", isError = true)
         }
@@ -842,7 +833,7 @@ class AndroidToolExecutor(
         )
     }
 
-    private suspend fun scroll(arguments: JsonObject): ToolResult {
+    private suspend fun scroll(clientId: String, arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val direction = arguments.string("direction")?.lowercase()
         if (direction !in McpTools.SCROLL_DIRECTIONS) {
@@ -852,11 +843,11 @@ class AndroidToolExecutor(
             )
         }
         val selector = arguments.selector()
-        val node = if (selector.isEmpty) {
+        val node = if (selector.isEmpty && arguments.string("element_ref") == null) {
             ScreenNavigator.primaryScrollable(service)
         } else {
-            ScreenNavigator.find(service, selector)
-                ?: return ToolResult("No visible element matches $selector.", isError = true)
+            val target = resolveTarget(clientId, service, arguments, selector)
+            target.node ?: return target.error!!
         }
         val method = ScreenNavigator.scroll(service, node, direction!!)
             ?: return ToolResult("Unable to scroll $direction.", isError = true)
@@ -931,7 +922,7 @@ class AndroidToolExecutor(
         }
     }
 
-    private suspend fun uiFind(arguments: JsonObject): ToolResult {
+    private suspend fun uiFind(clientId: String, arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val selector = qaSelector(arguments)
         if (selector.isEmpty) {
@@ -941,15 +932,38 @@ class AndroidToolExecutor(
             )
         }
         val limit = (arguments.int("limit") ?: DEFAULT_QA_MATCHES).coerceIn(1, MAX_QA_MATCHES)
-        val matches = ScreenNavigator.findAll(service, selector, limit)
+        val root = service.rootInActiveWindow ?: return targetingError("no_window", "No active window.")
+        val started = System.currentTimeMillis()
+        val window = observationWindow(service, root)
+        val matches = ScreenNavigator.findAll(service, selector, limit, root)
+        val snapshot = ScreenNavigator.snapshot(root, MAX_TREE_NODES)
+        val paths = matches.map { node -> snapshot.allNodes.firstOrNull { it.node == node } }
+        val recorded = references.record(clientId, window, paths.mapNotNull { item ->
+            item?.let { ReferencedNode(it.node, it.path, fingerprint(it.node)) }
+        })
+        val stable = window == observationWindow(service, service.rootInActiveWindow)
+        var referenceIndex = 0
         val payload = buildJsonObject {
+            put("observation_id", recorded.first)
+            put("capture_started_at_ms", started)
+            put("capture_finished_at_ms", System.currentTimeMillis())
+            put("foreground_package", window.packageName)
+            put("window_id", window.windowId)
+            put("window_generation", window.generation)
+            put("reference_lifetime_ms", 30_000)
+            put("unstable", !stable)
+            put("truncated", matches.size >= limit || snapshot.truncated)
             put("count", matches.size)
             put("selector", selector.toString())
             putJsonArray("matches") {
-                matches.forEachIndexed { index, node -> add(nodeJson(selector.nth.coerceAtLeast(0) + index, node)) }
+                matches.forEachIndexed { index, node ->
+                    val ref = if (paths[index] != null) recorded.second[referenceIndex++] else null
+                    add(JsonObject(nodeJson(selector.nth.coerceAtLeast(0) + index, node, service) +
+                        if (ref != null && stable) mapOf("element_ref" to JsonPrimitive(ref)) else emptyMap()))
+                }
             }
         }
-        return ToolResult(payload.toString())
+        return ToolResult(payload.toString(), structuredContent = payload)
     }
 
     private suspend fun uiWait(arguments: JsonObject): ToolResult {
@@ -1064,13 +1078,18 @@ class AndroidToolExecutor(
         )
     }
 
-    private suspend fun uiGesture(arguments: JsonObject): ToolResult {
+    private suspend fun uiGesture(clientId: String, arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val type = arguments.string("type")?.lowercase()
             ?: return ToolResult("Missing required argument: type", isError = true)
         val selector = qaSelector(arguments)
-        val node = if (!selector.isEmpty) ScreenNavigator.find(service, selector) else null
-        val rect = node?.let { ScreenNavigator.bounds(it) }
+        val explicit = !selector.isEmpty || arguments.string("element_ref") != null
+        if (explicit && (arguments["x"] != null || arguments["y"] != null)) {
+            return targetingError("invalid_selector", "Use a selector/reference or coordinates, not both.")
+        }
+        val target = if (explicit) resolveTarget(clientId, service, arguments, selector) else null
+        if (target?.error != null) return target.error
+        val rect = target?.node?.let { ScreenNavigator.visibleBounds(it, service) }
         var x = arguments.float("x") ?: rect?.exactCenterX()
         var y = arguments.float("y") ?: rect?.exactCenterY()
         if (x == null || y == null) {
@@ -1294,11 +1313,12 @@ class AndroidToolExecutor(
 
     private suspend fun captureScreenshot(
         service: McpTouchAccessibilityService,
-        maxDimension: Int
+        maxDimension: Int,
+        windowId: Int? = null
     ): Result<Screenshot> {
         var last: Result<Screenshot>? = null
         repeat(3) {
-            val result = ScreenNavigator.takeScreenshot(service, maxDimension)
+            val result = ScreenNavigator.takeScreenshot(service, maxDimension, windowId)
             if (result.isSuccess) return result
             last = result
             val message = result.exceptionOrNull()?.message.orEmpty()
@@ -1421,8 +1441,10 @@ class AndroidToolExecutor(
         return if (total == 0L) 0f else different * 100f / total
     }
 
-    private fun nodeJson(index: Int, node: android.view.accessibility.AccessibilityNodeInfo): JsonObject {
+    private fun nodeJson(index: Int, node: AccessibilityNodeInfo, service: McpTouchAccessibilityService): JsonObject {
         val rect = ScreenNavigator.bounds(node)
+        val visible = ScreenNavigator.visibleBounds(node, service)
+        val inWindow = android.graphics.Rect().also(node::getBoundsInWindow)
         return buildJsonObject {
             put("match_index", index)
             if (node.isPassword) {
@@ -1436,6 +1458,19 @@ class AndroidToolExecutor(
             node.viewIdResourceName?.let { put("resource_id", it) }
             node.className?.toString()?.let { put("class", it) }
             put("bounds", "[${rect.left},${rect.top}][${rect.right},${rect.bottom}]")
+            put("bounds_in_window", "[${inWindow.left},${inWindow.top}][${inWindow.right},${inWindow.bottom}]")
+            putJsonObject("visible_bounds") {
+                put("left", visible.left); put("top", visible.top)
+                put("right", visible.right); put("bottom", visible.bottom)
+            }
+            put("accessibility_visible", node.isVisibleToUser)
+            put("viewport_intersecting", !visible.isEmpty)
+            put("fully_visible", ScreenNavigator.visibleByPolicy(node, "fully_visible", service))
+            put("reported_clipping", ScreenNavigator.reportsClipping(node))
+            put("visibility_basis", "reported_accessibility_geometry; original extent and overlays may be unknown")
+            put("actionable", node.isEnabled && ScreenNavigator.visibleByPolicy(node, "fully_visible", service) &&
+                (ScreenNavigator.hasClickAction(node) || node.isEditable || node.isScrollable))
+            put("occlusion_known", false)
             put("clickable", node.isClickable)
             put("click_action", ScreenNavigator.hasClickAction(node))
             put("enabled", node.isEnabled)
@@ -1446,16 +1481,186 @@ class AndroidToolExecutor(
         }
     }
 
-    private fun qaSelector(arguments: JsonObject): NodeSelector = NodeSelector(
+    private fun qaSelector(arguments: JsonObject, textKey: String = "text"): NodeSelector = NodeSelector(
         index = arguments.int("index"),
-        text = arguments.string("text"),
+        text = arguments.string(textKey),
         resourceId = arguments.string("resource_id"),
         contentDescription = arguments.string("content_desc"),
         textExact = arguments.bool("text_exact"),
         className = arguments.string("class_name"),
         nth = arguments.int("nth") ?: 0,
-        includeInvisible = arguments.bool("include_invisible")
+        includeInvisible = arguments.bool("include_invisible"),
+        within = (arguments["within"] as? JsonObject)?.let { qaSelector(it) },
+        visibility = arguments.string("visibility") ?: "accessibility"
     )
+
+    private fun validateTargeting(toolName: String, arguments: JsonObject) {
+        arguments["within"]?.let {
+            require(it is JsonObject && it.isNotEmpty()) { "within must be a nonempty container selector." }
+            require(it.keys.all { key -> key in setOf("text", "text_exact", "resource_id", "content_desc", "class_name") }) {
+                "within accepts text, text_exact, resource_id, content_desc and class_name only."
+            }
+            require(it.any { (key, value) -> key != "text_exact" && value is JsonPrimitive &&
+                value.isString && value.content.isNotBlank() }) { "within requires a container identity." }
+            it.forEach { (key, value) ->
+                require(value is JsonPrimitive && if (key == "text_exact") value.content in setOf("true", "false")
+                    else value.isString && value.content.isNotBlank()) { "Invalid within field: $key." }
+            }
+        }
+        arguments["visibility"]?.let {
+            require((it as? JsonPrimitive)?.content in setOf("accessibility", "intersecting", "fully_visible")) {
+                "visibility must be accessibility, intersecting or fully_visible."
+            }
+        }
+        arguments["element_ref"]?.let {
+            require(it is JsonPrimitive && it.isString && it.content.isNotBlank()) { "element_ref must be a nonempty string." }
+            require(arguments.keys.none { key -> key in setOf("index", "within", "resource_id", "match_text",
+                "content_desc", "class_name", "nth", "text_exact") }) { "element_ref cannot be combined with selectors." }
+            require(toolName == "input_text" || "text" !in arguments) { "element_ref cannot be combined with text selectors." }
+        }
+        if ("index" in arguments) require(arguments.keys.none { it in setOf("within", "resource_id",
+                "content_desc", "class_name", "nth", "match_text") } &&
+            (toolName == "input_text" || "text" !in arguments)) { "Legacy index cannot be combined with other selectors." }
+        arguments["nth"]?.let {
+            require((it as? JsonPrimitive)?.content?.toIntOrNull()?.let { n -> n in 0..99 } == true) {
+                "nth must be in 0..99."
+            }
+        }
+    }
+
+    private fun targetingError(reason: String, message: String) = ToolResult(
+        message, isError = true, structuredContent = buildJsonObject {
+            put("reason", reason); put("action_dispatched", false); put("retryable", false)
+        }
+    )
+
+    private fun observationWindow(service: McpTouchAccessibilityService, root: AccessibilityNodeInfo?): ObservationWindow {
+        val metrics = service.resources.displayMetrics
+        val display = context.getSystemService(android.hardware.display.DisplayManager::class.java)
+            .getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        return ObservationWindow(service.windowGeneration.get(), root?.windowId ?: -1,
+            root?.packageName?.toString().orEmpty(), display?.rotation ?: -1, metrics.widthPixels, metrics.heightPixels)
+    }
+
+    private fun fingerprint(node: AccessibilityNodeInfo): String = listOf(
+        node.windowId, node.packageName, node.className, node.viewIdResourceName,
+        if (node.isPassword) "<password>" else node.text, node.contentDescription,
+        ScreenNavigator.bounds(node), node.isEnabled, node.isClickable, node.isEditable,
+        node.isVisibleToUser, node.isSelected, node.isChecked, node.isCheckable, node.isScrollable,
+        node.childCount, node.actionList.map { it.id }
+    ).joinToString("|")
+
+    private data class Target(val node: AccessibilityNodeInfo? = null, val error: ToolResult? = null)
+
+    private fun resolveTarget(
+        owner: String, service: McpTouchAccessibilityService, arguments: JsonObject, selector: NodeSelector
+    ): Target {
+        val root = service.rootInActiveWindow
+            ?: return Target(error = targetingError("no_window", "No active window; nothing was dispatched."))
+        val window = observationWindow(service, root)
+        val reference = arguments.string("element_ref")
+        val node = if (reference != null) {
+            val stored = references.resolve(owner, reference, window)
+                ?: return Target(error = targetingError("stale_reference", "Reference is expired, foreign or stale; observe again."))
+            val live = ScreenNavigator.atPath(root, stored.path)
+            if (!stored.node.refresh() || live != stored.node || fingerprint(stored.node) != stored.fingerprint) {
+                return Target(error = targetingError("stale_reference", "Element changed; observe again."))
+            }
+            stored.node
+        } else {
+            val matches = ScreenNavigator.findAll(service, selector.copy(nth = 0), MAX_QA_MATCHES, root)
+            if (matches.size >= MAX_QA_MATCHES || (matches.size > 1 && arguments.int("nth") == null)) {
+                return Target(error = targetingError("ambiguous_match",
+                    "Selector matches ${matches.size} elements; use within or an explicit nth. Nothing was dispatched."))
+            }
+            matches.getOrNull(arguments.int("nth") ?: 0)
+                ?: return Target(error = targetingError("no_match", "No element matches $selector."))
+        }
+        if (window != observationWindow(service, service.rootInActiveWindow) || !node.refresh()) {
+            return Target(error = targetingError("stale_reference", "Window changed during resolution; observe again."))
+        }
+        if (!node.isEnabled || ScreenNavigator.visibleBounds(node, service).isEmpty || !ScreenNavigator.visibleByPolicy(node,
+                arguments.string("visibility") ?: "fully_visible", service)) {
+            return Target(error = targetingError("not_actionable", "Element is disabled or fails the visibility policy."))
+        }
+        if (node.windowId != root.windowId || node.packageName != root.packageName) {
+            return Target(error = targetingError("stale_reference", "Element does not belong to the active window."))
+        }
+        return Target(node)
+    }
+
+    private suspend fun observeScreen(owner: String, arguments: JsonObject): ToolResult {
+        val service = touchService() ?: return touchServiceMissing()
+        val started = System.currentTimeMillis()
+        val startMono = SystemClock.elapsedRealtime()
+        val root = service.rootInActiveWindow ?: return targetingError("no_window", "No active window.")
+        val window = observationWindow(service, root)
+        val tree = ScreenNavigator.snapshot(root,
+            (arguments.int("max_nodes") ?: DEFAULT_TREE_NODES).coerceIn(1, MAX_TREE_NODES))
+        val treeAt = System.currentTimeMillis()
+        val fingerprints = tree.nodes.map { ReferencedNode(it.node, it.path, fingerprint(it.node)) }
+        val nodePayloads = tree.nodes.mapIndexed { index, item -> buildJsonObject {
+            nodeJson(index, item.node, service).filterKeys { it != "match_index" }.forEach { (key, value) -> put(key, value) }
+            put("node_index", index)
+            putJsonArray("path") { item.path.forEach { add(it) } }
+        } }
+        val shot = if (arguments.bool("include_screenshot")) captureScreenshot(service,
+            (arguments.int("max_dimension") ?: DEFAULT_SCREENSHOT_DIMENSION)
+                .coerceIn(MIN_SCREENSHOT_DIMENSION, MAX_SCREENSHOT_DIMENSION), root.windowId) else null
+        val nodesChanged = fingerprints.any { !it.node.refresh() || fingerprint(it.node) != it.fingerprint }
+        val endWindow = observationWindow(service, service.rootInActiveWindow)
+        val unstable = window != endWindow || nodesChanged
+        val recorded = references.record(owner, window, if (unstable) emptyList() else fingerprints)
+        val payload = buildJsonObject {
+            put("observation_id", recorded.first)
+            put("capture_started_at_ms", started); put("tree_captured_at_ms", treeAt)
+            put("capture_finished_at_ms", System.currentTimeMillis())
+            put("elapsed_ms", SystemClock.elapsedRealtime() - startMono)
+            put("atomic", false); put("unstable", unstable); put("truncated", tree.truncated)
+            put("foreground_package", window.packageName); put("window_id", window.windowId)
+            put("window_generation", window.generation); put("rotation", window.rotation)
+            put("end_window_generation", endWindow.generation)
+            put("end_foreground_package", endWindow.packageName)
+            putJsonArray("instability_reasons") {
+                if (window != endWindow) add("window_changed")
+                if (nodesChanged) add("nodes_changed")
+            }
+            put("orientation", when (service.resources.configuration.orientation) {
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE -> "landscape"
+                android.content.res.Configuration.ORIENTATION_PORTRAIT -> "portrait"
+                else -> "undefined"
+            })
+            put("screen_width", window.width); put("screen_height", window.height)
+            put("reference_lifetime_ms", 30_000)
+            putJsonObject("webview") {
+                put("count", tree.webViews)
+                put("with_readable_accessibility", tree.readableWebViews)
+                put("method", "android_accessibility")
+                put("dom_available", false)
+            }
+            putJsonArray("nodes") {
+                nodePayloads.forEachIndexed { index, item ->
+                    add(JsonObject(item +
+                        if (!unstable) mapOf("element_ref" to JsonPrimitive(recorded.second[index])) else emptyMap()))
+                }
+            }
+            putJsonObject("screenshot") {
+                put("status", if (shot == null) "not_requested" else if (shot.isSuccess) "captured" else "failed")
+                shot?.exceptionOrNull()?.let { put("error", it.message ?: "Screenshot unavailable.") }
+                shot?.getOrNull()?.let {
+                    put("coordinate_space", "window")
+                    put("origin_x", it.originX); put("origin_y", it.originY)
+                    put("width", it.width); put("height", it.height)
+                    put("screen_width", it.screenWidth); put("screen_height", it.screenHeight)
+                    put("scale_x", it.screenWidth.toDouble() / it.width)
+                    put("scale_y", it.screenHeight.toDouble() / it.height)
+                }
+            }
+        }
+        return ToolResult(payload.toString(), isError = shot?.isFailure == true,
+            imageBase64 = shot?.getOrNull()?.let { java.util.Base64.getEncoder().encodeToString(it.jpegBytes) },
+            imageMimeType = if (shot?.isSuccess == true) "image/jpeg" else null, structuredContent = payload)
+    }
 
     private fun JsonObject.optionalBool(key: String): Boolean? {
         val value = (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() ?: return null
@@ -1479,7 +1684,7 @@ class AndroidToolExecutor(
     private companion object {
         val routeExecutionMutex = Mutex()
         val ROUTE_SERIALIZED_TOOLS = setOf(
-            "touch_test", "launch_app", "swipe", "get_screen_tree", "take_screenshot",
+            "touch_test", "launch_app", "swipe", "get_screen_tree", "take_screenshot", "observe_screen",
             "click_element", "input_text", "scroll", "global_action", "ui_find", "ui_wait",
             "ui_assert", "ui_gesture", "device_state", "get_device_state", "ui_diff", "take_photo",
             "qa_session", "audio_instruction"

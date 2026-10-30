@@ -76,9 +76,10 @@ class McpDispatcherTest {
         listOf("get_screen_tree", "take_screenshot", "click_element", "input_text", "scroll", "global_action")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
 
-        assertEquals(29, tools.size)
+        assertEquals(30, tools.size)
         assertTrue(tools.contains("run_route"))
         assertTrue(tools.contains("get_capabilities"))
+        assertTrue(tools.contains("observe_screen"))
         assertEquals(tools.size, tools.toSet().size, "tool names must be unique")
         listOf("qa_session", "ui_find", "ui_wait", "ui_assert", "ui_gesture", "audio_instruction", "audio_state", "get_device_state", "device_state", "ui_diff")
             .forEach { assertTrue(tools.contains(it), "missing $it") }
@@ -86,6 +87,19 @@ class McpDispatcherTest {
             McpTools.all.filter { it.sensitive }.all { it.requirement != null },
             "sensitive tools must declare a requirement for the in-app catalog"
         )
+    }
+
+    @Test
+    fun p1SchemasExposeTargetingOnlyWhereSupported() {
+        for (name in listOf("click_element", "input_text", "scroll", "ui_gesture", "ui_find", "ui_wait", "ui_assert")) {
+            val properties = McpTools.find(name)!!.inputSchema.getValue("properties").jsonObject
+            assertTrue("within" in properties, name)
+            assertTrue("visibility" in properties, name)
+            assertEquals(name in setOf("click_element", "input_text", "scroll", "ui_gesture"),
+                "element_ref" in properties, name)
+        }
+        assertTrue(McpTools.observeScreen.sensitive)
+        assertTrue(McpTools.iosAvailable().none { it.name == "observe_screen" })
     }
 
     @Test

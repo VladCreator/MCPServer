@@ -1,4 +1,8 @@
-# Unified QA Gateway — 0.1.6
+# Unified QA Gateway — 0.1.7
+
+Android 0.1.7 dynamically exposes `android__observe_screen`; its structured
+observation and optional image are forwarded unchanged. Element references remain
+owned by the native Android connection: reconnecting does not transfer them.
 
 The QA Gateway is a **stdio MCP server on the Mac** that presents Android and iOS
 QA backends through one tool list and one gateway QA report.

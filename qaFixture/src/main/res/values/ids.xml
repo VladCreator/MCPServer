@@ -1,0 +1,9 @@
+<resources>
+    <item name="project_alpha" type="id" />
+    <item name="project_beta" type="id" />
+    <item name="open" type="id" />
+    <item name="field" type="id" />
+    <item name="status" type="id" />
+    <item name="clipped" type="id" />
+    <item name="web" type="id" />
+</resources>

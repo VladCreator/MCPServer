@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.1.6** (Android P0 reliability; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.1.7** (Android P1 observation/targeting; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 ## Features
 
@@ -42,7 +42,7 @@ Current version: **0.1.6** (Android P0 reliability; iOS embedded QA service impl
   tool execution log and connection URLs.
 - **Foreground service**: while the server runs, a `dataSync` foreground service keeps
   the process alive with a persistent notification.
-- **Device + QA tools**: 29 tools for device info, sandboxed files, notifications, camera,
+- **Device + QA tools**: 30 tools for device info, sandboxed files, notifications, camera,
   app launching and full accessibility-driven UI automation (screen tree, screenshots,
   clicks, text input, scrolling and global actions). See
   [`docs/TOOLS.md`](docs/TOOLS.md).
@@ -52,6 +52,9 @@ Current version: **0.1.6** (Android P0 reliability; iOS embedded QA service impl
 - **Agent reliability (0.1.6)**: native text comparisons, structured predicate
   outcomes, capability discovery, explicit restoration failures and Android 15+
   notification compatibility. See [`docs/P0_0.1.6.md`](docs/P0_0.1.6.md).
+- **Observation and targeting (0.1.7)**: `observe_screen`, container-scoped selectors,
+  short-lived session-bound element references, explicit visibility geometry and
+  an isolated synthetic QA fixture. See [`docs/P1_0.1.7.md`](docs/P1_0.1.7.md).
 
 The [agent-first implementation plan](docs/AGENT_QUALITY_IMPLEMENTATION_PLAN.md)
 prioritizes tool correctness, reliable observations, evidence, environment setup
@@ -222,6 +225,7 @@ icon in the header (**Tools**).
 | `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. |
 | `qa_session` | Available (QA pack) | Begin/step/status/end a QA case and write JSON/Markdown reports with device snapshot. |
 | `ui_find` | Available (QA pack) | Find all matching elements with flags/bounds; returns JSON count and matches; `match_index` equals the `nth` used by `click_element`. |
+| `observe_screen` | Available (Android) | Correlated accessibility observation with session-bound references and optional window screenshot; explicit timestamps, instability and capture errors. |
 | `ui_wait` | Available (QA pack) | Wait for visible/absent/text/idle with timeout; `idle` with `package_name` also waits for that app to be in front (no false positive during launch). |
 | `ui_assert` | Available (QA pack) | Assert visible/absent/text/count; failure returns screenshot + tree excerpt. |
 | `ui_gesture` | Available (QA pack) | tap, double_tap, multi_tap, long_press, swipe, drag, pinch; selector or coordinates. |
@@ -325,7 +329,9 @@ recovered/committed.
 - `global_action` accepts `count`/`interval_ms` (e.g. Back x2 repeated reliably).
 - `install_apk` and `screen_record` are intentionally not provided: Android requires an on-screen user confirmation (package installer / MediaProjection).
 - `take_screenshot` waits for the UI to settle (`settle_ms`, default 1500) and reports a capture timestamp and foreground package.
-- `click_element` refuses ambiguous matches: pass `nth` (0-based, same as `ui_find` `match_index`), `text_exact` or a more specific selector; candidates are listed.
+- Selector-based actions refuse ambiguous matches: use `within`, a session-bound
+  `element_ref`, or an explicit `nth` (0-based, same as `ui_find` `match_index`).
+  Actions default to fully visible reported geometry; no implicit exact-match preference.
 - `take_screenshot` accepts `package_name` to wait for that app and warns when Tester itself is in front.
 - Dark mode/animation changes need `adb shell pm grant com.vlad.mcpserver android.permission.WRITE_SECURE_SETTINGS`; `health_check` reports which special accesses are granted.
 - `touch_test` failures explain the likely cause (no window, transition, screen off).

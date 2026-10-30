@@ -47,6 +47,20 @@ class YamlRouteTest {
     }
 
     @Test
+    fun scopedSelectorsRemainNativeAndRejectEphemeralReferences() {
+        val route = YamlRouteParser.parse(source(
+            "- tap: {resource_id: open, within: {resource_id: project_beta}, visibility: fully_visible}\n" +
+                "- input_text: {class_name: EditText, within: {content_desc: Project}, text: hello}"
+        ))
+        assertEquals("project_beta", route.steps.first().arguments.getValue("within").jsonObject
+            .getValue("resource_id").jsonPrimitive.content)
+        assertEquals("fully_visible", route.steps.first().arguments.getValue("visibility").jsonPrimitive.content)
+        assertFailsWith<IllegalArgumentException> {
+            YamlRouteParser.parse(source("- tap: {element_ref: ephemeral}"))
+        }
+    }
+
+    @Test
     fun textChecksUseTheNativePredicateWithoutSelectorRewriting() {
         val route = YamlRouteParser.parse(source(
             """- assert: {condition: text, resource_id: title, expected: Projects}"""
@@ -83,7 +97,9 @@ class YamlRouteTest {
         val invalid = listOf(
             "- back: {}\n- unknown: {}",
             "- tap: {index: 4}",
-            "- tap: {text: Open, within: {text: Project}}",
+            "- tap: {text: Open, within: {index: 4}}",
+            "- tap: {text: Open, within: {}}",
+            "- tap: {text: Open, visibility: guessed}",
             "- tap: {text_exact: true}",
             "- delay: {milliseconds: 5001}",
             "- delay: {milliseconds: -1}",

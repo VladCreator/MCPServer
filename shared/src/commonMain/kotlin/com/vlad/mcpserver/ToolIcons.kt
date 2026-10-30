@@ -58,6 +58,7 @@ fun toolIcon(name: String): ImageVector = when (name) {
     "scroll" -> Icons.Rounded.SwipeVertical
     "global_action" -> Icons.Rounded.Navigation
     "ui_find" -> Icons.Rounded.Search
+    "observe_screen" -> Icons.Rounded.Search
     "ui_wait" -> Icons.Rounded.Timer
     "ui_assert" -> Icons.Rounded.Rule
     "ui_diff" -> Icons.Rounded.Compare

@@ -41,7 +41,7 @@ internal object YamlRouteParser {
     private val name = Regex("[A-Za-z][A-Za-z0-9_.-]{0,79}")
     private val packageName = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     private val reference = Regex("""\$\{([A-Za-z][A-Za-z0-9_.-]{0,79})\}""")
-    private val selectors = setOf("text", "resource_id", "content_desc", "class_name", "text_exact")
+    private val selectors = setOf("text", "resource_id", "content_desc", "class_name", "text_exact", "within", "visibility")
 
     fun parse(source: String, supplied: JsonObject = JsonObject(emptyMap())): YamlRoute {
         require(source.length in 1..32768) { "Route YAML must contain 1..32768 characters." }
@@ -108,8 +108,8 @@ internal object YamlRouteParser {
         }
         val allowed = when (command) {
             "tap" -> selectors + "long_press"
-            "input_text" -> setOf("resource_id", "content_desc", "match_text", "text")
-            "scroll" -> setOf("direction", "text", "resource_id", "content_desc")
+            "input_text" -> selectors + setOf("match_text")
+            "scroll" -> selectors + setOf("direction")
             "wait", "assert" -> selectors + setOf("condition", "expected", "timeout_ms")
             "delay" -> setOf("milliseconds")
             else -> emptySet()
@@ -122,18 +122,31 @@ internal object YamlRouteParser {
                 }
                 "timeout_ms" -> args.integer(key, 250..30000)
                 "milliseconds" -> args.integer(key, 0..5000)
+                "within" -> {
+                    val container = value.obj("within")
+                    container.keysOnly(setOf("text", "text_exact", "resource_id", "content_desc", "class_name"))
+                    require(container.keys.any { it != "text_exact" }) { "within requires a container identity." }
+                    container.forEach { (field, entry) ->
+                        if (field == "text_exact") require(entry is JsonPrimitive && !entry.isString &&
+                            entry.booleanOrNull != null) { "text_exact must be a boolean." }
+                        else container.string(field)
+                    }
+                }
+                "visibility" -> require(args.string(key) in setOf("accessibility", "intersecting", "fully_visible")) {
+                    "Invalid visibility policy."
+                }
                 else -> args.string(key, allowEmpty = (key == "text" && command == "input_text") ||
                     (key == "expected" && command in setOf("wait", "assert")))
             }
         }
         fun requireSelector() {
-            require(args.keys.any { it in selectors - "text_exact" }) { "$command requires a selector." }
+            require(args.keys.any { it in selectors - setOf("text_exact", "visibility") }) { "$command requires a selector." }
         }
         when (command) {
             "tap" -> requireSelector()
             "input_text" -> {
                 args.string("text", allowEmpty = true)
-                require(args.keys.any { it in setOf("resource_id", "content_desc", "match_text") }) {
+                require(args.keys.any { it in setOf("resource_id", "content_desc", "match_text", "class_name", "within") }) {
                     "input_text requires an explicit field selector."
                 }
             }

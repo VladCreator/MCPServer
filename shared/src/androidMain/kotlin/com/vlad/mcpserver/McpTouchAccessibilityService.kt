@@ -8,6 +8,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Accessibility service used by the touch and screen navigation MCP tools.
@@ -23,7 +24,23 @@ class McpTouchAccessibilityService : AccessibilityService() {
         current = this
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    val windowGeneration = AtomicLong(System.nanoTime())
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
+        if (event.eventType in setOf(
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            ) || (event.windowId == rootInActiveWindow?.windowId && event.eventType in setOf(
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_SCROLLED,
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_CLICKED,
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                AccessibilityEvent.TYPE_VIEW_SELECTED,
+                AccessibilityEvent.TYPE_VIEW_FOCUSED
+            ))) windowGeneration.incrementAndGet()
+    }
 
     override fun onInterrupt() = Unit
 

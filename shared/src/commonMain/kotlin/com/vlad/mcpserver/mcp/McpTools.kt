@@ -212,11 +212,27 @@ object McpTools {
         requirement = "MCP Touch Service; unavailable on secure screens"
     )
 
+    val observeScreen: ToolDefinition = ToolDefinition(
+        name = "observe_screen",
+        description = "Observe the foreground Android window: bounded accessibility nodes with session-bound " +
+            "element_ref values, visible bounds, window generation, package, rotation, dimensions and timestamps. " +
+            "Tree-only by default; optional screenshot includes scaling and explicit capture failure. " +
+            "Capture is not atomic; unstable observations have no actionable references. References expire " +
+            "after 30 seconds, a new observation by this session, UI changes or an action. No DOM/OCR fallback.",
+        inputSchema = schema(emptyList()) {
+            putJsonObject("include_screenshot") { put("type", "boolean"); put("description", "Default false") }
+            putJsonObject("max_nodes") { put("type", "integer"); put("description", "Default 300, max 1000") }
+            putJsonObject("max_dimension") { put("type", "integer"); put("description", "Image longest side, 320-2400") }
+        },
+        sensitive = true,
+        requirement = "MCP Touch Service; secure windows deny image capture"
+    )
+
     val clickElement: ToolDefinition = ToolDefinition(
         name = "click_element",
         description = "Click (or long-press) a UI element." + SELECTOR_HINT +
             " If several elements match and neither index nor nth is given, nothing is clicked " +
-            "and the candidates are listed (unless exactly one matches the text exactly). Elements " +
+            "and an ambiguity error is returned. Use within to scope to an ancestor container. Elements " +
             "without a click action are tapped at their center.",
         inputSchema = schema(emptyList()) {
             selectorProperties()
@@ -437,6 +453,8 @@ object McpTools {
                 }
             }
             qaSelectorProperties()
+            putJsonObject("element_ref") { put("type", "string"); put("description", "Session-bound observation reference instead of a selector") }
+            putJsonObject("nth") { put("type", "integer"); put("description", "Explicit 0-based match") }
             putJsonObject("x") { put("type", "number") }
             putJsonObject("y") { put("type", "number") }
             putJsonObject("to_x") { put("type", "number") }
@@ -578,7 +596,8 @@ object McpTools {
         deviceState,
         uiDiff,
         runRoute,
-        getCapabilities
+        getCapabilities,
+        observeScreen
     )
 
     fun available(): List<ToolDefinition> = all.filter { it.available }
@@ -608,6 +627,7 @@ object McpTools {
     fun isSensitive(name: String): Boolean = all.firstOrNull { it.name == name }?.sensitive == true
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.qaSelectorProperties() {
+        targetingProperties()
         putJsonObject("index") { put("type", "integer"); put("description", "Index from the last get_screen_tree") }
         putJsonObject("text") { put("type", "string"); put("description", "Visible text (partial, case-insensitive)") }
         putJsonObject("resource_id") { put("type", "string"); put("description", "View id, full or suffix") }
@@ -626,10 +646,15 @@ object McpTools {
         textKey: String = "text",
         textDescription: String = "Visible text of the element (case-insensitive, partial match)"
     ) {
+        targetingProperties(includeReference = true)
+        putJsonObject("class_name") { put("type", "string"); put("description", "Simple or full class name") }
+        putJsonObject("text_exact") { put("type", "boolean") }
+        putJsonObject("nth") { put("type", "integer"); put("description", "Explicit 0-based match; otherwise actions require uniqueness") }
         putJsonObject("index") {
             put("type", "integer")
             put("description", "Element index from the last get_screen_tree result")
         }
+
         putJsonObject(textKey) {
             put("type", "string")
             put("description", textDescription)
@@ -641,6 +666,29 @@ object McpTools {
         putJsonObject("content_desc") {
             put("type", "string")
             put("description", "Accessibility description (case-insensitive, partial match)")
+        }
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.targetingProperties(includeReference: Boolean = false) {
+        if (includeReference) putJsonObject("element_ref") {
+            put("type", "string")
+            put("description", "Opaque reference from observe_screen/ui_find; cannot combine with selectors")
+        }
+        putJsonObject("within") {
+            put("type", "object")
+            put("description", "Match an ancestor container, not a sibling label. Use container resource_id or content_desc.")
+            putJsonObject("properties") {
+                for (field in listOf("text", "resource_id", "content_desc", "class_name")) {
+                    putJsonObject(field) { put("type", "string") }
+                }
+                putJsonObject("text_exact") { put("type", "boolean") }
+            }
+            put("additionalProperties", false)
+        }
+        putJsonObject("visibility") {
+            put("type", "string")
+            putJsonArray("enum") { add("accessibility"); add("intersecting"); add("fully_visible") }
+            put("description", "Find/check default accessibility; actions default fully_visible. Bounds cannot establish overlay occlusion.")
         }
     }
 

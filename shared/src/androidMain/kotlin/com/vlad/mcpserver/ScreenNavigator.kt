@@ -17,7 +17,7 @@ import kotlin.math.roundToInt
  * Criteria used to locate a UI element. [index] refers to the numbering of
  * the last [ScreenNavigator.dumpTree] call; the other fields are matched
  * against the live screen (text and description are case-insensitive
- * "contains" matches, exact matches win).
+ * "contains" matches). Action callers enforce unique resolution separately.
  */
 data class NodeSelector(
     val index: Int? = null,
@@ -29,11 +29,13 @@ data class NodeSelector(
     val nth: Int = 0,
     val includeInvisible: Boolean = false,
     val requireEnabled: Boolean? = null,
-    val requireClickable: Boolean? = null
+    val requireClickable: Boolean? = null,
+    val within: NodeSelector? = null,
+    val visibility: String = "accessibility"
 ) {
     val isEmpty: Boolean
         get() = index == null && text == null && resourceId == null && contentDescription == null &&
-            className == null
+            className == null && within == null
 
     override fun toString(): String = listOfNotNull(
         index?.let { "index=$it" },
@@ -41,6 +43,7 @@ data class NodeSelector(
         resourceId?.let { "resource_id=$it" },
         contentDescription?.let { "content_desc=\"$it\"" },
         className?.let { "class_name=$it" },
+        within?.let { "within=($it)" },
         if (nth > 0) "nth=$nth" else null
     ).joinToString(", ")
 }
@@ -50,7 +53,9 @@ data class Screenshot(
     val width: Int,
     val height: Int,
     val screenWidth: Int,
-    val screenHeight: Int
+    val screenHeight: Int,
+    val originX: Int = 0,
+    val originY: Int = 0
 )
 
 /**
@@ -105,13 +110,14 @@ object ScreenNavigator {
     fun find(service: AccessibilityService, selector: NodeSelector): AccessibilityNodeInfo? {
         selector.index?.let { index ->
             val node = lastNodes.getOrNull(index) ?: return null
-            return if (node.refresh() && node.isVisibleToUser) node else null
+            return if (node.refresh() && selectorVisible(node, selector, service)) node else null
         }
         val root = service.rootInActiveWindow ?: return null
         val candidates = mutableListOf<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo) {
             if (!selector.includeInvisible && !node.isVisibleToUser) return
-            if (matches(node, selector)) candidates += node
+            if (matches(node, selector) && within(node, selector.within) &&
+                selectorVisible(node, selector, service)) candidates += node
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let(::visit)
             }
@@ -133,13 +139,14 @@ object ScreenNavigator {
     ): List<AccessibilityNodeInfo> {
         selector.index?.let { index ->
             val node = lastNodes.getOrNull(index) ?: return emptyList()
-            return if (node.refresh() && (selector.includeInvisible || node.isVisibleToUser)) listOf(node) else emptyList()
+            return if (node.refresh() && selectorVisible(node, selector, service)) listOf(node) else emptyList()
         }
         if (root == null) return emptyList()
         val candidates = mutableListOf<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo) {
             if (!selector.includeInvisible && !node.isVisibleToUser) return
-            if (matches(node, selector)) candidates += node
+            if (matches(node, selector) && within(node, selector.within) &&
+                selectorVisible(node, selector, service)) candidates += node
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let(::visit)
             }
@@ -149,6 +156,88 @@ object ScreenNavigator {
     }
 
     fun bounds(node: AccessibilityNodeInfo): Rect = Rect().also(node::getBoundsInScreen)
+
+    private fun selectorVisible(node: AccessibilityNodeInfo, selector: NodeSelector, service: AccessibilityService): Boolean =
+        (selector.includeInvisible && selector.visibility == "accessibility") ||
+            visibleByPolicy(node, selector.visibility, service)
+
+    fun visibleBounds(node: AccessibilityNodeInfo, service: AccessibilityService): Rect {
+        val metrics = service.resources.displayMetrics
+        val visible = bounds(node)
+        if (!visible.intersect(0, 0, metrics.widthPixels, metrics.heightPixels)) visible.setEmpty()
+        var parent = node.parent
+        var depth = 0
+        while (parent != null && depth++ < 100 && !visible.isEmpty) {
+            if (!visible.intersect(bounds(parent))) visible.setEmpty()
+            parent = parent.parent
+        }
+        return visible
+    }
+
+    fun visibleByPolicy(node: AccessibilityNodeInfo, policy: String, service: AccessibilityService): Boolean {
+        if (policy == "accessibility") return node.isVisibleToUser
+        val visible = visibleBounds(node, service)
+        return node.isVisibleToUser && !visible.isEmpty &&
+            (policy == "intersecting" || (visible == bounds(node) && !reportsClipping(node)))
+    }
+
+    @Suppress("DEPRECATION")
+    fun reportsClipping(node: AccessibilityNodeInfo): Boolean {
+        // Android may already clip screen/window bounds. Parent-local geometry can
+        // still reveal lost extent; missing geometry is not proof of no clipping.
+        val local = Rect().also(node::getBoundsInParent)
+        val screen = bounds(node)
+        return local.width() > screen.width() || local.height() > screen.height()
+    }
+
+    private fun within(node: AccessibilityNodeInfo, container: NodeSelector?): Boolean {
+        if (container == null) return true
+        var ancestor = node.parent
+        var depth = 0
+        while (ancestor != null && depth++ < 100) {
+            if (matches(ancestor, container)) return true
+            ancestor = ancestor.parent
+        }
+        return false
+    }
+
+    data class TreeNode(val node: AccessibilityNodeInfo, val path: List<Int>)
+    data class TreeSnapshot(val nodes: List<TreeNode>, val allNodes: List<TreeNode>, val truncated: Boolean, val webViews: Int,
+                            val readableWebViews: Int)
+
+    fun snapshot(root: AccessibilityNodeInfo, maxNodes: Int): TreeSnapshot {
+        val nodes = mutableListOf<TreeNode>()
+        val allNodes = mutableListOf<TreeNode>()
+        var truncated = false
+        var webViews = 0
+        var readableWebViews = 0
+        var visited = 0
+        fun visit(node: AccessibilityNodeInfo, path: List<Int>, insideWeb: Boolean): Boolean {
+            if (visited++ >= 5000 || path.size > 100 || nodes.size >= maxNodes) {
+                truncated = true
+                return false
+            }
+            val web = node.className?.toString() == "android.webkit.WebView"
+            allNodes += TreeNode(node, path)
+            if (web) webViews++
+            if (node.isVisibleToUser && (isMeaningful(node) || web)) nodes += TreeNode(node, path)
+            var readable = insideWeb && node.isVisibleToUser && isMeaningful(node)
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { if (visit(it, path + i, insideWeb || web)) readable = true }
+                if (truncated) break
+            }
+            if (web && readable) readableWebViews++
+            return readable
+        }
+        visit(root, emptyList(), false)
+        return TreeSnapshot(nodes, allNodes, truncated, webViews, readableWebViews)
+    }
+
+    fun atPath(root: AccessibilityNodeInfo, path: List<Int>): AccessibilityNodeInfo? {
+        var current = root
+        for (index in path) current = current.getChild(index) ?: return null
+        return current
+    }
 
     /** True when the node is clickable or exposes ACTION_CLICK (common in MAUI/Flutter/RN views). */
     fun hasClickAction(node: AccessibilityNodeInfo, longPress: Boolean = false): Boolean {
@@ -160,13 +249,13 @@ object ScreenNavigator {
     /**
      * Clicks [node] and returns how it was done, or null on failure. Order: the node's own
      * click action; a clickable ancestor of about the same size; a real tap on the node's
-     * center (so a non-clickable child is not "clicked" through a large container); finally
-     * any clickable ancestor.
+     * visible center. Large unrelated ancestors are never used as a fallback.
      */
     suspend fun click(
         service: McpTouchAccessibilityService,
         node: AccessibilityNodeInfo,
-        longPress: Boolean
+        longPress: Boolean,
+        container: NodeSelector? = null
     ): String? {
         val action = if (longPress) {
             AccessibilityNodeInfo.ACTION_LONG_CLICK
@@ -179,12 +268,14 @@ object ScreenNavigator {
         while (ancestor != null && !hasClickAction(ancestor, longPress)) {
             ancestor = ancestor.parent
         }
-        val rect = bounds(node)
+        val rect = visibleBounds(node, service)
         val nodeArea = rect.width().toLong() * rect.height()
         if (ancestor != null && nodeArea > 0) {
             val parentRect = bounds(ancestor)
             val parentArea = parentRect.width().toLong() * parentRect.height()
-            if (parentArea <= nodeArea * SAME_SIZE_FACTOR && ancestor.performAction(action)) {
+            if (parentArea <= nodeArea * SAME_SIZE_FACTOR &&
+                (container == null || matches(ancestor, container) || within(ancestor, container)) &&
+                ancestor.performAction(action)) {
                 return "clickable ancestor"
             }
         }
@@ -196,7 +287,6 @@ object ScreenNavigator {
         ) {
             return "tap gesture at (${rect.centerX()}, ${rect.centerY()})"
         }
-        if (ancestor != null && ancestor.performAction(action)) return "clickable ancestor (large)"
         return null
     }
 
@@ -211,6 +301,26 @@ object ScreenNavigator {
             node.getChild(i)?.let { child -> editableTarget(service, child)?.let { return it } }
         }
         return null
+    }
+
+    fun editableTargets(node: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        if (node.isEditable) return listOf(node)
+        val results = mutableListOf<AccessibilityNodeInfo>()
+        fun visit(current: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 100 || results.size >= 2 || !current.isVisibleToUser) return
+            if (current.isEditable) results += current
+            else for (i in 0 until current.childCount) current.getChild(i)?.let { visit(it, depth + 1) }
+        }
+        visit(node, 0)
+        if (results.isEmpty()) {
+            var parent = node.parent
+            var depth = 0
+            while (parent != null && depth++ < 100) {
+                if (parent.isEditable && parent.isVisibleToUser) return listOf(parent)
+                parent = parent.parent
+            }
+        }
+        return results
     }
 
     fun setText(node: AccessibilityNodeInfo, text: String): Boolean {
@@ -292,12 +402,15 @@ object ScreenNavigator {
         return if (swiped) "swipe gesture" else null
     }
 
-    suspend fun takeScreenshot(service: AccessibilityService, maxDimension: Int): Result<Screenshot> {
+    suspend fun takeScreenshot(service: AccessibilityService, maxDimension: Int, windowId: Int? = null): Result<Screenshot> {
+        val windowBounds = Rect()
+        if (windowId != null) {
+            val window = service.windows.firstOrNull { it.id == windowId }
+                ?: return Result.failure(IllegalStateException("Observed window is no longer available."))
+            window.getBoundsInScreen(windowBounds)
+        }
         val bitmap = suspendCancellableCoroutine { cont ->
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                service.mainExecutor,
-                object : AccessibilityService.TakeScreenshotCallback {
+            val callback = object : AccessibilityService.TakeScreenshotCallback {
                     override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
                         val buffer = result.hardwareBuffer
                         val copy = runCatching {
@@ -315,7 +428,8 @@ object ScreenNavigator {
                         cont.resume(Result.failure(IllegalStateException(screenshotError(errorCode))))
                     }
                 }
-            )
+            if (windowId != null) service.takeScreenshotOfWindow(windowId, service.mainExecutor, callback)
+            else service.takeScreenshot(Display.DEFAULT_DISPLAY, service.mainExecutor, callback)
         }.getOrElse { return Result.failure(it) }
 
         val screenWidth = bitmap.width
@@ -335,7 +449,8 @@ object ScreenNavigator {
             scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream)
             stream.toByteArray()
         }
-        val result = Screenshot(bytes, scaled.width, scaled.height, screenWidth, screenHeight)
+        val result = Screenshot(bytes, scaled.width, scaled.height, screenWidth, screenHeight,
+            windowBounds.left, windowBounds.top)
         scaled.recycle()
         return Result.success(result)
     }
