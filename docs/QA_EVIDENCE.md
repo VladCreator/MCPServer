@@ -5,8 +5,11 @@ The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 No sandbox path copying, ADB, broad storage permission or cloud account is needed.
 Refresh the card after collecting evidence; it also refreshes on returning to Tester.
 Evidence is grouped by calendar day in the device's time zone, newest first.
+All days start collapsed: tap a date to expand or collapse its complete file list.
+Each date shows its file count; all dates are available in the scrollable list.
 View/Open and Share sit beside each filename; the source and local time appear
-underneath the name.
+underneath the name. Compact rows include file-type icons for images, videos,
+PDFs, structured data and text reports.
 
 ## What appears
 

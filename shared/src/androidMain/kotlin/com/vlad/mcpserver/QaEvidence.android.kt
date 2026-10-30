@@ -4,8 +4,10 @@ import android.content.ClipData
 import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -16,9 +18,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,10 +44,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
@@ -66,7 +82,7 @@ actual fun QaEvidenceCard(modifier: Modifier) {
     var loading by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var revision by remember { mutableStateOf(0) }
-    var showAll by remember { mutableStateOf(false) }
+    var expandedDays by remember { mutableStateOf(emptySet<LocalDate>()) }
     var preview by remember { mutableStateOf<EvidencePreview?>(null) }
     var transfer by remember { mutableStateOf<EvidenceTransfer?>(null) }
 
@@ -140,33 +156,55 @@ actual fun QaEvidenceCard(modifier: Modifier) {
                 Text("No saved evidence yet. Finish a QA session or retain a run artifact. Inline-only screenshots and host reports are not stored here.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                groupEvidenceByDay(if (showAll) entries else entries.take(4)).forEach { (day, evidence) ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                groupEvidenceByDay(entries).forEach { (day, evidence) ->
+                    val expanded = day in expandedDays
                     item(key = "day:$day") {
-                        Text(day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 8.dp))
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+                                .clickable(
+                                    role = Role.Button,
+                                    onClickLabel = if (expanded) "Collapse day" else "Expand day"
+                                ) {
+                                    expandedDays = if (expanded) expandedDays - day else expandedDays + day
+                                }
+                                .heightIn(min = 48.dp)
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                contentDescription = null, modifier = Modifier.size(20.dp))
+                            Text(day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f))
+                            Text("${evidence.size}", style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    items(evidence, key = { it.id }) { item ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (expanded) items(evidence, key = { it.id }) { item ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(evidenceIcon(item.mime), contentDescription = item.mime,
+                                modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Column(Modifier.weight(1f)) {
                                 Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text("${item.origin} | ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(item.created))}",
                                     style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
-                            TextButton(onClick = { view(item) }, enabled = !busy) {
+                            TextButton(onClick = { view(item) }, enabled = !busy,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
                                 Text(if (isEvidenceText(item.mime) || item.mime.startsWith("image/")) "View" else "Open")
                             }
-                            TextButton(onClick = { transfer = EvidenceTransfer(item, share = true) }, enabled = !busy) {
+                            TextButton(onClick = { transfer = EvidenceTransfer(item, share = true) }, enabled = !busy,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
                                 Text("Share")
                             }
                         }
                     }
                 }
-            }
-            if (entries.size > 4) TextButton(onClick = { showAll = !showAll }) {
-                Text(if (showAll) "Show less" else "Show all (${entries.size})")
             }
         }
     }
@@ -225,6 +263,15 @@ actual fun QaEvidenceCard(modifier: Modifier) {
 
 internal fun isEvidenceText(mime: String): Boolean =
     mime.startsWith("text/") || mime in setOf("application/json", "application/xml")
+
+internal fun evidenceIcon(mime: String): ImageVector = when {
+    mime.startsWith("image/") -> Icons.Rounded.Image
+    mime.startsWith("video/") -> Icons.Rounded.VideoFile
+    mime.startsWith("audio/") -> Icons.Rounded.AudioFile
+    mime == "application/pdf" -> Icons.Rounded.PictureAsPdf
+    mime in setOf("application/json", "application/xml", "text/xml") -> Icons.Rounded.Code
+    else -> Icons.Rounded.Description
+}
 
 internal fun groupEvidenceByDay(
     entries: List<QaEvidence>,
