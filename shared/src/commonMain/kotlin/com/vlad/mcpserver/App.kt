@@ -81,6 +81,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -133,7 +136,6 @@ fun App(viewModel: AppViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
     var showConnection by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
-    var showAllLogs by remember { mutableStateOf(false) }
 
     val copy: (String, String) -> Unit = { _, value ->
         clipboardManager.setText(AnnotatedString(value))
@@ -257,8 +259,6 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ActivityCard(
                                         logs = executionLogs,
-                                        showAll = showAllLogs,
-                                        onToggleAll = { showAllLogs = !showAllLogs },
                                         modifier = Modifier.weight(1f)
                                     )
                                     QaEvidenceCard(Modifier.weight(1f))
@@ -266,9 +266,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ActivityCard(
-                                        logs = executionLogs,
-                                        showAll = showAllLogs,
-                                        onToggleAll = { showAllLogs = !showAllLogs }
+                                        logs = executionLogs
                                     )
                                     QaEvidenceCard(Modifier.fillMaxWidth())
                                 }
@@ -924,13 +922,11 @@ private fun AgentRow(title: String, subtitle: String, dotSize: Int = 6) {
 @Composable
 private fun ActivityCard(
     logs: List<ToolExecutionLog>,
-    showAll: Boolean,
-    onToggleAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    val sorted = logs.sortedByDescending { it.timestamp }
-    val visible = groupActivityByDay(if (showAll) sorted else sorted.take(4))
+    val groups = groupActivityByDay(logs)
+    var expandedDays by remember { mutableStateOf(emptySet<LocalDate?>()) }
     OutlinedCard(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -950,39 +946,21 @@ private fun ActivityCard(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f)
                 )
-                if (logs.size > 4) {
-                    TextButton(onClick = onToggleAll) {
-                        Text(
-                            text = if (showAll) "Show less" else "Show all",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                }
             }
             if (logs.isEmpty()) {
                 Text("No activity yet.", style = MaterialTheme.typography.bodySmall)
             }
-            if (showAll) {
-                Text(
-                    text = "${logs.size} recent activities · Scroll to browse history",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant
-                )
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                    visible.forEach { (day, dayLogs) ->
-                        item(key = "day:$day") { ActivityDayHeader(day) }
-                        items(dayLogs, key = { it.id }) { log ->
-                            ActivityRow(log)
-                            HorizontalDivider(color = colors.outlineVariant)
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                groups.forEach { (day, dayLogs) ->
+                    val expanded = day in expandedDays
+                    item(key = "day:$day") {
+                        ActivityDayHeader(day, dayLogs.size, expanded) {
+                            expandedDays = if (expanded) expandedDays - day else expandedDays + day
                         }
                     }
-                }
-            } else {
-                visible.forEach { (day, dayLogs) ->
-                    ActivityDayHeader(day)
-                    dayLogs.forEachIndexed { index, log ->
-                        ActivityRow(log)
-                        if (index < dayLogs.lastIndex) {
+                    if (expanded) {
+                        items(dayLogs, key = { it.id }) { log ->
+                            ActivityRow(log)
                             HorizontalDivider(color = colors.outlineVariant)
                         }
                     }
@@ -993,13 +971,34 @@ private fun ActivityCard(
 }
 
 @Composable
-private fun ActivityDayHeader(day: LocalDate?) {
-    Text(
-        text = day?.toString() ?: "Unknown date",
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
-    )
+private fun ActivityDayHeader(day: LocalDate?, count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+            .clickable(
+                role = Role.Button,
+                onClickLabel = if (expanded) "Collapse day" else "Expand day",
+                onClick = onToggle
+            )
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            text = day?.toString() ?: "Unknown date",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f)
+        )
+        Text("$count", style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 internal fun groupActivityByDay(

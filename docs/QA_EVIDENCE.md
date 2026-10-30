@@ -2,8 +2,11 @@
 
 The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 640 dp or more. Narrow screens stack the two cards to keep their contents usable.
-Activity also groups entries by local calendar day, with explicit date headers
-above the per-entry times in both the recent preview and expanded history.
+Activity also groups entries by local calendar day, newest first. Each date starts
+collapsed and shows its activity count; tap it to expand or collapse that day's
+entries. All retained activity dates are available in the scrollable list,
+replacing the four-entry preview and Show all control. Individual activity rows
+still expand separately to show arguments and results.
 No sandbox path copying, ADB, broad storage permission or cloud account is needed.
 Refresh the card after collecting evidence; it also refreshes on returning to Tester.
 Evidence is grouped by calendar day in the device's time zone, newest first.
