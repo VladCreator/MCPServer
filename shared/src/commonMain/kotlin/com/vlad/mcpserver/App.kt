@@ -100,7 +100,6 @@ import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.ToolDefinition
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -942,8 +941,7 @@ private fun ActivityCard(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    val groups = groupActivityByDay(logs)
-    var expandedDays by remember { mutableStateOf(emptySet<LocalDate?>()) }
+    val orderedLogs = activityLogsInSequence(logs)
     OutlinedCard(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -968,70 +966,17 @@ private fun ActivityCard(
                 Text("No activity yet.", style = MaterialTheme.typography.bodySmall)
             }
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                groups.forEach { (day, dayLogs) ->
-                    val expanded = day in expandedDays
-                    item(key = "day:$day") {
-                        ActivityDayHeader(day, dayLogs.size, expanded) {
-                            expandedDays = if (expanded) expandedDays - day else expandedDays + day
-                        }
-                    }
-                    if (expanded) {
-                        dayLogs.groupBy { it.flowId }.forEach { (flowId, flowLogs) ->
-                            item(key = "flow:$day:$flowId") {
-                                Text("${flowLabel(flowId)} (${flowLogs.size})",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.primary,
-                                    modifier = Modifier.padding(vertical = 4.dp))
-                            }
-                            items(flowLogs, key = { it.id }) { log ->
-                                ActivityRow(log)
-                                HorizontalDivider(color = colors.outlineVariant)
-                            }
-                        }
-                    }
+                items(orderedLogs, key = { it.id }) { log ->
+                    ActivityRow(log)
+                    HorizontalDivider(color = colors.outlineVariant)
                 }
             }
         }
     }
 }
 
-@Composable
-private fun ActivityDayHeader(day: LocalDate?, count: Int, expanded: Boolean, onToggle: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
-            .clickable(
-                role = Role.Button,
-                onClickLabel = if (expanded) "Collapse day" else "Expand day",
-                onClick = onToggle
-            )
-            .heightIn(min = 48.dp)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(
-            imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp)
-        )
-        Text(
-            text = day?.toString() ?: "Unknown date",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1f)
-        )
-        Text("$count", style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-internal fun groupActivityByDay(
-    logs: List<ToolExecutionLog>,
-    zone: TimeZone = TimeZone.currentSystemDefault()
-): Map<LocalDate?, List<ToolExecutionLog>> = logs.sortedByDescending { it.timestamp }.groupBy {
-    if (it.timestamp <= 0L) null else Instant.fromEpochMilliseconds(it.timestamp).toLocalDateTime(zone).date
-}
+internal fun activityLogsInSequence(logs: List<ToolExecutionLog>): List<ToolExecutionLog> =
+    logs.sortedWith(compareByDescending<ToolExecutionLog> { it.timestamp }.thenByDescending { it.id })
 
 @Composable
 private fun ActivityRow(log: ToolExecutionLog) {
@@ -1069,13 +1014,20 @@ private fun ActivityRow(log: ToolExecutionLog) {
                     modifier = Modifier.size(15.dp)
                 )
             }
-            Text(
-                text = log.toolName,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = log.toolName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = flowLabel(log.flowId),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.primary,
+                    maxLines = 1
+                )
+            }
             Text(
                 text = formatLogTime(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,

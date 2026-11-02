@@ -10,6 +10,7 @@ import os
 import time
 import unittest
 import secrets
+import json
 from unittest.mock import patch
 
 import test_android_agent_mcp as native
@@ -36,11 +37,13 @@ class AndroidTargetingTests(unittest.TestCase):
 
     def setUp(self):
         self.ok("launch_app", {"package_name": self.package})
-        # A previous scroll can hide the header without leaving the cards screen.
-        self.ok("scroll", {"direction": "up"})
         self.idle()
         # Leave any previous fixture sub-screen without relying on process resets.
         for _ in range(4):
+            scrolled = self.call("scroll", {"direction": "up"})
+            if scrolled["isError"]:
+                self.assertEqual("no_scroll_target", scrolled.get("structuredContent", {}).get("reason"), scrolled)
+            self.idle()
             visible = self.ok("ui_find", {"text": "Synthetic cards fixture", "text_exact": True})
             if visible["structuredContent"]["count"]:
                 break
@@ -176,7 +179,7 @@ steps:
         self.assert_text("status", "Opened Beta")
 
     def test_bounded_tree_only_observation_is_explicit(self):
-        result = self.ok("observe_screen", {"max_nodes": 2})
+        result = self.ok("observe_screen", {"max_nodes": 2, "detail": "full"})
         observation = result["structuredContent"]
         self.assertEqual(2, len(observation["nodes"]))
         self.assertTrue(observation["truncated"])
@@ -185,18 +188,121 @@ steps:
         self.assertTrue(all("path" in node and "node_index" in node for node in observation["nodes"]))
 
     def test_partial_visibility_is_explicit_and_not_actionable_by_default(self):
-        found = self.ok("ui_find", {"resource_id": "clipped"})["structuredContent"]
+        found = self.ok("ui_find", {"resource_id": "clipped", "detail": "full"})["structuredContent"]
         self.assertEqual(1, found["count"])
         node = found["matches"][0]
         self.assertTrue(node["viewport_intersecting"])
         self.assertFalse(node["fully_visible"])
         self.assertFalse(node["occlusion_known"])
-        self.rejects("click_element", {"resource_id": "clipped"}, "not_actionable")
-        self.rejects("ui_gesture", {"type": "tap", "resource_id": "clipped"}, "not_actionable")
+        self.rejects("click_element", {"resource_id": "clipped"}, "reported_clipping")
+        self.rejects("ui_gesture", {"type": "tap", "resource_id": "clipped"}, "reported_clipping")
         none = self.ok("ui_find", {"resource_id": "clipped", "visibility": "fully_visible"})
         self.assertEqual(0, none["structuredContent"]["count"])
         self.ok("click_element", {"resource_id": "clipped", "visibility": "intersecting"})
         self.assert_text("status", "Clipped clicked")
+
+    def test_compact_output_is_bounded_and_not_duplicated(self):
+        self.ok("qa_session", {"action": "begin", "test_case": "Compact synthetic output"})
+        try:
+            for tool, args, budget in (
+                ("ui_find", {"resource_id": "missing_synthetic_id", "limit": 1}, 2048),
+                ("observe_screen", {"max_nodes": 80}, 24 * 1024),
+                ("observe_screen", {"max_nodes": 80, "detail": "full"}, 64 * 1024),
+            ):
+                result = self.ok(tool, args)
+                wire = json.dumps({"jsonrpc": "2.0", "id": 9223372036854775807,
+                                   "result": result}, ensure_ascii=False, separators=(",", ":")).encode()
+                self.assertLessEqual(len(wire), budget)
+                self.assertIn("flow_id", result["structuredContent"])
+                self.assertFalse(any(c.get("text", "").startswith("{") for c in result["content"]))
+        finally:
+            self.ok("qa_session", {"action": "end", "result": "PASS"})
+
+    def reliability_screen(self, name, settle=True):
+        self.ok("scroll", {"direction": "down"})
+        self.ok("click_element", {"text": "Show reliability", "text_exact": True})
+        self.idle()
+        self.ok("click_element", {"text": f"Show {name}", "text_exact": True})
+        if settle:
+            self.idle()
+
+    def test_cancel_eligibility_and_disabled_rejection(self):
+        self.reliability_screen("search")
+        found = self.ok("ui_find", {"resource_id": "search_cancel", "visibility": "fully_visible"})
+        node = found["structuredContent"]["matches"][0]
+        self.assertTrue(node["actionable"])
+        self.ok("click_element", {"element_ref": node["element_ref"]})
+        self.assert_text("status", "My projects")
+        rejected = self.rejects("click_element", {"resource_id": "disabled_cancel"}, "disabled")
+        self.assertIn("disabled", rejected["structuredContent"]["failed_checks"])
+        self.assert_text("status", "My projects")
+
+    def test_drawer_scroll_reports_target_and_observed_movement(self):
+        self.reliability_screen("drawer")
+        home = self.ok("ui_find", {"resource_id": "home_anchor"})["structuredContent"]["matches"][0]["bounds"]
+        self.idle()
+        boundary = self.call("scroll", {"direction": "up", "resource_id": "drawer", "verify_movement": True})
+        self.assertTrue(boundary["isError"], boundary)
+        self.assertTrue(boundary["structuredContent"]["action_dispatched"])
+        self.assertEqual("not_observed", boundary["structuredContent"]["movement_status"])
+        self.idle()
+        for method in ("auto", "gesture"):
+            result = self.ok("scroll", {"direction": "down", "resource_id": "drawer",
+                                      "method": method, "verify_movement": True})["structuredContent"]
+            self.assertEqual("observed", result["movement_status"])
+            self.assertTrue(result["target"]["resource_id"].endswith(":id/drawer"))
+            self.assertTrue(result["action_dispatched"])
+            self.idle()
+            after = self.ok("ui_find", {"resource_id": "home_anchor"})["structuredContent"]["matches"][0]["bounds"]
+            self.assertEqual(home, after)
+
+    def test_transient_tree_recovers_without_an_image(self):
+        self.reliability_screen("delayed")
+        self.ok("click_element", {"text": "Empty then populate", "text_exact": True})
+        self.ok("ui_wait", {"condition": "absent", "text": "Empty then populate",
+                           "text_exact": True, "package_name": self.package, "timeout_ms": 1000})
+        result = self.ok("get_screen_tree", {"max_nodes": 80})
+        self.assertEqual("available", result["structuredContent"]["state"])
+        self.assertLessEqual(result["structuredContent"]["attempts"], 3)
+        self.assertIn("Delayed readable content", result["content"][-1]["text"])
+        self.assertFalse(any(c["type"] == "image" for c in result["content"]))
+
+    def test_route_scroll_uses_the_same_target_verification(self):
+        self.reliability_screen("drawer")
+        home = self.ok("ui_find", {"resource_id": "home_anchor"})["structuredContent"]["matches"][0]["bounds"]
+        self.idle()
+        self.ok("run_route", {"yaml": f"""schema_version: 1
+id: reliability.drawer
+platform: android
+app_id: {self.package}
+steps:
+  - scroll: {{direction: down, resource_id: drawer, method: gesture, verify_movement: true}}
+"""})
+        self.idle()
+        after = self.ok("ui_find", {"resource_id": "home_anchor"})["structuredContent"]["matches"][0]["bounds"]
+        self.assertEqual(home, after)
+
+    def test_custom_labels_and_dynamic_shortcuts_require_fresh_discovery(self):
+        self.reliability_screen("dynamic")
+        self.assert_text("custom_title", "Log Information")
+        self.assert_text("shortcut", "SUBMITTALS")
+        self.ok("click_element", {"text": "Refresh shortcuts", "text_exact": True})
+        self.assert_text("shortcut", "TEAM MEMBERS")
+        wrong = self.call("ui_wait", {"condition": "text", "resource_id": "custom_title",
+                                     "expected": "Log Contents", "timeout_ms": 250})
+        self.assertTrue(wrong["isError"])
+        self.assertEqual("text_mismatch", wrong["structuredContent"]["reason"])
+
+    def test_back_dispatch_is_verified_against_actual_destination(self):
+        self.reliability_screen("viewer")
+        self.ok("click_element", {"text": "View Properties", "text_exact": True})
+        self.idle()
+        result = self.ok("global_action", {"action": "back"})["structuredContent"]
+        self.assertEqual(1, result["dispatched_count"])
+        self.assertEqual("not_checked", result["destination_status"])
+        self.ok("wait_for_state", {"all": [
+            {"condition": "text", "resource_id": "status", "expected": "Synthetic viewer"}
+        ], "package_name": self.package, "timeout_ms": 2000})
 
     def test_compose_merged_semantics_and_webview_are_reported(self):
         self.ok("click_element", {"text": "Show compose", "text_exact": True})

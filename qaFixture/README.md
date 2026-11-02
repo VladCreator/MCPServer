@@ -16,6 +16,13 @@ so the visibility check must not mistake the clipped rectangle for the full butt
 Buttons open separate Compose merged-semantics, local WebView and FLAG_SECURE screens.
 Back returns to the cards screen.
 
+**Show reliability** opens synthetic right-edge/disabled Cancel, overlapping drawer
+and Home lists, an empty-then-populate tree, customized labels/changing shortcuts,
+and a viewer with a properties dialog. These cases validate Tester contracts;
+they do not reproduce every MAUI/OEM geometry issue or establish ProjectSight's
+Back behavior. Button labels may be exposed in uppercase by Android; assertions
+use the actual accessibility text.
+
 On the Compose screen, the content-description node for the field is a semantic
 child of the editable node. Input resolution can use the nearest editable ancestor;
 text assertions must select the actual EditText because the child has no text.
@@ -35,6 +42,8 @@ These tests change only synthetic app state and foreground navigation. They do n
 install builds, grant permissions or approve tool calls. Per-call confirmation UI
 can itself invalidate observations; explicitly disable it only on a disposable
 test environment when running unattended checks. Never use personal app content.
+Resolve initial Tester permission prompts and keep the owned emulator awake before
+the suite; it does not grant permissions or dismiss unrelated foreground dialogs.
 
 Optional `TESTER_MCP_SECOND_SESSION` enables cross-client reference rejection
 checks; both sessions must already be approved. Set

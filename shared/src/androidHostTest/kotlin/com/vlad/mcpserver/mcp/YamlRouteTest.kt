@@ -12,6 +12,21 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class YamlRouteTest {
+    @Test
+    fun scrollVerificationUsesNativeArgumentsAndRejectsInvalidModes() {
+        val route = YamlRouteParser.parse(source(
+            "- scroll: {direction: down, resource_id: drawer, method: gesture, verify_movement: true}"
+        ))
+        assertEquals("gesture", route.steps.single().arguments["method"]!!.jsonPrimitive.content)
+        assertTrue(route.steps.single().arguments["verify_movement"]!!.jsonPrimitive.boolean)
+        assertFailsWith<IllegalArgumentException> {
+            YamlRouteParser.parse(source("- scroll: {direction: down, method: retry}"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            YamlRouteParser.parse(source("- scroll: {direction: down, verify_movement: 'true'}"))
+        }
+    }
+
     private fun source(steps: String, extra: String = "") = """
         schema_version: 1
         id: navigation.race

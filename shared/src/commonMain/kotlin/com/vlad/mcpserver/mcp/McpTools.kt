@@ -222,11 +222,13 @@ object McpTools {
             "element_ref values, visible bounds, window generation, package, rotation, dimensions and timestamps. " +
             "Tree-only by default; optional screenshot includes scaling and explicit capture failure. " +
             "Capture is not atomic; unstable observations have no actionable references. References expire " +
-            "after 30 seconds, a new observation by this session, UI changes or an action. No DOM/OCR fallback.",
+            "after 30 seconds, a new observation by this session, UI changes or an action. No DOM/OCR fallback. " +
+            "Compact structuredContent is authoritative; text is a summary. Full detail adds paths and geometry. Output is byte-bounded.",
         inputSchema = schema(emptyList()) {
             putJsonObject("include_screenshot") { put("type", "boolean"); put("description", "Default false") }
             putJsonObject("max_nodes") { put("type", "integer"); put("description", "Default 300, max 1000") }
             putJsonObject("max_dimension") { put("type", "integer"); put("description", "Image longest side, 320-2400") }
+            observationDetailProperty()
         },
         sensitive = true,
         requirement = "MCP Touch Service; secure windows deny image capture"
@@ -279,7 +281,8 @@ object McpTools {
     val scroll: ToolDefinition = ToolDefinition(
         name = "scroll",
         description = "Scroll to reveal content in the given direction ('down' shows content " +
-            "below). Without a selector, the largest scrollable area is used." + SELECTOR_HINT,
+            "below). Without a selector, the largest scrollable area is used." + SELECTOR_HINT +
+            " Success means dispatch, not proven movement. Android supports bounded target-local verification and explicit gesture mode.",
         required = listOf("direction"),
         inputSchema = schema(listOf("direction")) {
             putJsonObject("direction") {
@@ -287,6 +290,13 @@ object McpTools {
                 putJsonArray("enum") { SCROLL_DIRECTIONS.forEach { add(it) } }
             }
             selectorProperties()
+            putJsonObject("method") {
+                put("type", "string"); putJsonArray("enum") { add("auto"); add("gesture") }
+                put("description", "Android only: auto tries accessibility then visible-target gesture; gesture dispatches one swipe")
+            }
+            putJsonObject("verify_movement") {
+                put("type", "boolean"); put("description", "Android only: observe target-local anchors for at most 1000 ms; default false")
+            }
         },
         sensitive = true,
         requirement = "MCP Touch Service enabled"
@@ -294,7 +304,8 @@ object McpTools {
 
     val globalAction: ToolDefinition = ToolDefinition(
         name = "global_action",
-        description = "Perform a system navigation action (back, home...), optionally repeated with a pause. Requires MCP Touch Service.",
+        description = "Perform a system navigation action (back, home...), optionally repeated with a pause. Requires MCP Touch Service. " +
+            "Success reports dispatch, not an exit destination; verify the actual screen afterward.",
         required = listOf("action"),
         inputSchema = schema(listOf("action")) {
             putJsonObject("action") {
@@ -394,12 +405,14 @@ object McpTools {
         name = "ui_find",
         description = "Find all visible UI elements matching a selector. Returns count and JSON matches with text, " +
             "content description, resource id, class, bounds and flags. match_index is the value to pass as nth to " +
-            "click_element (it stays absolute when nth is given here). Use instead of pulling the whole tree.",
+            "click_element (it stays absolute when nth is given here). Use instead of pulling the whole tree. " +
+            "Compact structuredContent is authoritative; text is a summary. Full detail adds geometry. Output is byte-bounded.",
         inputSchema = schema(emptyList()) {
             qaSelectorProperties(includeIndex = false)
             putJsonObject("nth") { put("type", "integer"); put("description", "Skip this many leading matches") }
             putJsonObject("include_invisible") { put("type", "boolean"); put("description", "Include invisible nodes (default false)") }
-            putJsonObject("limit") { put("type", "integer"); put("description", "Max matches (default 20, max 100)") }
+            putJsonObject("limit") { put("type", "integer"); put("description", "Upper bound on matches (default 20, max 100); byte budget may return fewer, explicitly truncated") }
+            observationDetailProperty()
         },
         requirement = "MCP Touch Service enabled"
     )
@@ -804,6 +817,14 @@ object McpTools {
     fun find(name: String): ToolDefinition? = available().firstOrNull { it.name == name }
 
     fun isSensitive(name: String): Boolean = all.firstOrNull { it.name == name }?.sensitive == true
+
+    private fun JsonObjectBuilder.observationDetailProperty() {
+        putJsonObject("detail") {
+            put("type", "string")
+            putJsonArray("enum") { add("compact"); add("full") }
+            put("description", "Default compact; full includes diagnostic geometry/paths. Parse structuredContent, not summary text.")
+        }
+    }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.qaSelectorProperties(includeIndex: Boolean = true) {
         targetingProperties()

@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.3.0** (Android QA Evidence browser and sharing; P5 authenticated loopback run Viewer; recording deferred; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.3.1** (Activity history is shown in sequence with per-entry flow IDs; Android QA Evidence browser and sharing; P5 authenticated loopback run Viewer; recording deferred; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 **QA Evidence** now appears beside Activity on wide screens (stacked on phones).
 View saved reports and images in Tester, or explicitly share/open evidence with
@@ -85,6 +85,10 @@ prioritizes tool correctness, reliable observations, evidence, environment setup
 and reusable scenarios. The [earlier QA roadmap](docs/QA_RELIABILITY_PLAN.md)
 retains design details and device-validation findings. Both distinguish existing
 tools from proposed capabilities.
+
+The [Android agent reliability follow-up](docs/ANDROID_AGENT_RELIABILITY_PLAN.md)
+addresses duplicated output, actionability diagnostics, scroll targeting and
+transient empty trees, with reproduction and release gates.
 
 ## UI
 
@@ -241,15 +245,15 @@ icon in the header (**Tools**).
 | `list_apps` | Available | Lists launchable apps (name + package), optional `query` filter. |
 | `health_check` | Available | Cheap probe: server time, uptime, version, Touch Service state. Use it to verify the connection and retry the transport on failure. |
 | `launch_app` | Available (foreground, overlay or accessibility) | Launches an installed app by `package_name` or visible `app_name` (ambiguous names return candidates). From the background it requires **Display over other apps** (Settings → Device access) or **MCP Touch Service** (Android background activity-start restrictions). Waits until the app is in the foreground and its UI settled (`wait_ms`, default 8000, 0 disables). |
-| `get_screen_tree` | Available (accessibility) | Returns the foreground app's UI as indented text: index, class, text, description, resource id, bounds and flags. Preferred way for an AI to "see" the screen. |
+| `get_screen_tree` | Available (accessibility) | Compact text tree with enabled/geometry eligibility. Empty/unstable snapshots get up to three read-only captures within a 1-second recovery budget; persistent failures are explicit. |
 | `take_screenshot` | Available (accessibility) | Captures the screen as a JPEG (`max_dimension`, default 1280). Fallback for games, maps or canvas UIs. Fails on `FLAG_SECURE` screens. |
-| `click_element` | Available (accessibility) | Clicks or long-presses an element by `index` (from the last tree), `text`, `resource_id`, `content_desc` or `class_name`; `text_exact` avoids partial matches (an exact match wins among several partial ones). Elements without a click action (e.g. MAUI) are tapped at their center. |
+| `click_element` | Available (accessibility) | Clicks/long-presses a fresh selector or session-bound reference. `text_exact` avoids partial matches; ambiguity requires `within` or explicit `nth`. Legacy tree indices remain supported. Enabled/visibility checks apply before accessibility or tap fallback. |
 | `input_text` | Available (accessibility) | Sets the text of an editable field (focused field or selector via `match_text`/`index`/`resource_id`/`content_desc`); optional `submit`. |
-| `scroll` | Available (accessibility) | Scrolls `up`/`down`/`left`/`right` on the largest or selected scrollable element. |
-| `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. |
+| `scroll` | Available (accessibility) | Dispatches on the largest or selected target and returns identity/bounds. Optional `method: gesture` stays inside visible target bounds; `verify_movement: true` checks target-local anchors for up to 1 second. Unobserved/unknown movement fails verification without repeating the action. |
+| `global_action` | Available (accessibility) | `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`. Success reports dispatch count, not a verified exit destination. |
 | `qa_session` | Available (QA pack) | Begin/step/status/end a QA case; end restores owned touched fields using `state_key` and fails the report if cleanup fails. |
-| `ui_find` | Available (QA pack) | Find all matching elements with flags/bounds; returns JSON count and matches; `match_index` equals the `nth` used by `click_element`. |
-| `observe_screen` | Available (Android) | Correlated accessibility observation with session-bound references and optional window screenshot; explicit timestamps, instability and capture errors. |
+| `ui_find` | Available (QA pack) | Canonical `structuredContent` with count/matches; text is a short summary, not duplicate JSON. `detail: compact` is default; `full` adds geometry. `match_index` equals action `nth`; `returned_count`, `count_lower_bound` and truncation distinguish capped results from exact totals. |
+| `observe_screen` | Available (Android) | Byte-bounded canonical `structuredContent` with references and optional screenshot. Default `detail: compact`; `full` adds paths/geometry. Explicit capture times, instability, `returned_count`, `byte_truncated` and `omitted_count`. |
 | `ui_wait` | Available (QA pack) | Wait for visible/absent/text/idle with timeout; `idle` with `package_name` also waits for that app to be in front (no false positive during launch). |
 | `ui_assert` | Available (QA pack) | Assert visible/absent/text/count; failure returns screenshot + tree excerpt. |
 | `ui_gesture` | Available (QA pack) | tap, double_tap, multi_tap, long_press, swipe, drag, pinch; selector or coordinates. |
@@ -262,9 +266,20 @@ icon in the header (**Tools**).
 | `clipboard` | Conditional (Android) | Foreground consented write/read-owned/clear-owned plain text; never snapshot unrelated clipboard contents. |
 | `get_test_environment` | Available (Android) | Inspect target permission flags and available app-locale override; explain unsupported privileged setup. |
 
-Recommended navigation loop for agents: `get_screen_tree` → `click_element` /
-`input_text` / `scroll` → `get_screen_tree` again; use `take_screenshot` only when
-the tree is empty or ambiguous.
+Recommended navigation loop: tree-only `observe_screen` or scoped `ui_find` →
+selector/reference action → `wait_for_state` to verify the destination. Parse
+`structuredContent`; clients that previously parsed JSON from observation text must
+migrate to this canonical object. Full detail still has a byte cap. Node limits
+are upper bounds; inspect truncation before asserting completeness.
+
+Clickable does not imply enabled, fully visible or overlay-free. Actions report
+specific failed checks and dispatch nothing when preflight fails; coordinate taps
+are not a workaround for disabled controls. Use stable IDs plus ancestor context,
+learn actual customized labels on first visits, reinspect changing shortcuts/recents,
+and use the full menu for currently exposed modules. Verify actual Back/cancel
+destinations instead of assuming a single panel closes. Try bounded accessibility
+observation before requesting an optional screenshot for an empty tree; screenshots
+do not resolve selector ambiguity.
 
 Sensitive tools (`read_file`, `take_photo`, `touch_test`, `launch_app`, all
 screen navigation tools, `ui_gesture`, `audio_instruction`, `device_state`,

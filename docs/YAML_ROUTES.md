@@ -85,7 +85,7 @@ Empty arguments use `{}`.
 | `launch_app` | `{}`; launches `app_id` with idle waiting disabled. Add an explicit idle wait when needed. |
 | `tap` | At least one of `resource_id`, `text`, `content_desc`, `class_name`, `within`; optional `text_exact`, `long_press`, `visibility`. Requires exactly one match. |
 | `input_text` | Required `text`; explicit field selector using `resource_id`, `content_desc`, `match_text`, `class_name` and/or `within`; optional `text_exact`, `visibility`. Replaces text, supports an empty string, does not submit. Requires a unique match and editable target. |
-| `scroll` | Required `direction: up/down/left/right`; optional selector including `within`, `class_name`, `text_exact`, `visibility`. A supplied selector must be unique; without one, uses the existing primary scrollable-area behavior. |
+| `scroll` | Required `direction: up/down/left/right`; optional selector including `within`, `class_name`, `text_exact`, `visibility`, plus `method: auto/gesture` and boolean `verify_movement`. Reports the target and dispatch method. Verification observes target-local anchors for up to 1 second; unobserved/unknown movement fails the step without dispatching another action. |
 | `back` | `{}`; one Android Back action. |
 | `delay` | Required integer `milliseconds`, 0..5000. No implicit idle wait before/after. |
 | `wait` | Required `condition: visible/absent/text/idle`; selector except for idle; optional `expected` and `timeout_ms` (250..30000). Idle waits specifically for `app_id`. |

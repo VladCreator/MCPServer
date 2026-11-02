@@ -925,16 +925,67 @@ class AndroidToolExecutor(
         return "'$label' at (${rect.centerX()}, ${rect.centerY()})"
     }
 
-    private fun screenTree(arguments: JsonObject): ToolResult {
+    private suspend fun screenTree(arguments: JsonObject): ToolResult {
         val service = touchService() ?: return touchServiceMissing()
         val maxNodes = (arguments.int("max_nodes") ?: DEFAULT_TREE_NODES).coerceIn(1, MAX_TREE_NODES)
-        val tree = ScreenNavigator.dumpTree(service, maxNodes)
-            ?: return ToolResult(
-                "No active window is available. If the service was just updated, turn " +
-                    "'MCP Touch Service' off and on again in Accessibility settings.",
-                isError = true
-            )
-        return ToolResult(tree)
+        val started = SystemClock.elapsedRealtime()
+        val deadline = started + 1000
+        val initialRoot = service.rootInActiveWindow
+        var initialPackage = initialRoot?.packageName?.toString()
+        var initialWindow = initialRoot?.windowId
+        var attempts = 0
+        var tree: String? = null
+        var state = "no_window"
+        for (attempt in 0 until 3) {
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                state = "timed_out"
+                break
+            }
+            if (attempt > 0) {
+                delay(minOf(200L, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)))
+                if (SystemClock.elapsedRealtime() >= deadline) {
+                    state = "timed_out"
+                    break
+                }
+            }
+            attempts++
+            val root = service.rootInActiveWindow
+            if (initialPackage != null && (root?.packageName?.toString() != initialPackage || root?.windowId != initialWindow)) {
+                state = "window_changed"
+                break
+            }
+            if (root != null && initialPackage == null) {
+                initialPackage = root.packageName?.toString()
+                initialWindow = root.windowId
+            }
+            val generation = service.windowGeneration.get()
+            val snapshot = root?.let { ScreenNavigator.snapshot(it, maxNodes, deadline) }
+            tree = ScreenNavigator.dumpTree(service, maxNodes, root, deadline)
+            val after = service.rootInActiveWindow
+            state = when {
+                SystemClock.elapsedRealtime() >= deadline -> "timed_out"
+                root == null -> "no_window"
+                generation != service.windowGeneration.get() || after?.windowId != root.windowId ||
+                    after?.packageName != root.packageName -> "unstable"
+                snapshot?.nodes?.any { ScreenNavigator.isMeaningful(it.node) } != true -> "empty_readable_tree"
+                else -> "available"
+            }
+            if (state == "available") {
+                return ToolResult(tree.orEmpty(), structuredContent = buildJsonObject {
+                    put("state", state); put("attempts", attempts)
+                    put("elapsed_ms", SystemClock.elapsedRealtime() - started)
+                })
+            }
+        }
+        ScreenNavigator.clearLegacyNodes()
+        return ToolResult(
+            if (state == "empty_readable_tree") tree.orEmpty()
+            else "Accessibility snapshot unavailable: $state. Use observe_screen or accessibility diagnostics before optional screenshots.",
+            isError = true, structuredContent = buildJsonObject {
+                put("state", state); put("attempts", attempts)
+                put("elapsed_ms", SystemClock.elapsedRealtime() - started)
+                put("retryable", state in setOf("no_window", "unstable", "empty_readable_tree", "timed_out"))
+            })
     }
 
     private suspend fun screenshot(arguments: JsonObject): ToolResult {
@@ -1015,10 +1066,7 @@ class AndroidToolExecutor(
                 isError = true
             )
         if (field == null) return targetingError("no_match", "The matched element is not an editable field.")
-        if (!field.isEnabled || !ScreenNavigator.visibleByPolicy(field,
-                arguments.string("visibility") ?: "fully_visible", service)) {
-            return targetingError("not_actionable", "The field is disabled or fails the visibility policy.")
-        }
+        eligibilityError(field, arguments.string("visibility") ?: "fully_visible", service)?.let { return it }
         if (!ScreenNavigator.setText(field, text)) {
             return ToolResult("The field rejected the text.", isError = true)
         }
@@ -1049,9 +1097,64 @@ class AndroidToolExecutor(
             val target = resolveTarget(clientId, service, arguments, selector)
             target.node ?: return target.error!!
         }
-        val method = ScreenNavigator.scroll(service, node, direction!!)
+        if (node == null) return targetingError("no_scroll_target", "No visible scrollable target; nothing was dispatched.")
+        eligibilityError(node, arguments.string("visibility") ?: "fully_visible", service)?.let { return it }
+        val root = service.rootInActiveWindow ?: return targetingError("no_window", "No active window.")
+        val targetWindow = observationWindow(service, root)
+        val targetPath = ScreenNavigator.snapshot(root, MAX_TREE_NODES).allNodes.firstOrNull { it.node == node }?.path
+        val before = if (arguments.bool("verify_movement")) ScreenNavigator.scrollAnchors(node) else emptyMap()
+        val identity = nodeJson(0, node, service, full = true)
+        val originalBounds = ScreenNavigator.bounds(node)
+        if (targetWindow != observationWindow(service, service.rootInActiveWindow) || !node.refresh() ||
+            node.windowId != targetWindow.windowId || node.packageName?.toString() != targetWindow.packageName) {
+            return targetingError("stale_reference", "Scroll target/window changed; nothing was dispatched.")
+        }
+        eligibilityError(node, arguments.string("visibility") ?: "fully_visible", service)?.let { return it }
+        val method = ScreenNavigator.scroll(service, node, direction!!, arguments.string("method") == "gesture")
             ?: return ToolResult("Unable to scroll $direction.", isError = true)
-        return ToolResult("Scrolled $direction using $method.")
+        var movement = "not_checked"
+        if (arguments.bool("verify_movement")) {
+            movement = "unknown"
+            val deadline = SystemClock.elapsedRealtime() + 1000
+            while (SystemClock.elapsedRealtime() < deadline) {
+                delay(100)
+                val liveRoot = service.rootInActiveWindow
+                // Scrolling changes generation; membership and the target path must still agree.
+                if (liveRoot == null || observationWindow(service, liveRoot).copy(generation = targetWindow.generation) != targetWindow ||
+                    targetPath == null || ScreenNavigator.atPath(liveRoot, targetPath) != node || !node.refresh() ||
+                    ScreenNavigator.bounds(node) != originalBounds) {
+                    movement = "unknown"
+                    break
+                }
+                val after = ScreenNavigator.scrollAnchors(node)
+                val comparable = before.keys.filter { before[it]?.first == after[it]?.first }
+                if (comparable.isNotEmpty()) {
+                    val moved = comparable.any { path ->
+                        val old = before.getValue(path).second
+                        val new = after.getValue(path).second
+                        when (direction) {
+                            "down" -> new.top < old.top
+                            "up" -> new.top > old.top
+                            "right" -> new.left < old.left
+                            else -> new.left > old.left
+                        }
+                    }
+                    movement = if (moved) "observed" else "not_observed"
+                    if (moved) break
+                } else movement = "unknown"
+            }
+        }
+        return ToolResult("Scroll $direction dispatched using $method; target movement=$movement.",
+            isError = arguments.bool("verify_movement") && movement != "observed",
+            structuredContent = buildJsonObject {
+                put("action_dispatched", true); put("movement_status", movement)
+                put("method", method); put("direction", direction)
+                put("target", identity)
+                put("selection_method", if (selector.isEmpty && arguments.string("element_ref") == null)
+                    "largest_scrollable_area" else if (arguments.string("element_ref") != null) "element_ref" else "selector")
+                put("window_id", targetWindow.windowId)
+                put("verification_basis", "target_local_matching_child_geometry; overlays and accessibility routing may be unknown")
+            })
     }
 
     private suspend fun globalAction(arguments: JsonObject): ToolResult {
@@ -1082,7 +1185,11 @@ class AndroidToolExecutor(
             done++
             if (i < count - 1) delay(interval)
         }
-        return ToolResult("Performed global action '$name' x$done.")
+        return ToolResult("Dispatched global action '$name' x$done; verify the actual destination.",
+            structuredContent = buildJsonObject {
+                put("action_dispatched", true); put("dispatched_count", done)
+                put("destination_status", "not_checked")
+            })
     }
 
 
@@ -1160,16 +1267,23 @@ class AndroidToolExecutor(
             put("unstable", !stable)
             put("truncated", matches.size >= limit || snapshot.truncated)
             put("count", matches.size)
-            put("selector", selector.toString())
+            put("selector", selector.toString().take(300))
+            put("selector_truncated", selector.toString().length > 300)
             putJsonArray("matches") {
                 matches.forEachIndexed { index, node ->
                     val ref = if (paths[index] != null) recorded.second[referenceIndex++] else null
-                    add(JsonObject(nodeJson(selector.nth.coerceAtLeast(0) + index, node, service) +
+                    add(JsonObject(nodeJson(selector.nth.coerceAtLeast(0) + index, node, service,
+                        full = arguments.string("detail") == "full") +
                         if (ref != null && stable) mapOf("element_ref" to JsonPrimitive(ref)) else emptyMap()))
                 }
             }
         }
-        return ToolResult(payload.toString(), structuredContent = payload)
+        val bounded = ObservationOutput.bound(payload, "matches", arguments.string("detail") == "full")
+        val result = JsonObject(bounded + mapOf(
+            "count" to bounded.getValue("returned_count"),
+            "count_lower_bound" to JsonPrimitive(matches.size)
+        ))
+        return ToolResult(ObservationOutput.summary("ui_find", result), structuredContent = result)
     }
 
     private suspend fun uiWait(arguments: JsonObject): ToolResult {
@@ -1599,24 +1713,33 @@ class AndroidToolExecutor(
         return if (total == 0L) 0f else different * 100f / total
     }
 
-    private fun nodeJson(index: Int, node: AccessibilityNodeInfo, service: McpTouchAccessibilityService): JsonObject {
+    private fun nodeJson(index: Int, node: AccessibilityNodeInfo, service: McpTouchAccessibilityService, full: Boolean = true): JsonObject {
         val rect = ScreenNavigator.bounds(node)
         val visible = ScreenNavigator.visibleBounds(node, service)
         val inWindow = android.graphics.Rect().also(node::getBoundsInWindow)
+        @Suppress("DEPRECATION")
+        val inParent = android.graphics.Rect().also(node::getBoundsInParent)
         return buildJsonObject {
             put("match_index", index)
             if (node.isPassword) {
                 put("text", "<password>")
             } else {
                 node.text?.takeIf { it.isNotBlank() }?.let { put("text", it.toString().take(200)) }
+                if ((node.text?.length ?: 0) > 200) put("text_truncated", true)
             }
             node.contentDescription?.takeIf { it.isNotBlank() }?.let {
                 put("content_desc", it.toString().take(200))
+                if (it.length > 200) put("content_desc_truncated", true)
             }
-            node.viewIdResourceName?.let { put("resource_id", it) }
-            node.className?.toString()?.let { put("class", it) }
+            node.viewIdResourceName?.let { put("resource_id", it.take(200)) }
+            node.className?.toString()?.let { put("class", it.take(100)) }
             put("bounds", "[${rect.left},${rect.top}][${rect.right},${rect.bottom}]")
             put("bounds_in_window", "[${inWindow.left},${inWindow.top}][${inWindow.right},${inWindow.bottom}]")
+            put("bounds_in_parent", "[${inParent.left},${inParent.top}][${inParent.right},${inParent.bottom}]")
+            put("window_id", node.windowId)
+            put("window_generation", service.windowGeneration.get())
+            put("screen_width", service.resources.displayMetrics.widthPixels)
+            put("screen_height", service.resources.displayMetrics.heightPixels)
             putJsonObject("visible_bounds") {
                 put("left", visible.left); put("top", visible.top)
                 put("right", visible.right); put("bottom", visible.bottom)
@@ -1626,8 +1749,8 @@ class AndroidToolExecutor(
             put("fully_visible", ScreenNavigator.visibleByPolicy(node, "fully_visible", service))
             put("reported_clipping", ScreenNavigator.reportsClipping(node))
             put("visibility_basis", "reported_accessibility_geometry; original extent and overlays may be unknown")
-            put("actionable", node.isEnabled && ScreenNavigator.visibleByPolicy(node, "fully_visible", service) &&
-                (ScreenNavigator.hasClickAction(node) || node.isEditable || node.isScrollable))
+            put("actionable", ScreenNavigator.eligibility(node, "fully_visible", service).isEmpty())
+            putJsonArray("failed_checks") { ScreenNavigator.eligibility(node, "fully_visible", service).forEach { add(it) } }
             put("occlusion_known", false)
             put("clickable", node.isClickable)
             put("click_action", ScreenNavigator.hasClickAction(node))
@@ -1636,6 +1759,12 @@ class AndroidToolExecutor(
             put("selected", node.isSelected)
             put("editable", node.isEditable)
             put("scrollable", node.isScrollable)
+        }.let { payload ->
+            if (full) payload else JsonObject(payload.filterKeys { it in setOf(
+                "match_index", "text", "content_desc", "resource_id", "class", "bounds", "enabled",
+                "fully_visible", "actionable", "clickable", "editable", "scrollable", "failed_checks",
+                "occlusion_known", "text_truncated", "content_desc_truncated"
+            ) })
         }
     }
 
@@ -1653,6 +1782,21 @@ class AndroidToolExecutor(
     )
 
     private fun validateTargeting(toolName: String, arguments: JsonObject) {
+        if (toolName in setOf("observe_screen", "ui_find")) arguments["detail"]?.let {
+            require(it is JsonPrimitive && it.isString && it.content in setOf("compact", "full")) {
+                "detail must be compact or full."
+            }
+        }
+        if (toolName == "scroll") {
+            arguments["method"]?.let {
+                require(it is JsonPrimitive && it.isString && it.content in setOf("auto", "gesture")) {
+                    "method must be auto or gesture."
+                }
+            }
+            arguments["verify_movement"]?.let {
+                require(it is JsonPrimitive && !it.isString && it.booleanOrNull != null) { "verify_movement must be a boolean." }
+            }
+        }
         val environmentFields = when (toolName) {
             "device_state" -> setOf("action", "state_key", "rotation", "dark_mode", "font_scale", "animations", "volume", "keep_awake")
             "open_link" -> setOf("package_name", "uri", "wait_ms")
@@ -1720,6 +1864,18 @@ class AndroidToolExecutor(
         }
     )
 
+    private fun eligibilityError(node: AccessibilityNodeInfo, policy: String, service: McpTouchAccessibilityService): ToolResult? {
+        val failures = ScreenNavigator.eligibility(node, policy, service)
+        if (failures.isEmpty()) return null
+        return ToolResult("Element rejected: ${failures.joinToString()}; visibility=$policy. Nothing was dispatched.",
+            isError = true, structuredContent = buildJsonObject {
+                put("reason", failures.first()); put("action_dispatched", false); put("retryable", false)
+                put("visibility_policy", policy)
+                putJsonArray("failed_checks") { failures.forEach { add(it) } }
+                put("target", nodeJson(0, node, service))
+            })
+    }
+
     private fun observationWindow(service: McpTouchAccessibilityService, root: AccessibilityNodeInfo?): ObservationWindow {
         val metrics = service.resources.displayMetrics
         val display = context.getSystemService(android.hardware.display.DisplayManager::class.java)
@@ -1765,12 +1921,11 @@ class AndroidToolExecutor(
         if (window != observationWindow(service, service.rootInActiveWindow) || !node.refresh()) {
             return Target(error = targetingError("stale_reference", "Window changed during resolution; observe again."))
         }
-        if (!node.isEnabled || ScreenNavigator.visibleBounds(node, service).isEmpty || !ScreenNavigator.visibleByPolicy(node,
-                arguments.string("visibility") ?: "fully_visible", service)) {
-            return Target(error = targetingError("not_actionable", "Element is disabled or fails the visibility policy."))
-        }
         if (node.windowId != root.windowId || node.packageName != root.packageName) {
             return Target(error = targetingError("stale_reference", "Element does not belong to the active window."))
+        }
+        eligibilityError(node, arguments.string("visibility") ?: "fully_visible", service)?.let {
+            return Target(error = it)
         }
         return Target(node)
     }
@@ -1786,9 +1941,10 @@ class AndroidToolExecutor(
         val treeAt = System.currentTimeMillis()
         val fingerprints = tree.nodes.map { ReferencedNode(it.node, it.path, fingerprint(it.node)) }
         val nodePayloads = tree.nodes.mapIndexed { index, item -> buildJsonObject {
-            nodeJson(index, item.node, service).filterKeys { it != "match_index" }.forEach { (key, value) -> put(key, value) }
+            nodeJson(index, item.node, service, full = arguments.string("detail") == "full")
+                .filterKeys { it != "match_index" }.forEach { (key, value) -> put(key, value) }
             put("node_index", index)
-            putJsonArray("path") { item.path.forEach { add(it) } }
+            if (arguments.string("detail") == "full") putJsonArray("path") { item.path.forEach { add(it) } }
         } }
         val shot = if (arguments.bool("include_screenshot")) captureScreenshot(service,
             (arguments.int("max_dimension") ?: DEFAULT_SCREENSHOT_DIMENSION)
@@ -1843,9 +1999,10 @@ class AndroidToolExecutor(
                 }
             }
         }
-        return ToolResult(payload.toString(), isError = shot?.isFailure == true,
+        val bounded = ObservationOutput.bound(payload, "nodes", arguments.string("detail") == "full")
+        return ToolResult(ObservationOutput.summary("observe_screen", bounded), isError = shot?.isFailure == true,
             imageBase64 = shot?.getOrNull()?.let { java.util.Base64.getEncoder().encodeToString(it.jpegBytes) },
-            imageMimeType = if (shot?.isSuccess == true) "image/jpeg" else null, structuredContent = payload)
+            imageMimeType = if (shot?.isSuccess == true) "image/jpeg" else null, structuredContent = bounded)
     }
 
     private suspend fun waitForState(arguments: JsonObject): ToolResult {
@@ -2006,7 +2163,7 @@ class AndroidToolExecutor(
             buildJsonObject { put("reason", "wrong_package") })
         else {
             captureSource("observation") {
-                val observation = observeScreen(owner, buildJsonObject { put("max_nodes", 200) })
+                val observation = observeScreen(owner, buildJsonObject { put("max_nodes", 200); put("detail", "full") })
                 check(!observation.isError) { "Observed window became unavailable." }
                 val raw = observation.structuredContent!!
                 check(raw.string("foreground_package") == pkg) { "Observed package changed." }

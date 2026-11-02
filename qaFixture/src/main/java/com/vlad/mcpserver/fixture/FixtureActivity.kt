@@ -1,8 +1,10 @@
 package com.vlad.mcpserver.fixture
 
+import android.app.Dialog
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.view.Gravity
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.Button
@@ -85,7 +87,7 @@ class FixtureActivity : ComponentActivity() {
                     id = R.id.clipped
                 }, FrameLayout.LayoutParams(dp(240), dp(90)))
             }, LinearLayout.LayoutParams(dp(240), dp(30)))
-            for (screen in listOf("compose", "webview", "secure")) {
+            for (screen in listOf("compose", "webview", "secure", "reliability")) {
                 column.addView(button("Show $screen") {
                     startActivity(Intent(this, FixtureActivity::class.java).putExtra("screen", screen))
                 }.apply { if (screen == "compose") id = R.id.show_compose })
@@ -93,6 +95,63 @@ class FixtureActivity : ComponentActivity() {
             column.addView(label("Unicode: café 日本語 😀"))
             column.addView(label("Scrollable synthetic footer"), LinearLayout.LayoutParams(-1, dp(800)))
             column.addView(label("End of synthetic list"))
+        } else if (mode == "reliability") {
+            for (screen in listOf("search", "drawer", "delayed", "dynamic", "viewer")) {
+                column.addView(button("Show $screen") {
+                    startActivity(Intent(this, FixtureActivity::class.java).putExtra("screen", screen))
+                })
+            }
+        } else if (mode == "search") {
+            val status = label("Search results").apply { id = R.id.status }
+            column.addView(status)
+            column.addView(FrameLayout(this).apply {
+                addView(button("Cancel") { status.text = "My projects" }.apply { id = R.id.search_cancel },
+                    FrameLayout.LayoutParams(dp(100), dp(60), Gravity.END))
+            }, LinearLayout.LayoutParams(-1, dp(60)))
+            column.addView(button("Disabled Cancel") { status.text = "Invalid disabled action" }.apply {
+                id = R.id.disabled_cancel
+                isEnabled = false
+            })
+        } else if (mode == "drawer") {
+            fun list(drawer: Boolean) = ScrollView(this).apply {
+                id = if (drawer) R.id.drawer else R.id.home_scroll
+                setBackgroundColor(if (drawer) 0xFFEEEEEE.toInt() else 0xFFFFFFFF.toInt())
+                addView(LinearLayout(this@FixtureActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    for (i in 0 until 30) addView(label(if (drawer) "Drawer item $i" else "Home item $i").apply {
+                        if (i == 4) id = if (drawer) R.id.drawer_anchor else R.id.home_anchor
+                    }, LinearLayout.LayoutParams(-1, dp(60)))
+                })
+            }
+            column.addView(FrameLayout(this).apply {
+                addView(list(false), FrameLayout.LayoutParams(-1, -1))
+                addView(list(true), FrameLayout.LayoutParams(dp(200), -1, Gravity.START))
+            }, LinearLayout.LayoutParams(-1, dp(420)))
+        } else if (mode == "delayed") {
+            val empty = FrameLayout(this)
+            setContentView(empty)
+            empty.addView(button("Empty then populate") {
+                empty.removeAllViews()
+                empty.postDelayed({
+                    if (!isFinishing && !isDestroyed) {
+                        empty.addView(label("Delayed readable content").apply { id = R.id.status })
+                    }
+                }, 300)
+            }, FrameLayout.LayoutParams(-1, dp(60)).apply { topMargin = dp(60) })
+            return
+        } else if (mode == "dynamic") {
+            column.addView(label("Log Information").apply { id = R.id.custom_title })
+            val shortcut = button("Submittals") {}.apply { id = R.id.shortcut }
+            column.addView(shortcut)
+            column.addView(button("Refresh shortcuts") { shortcut.text = "Team members" })
+        } else if (mode == "viewer") {
+            column.addView(label("Synthetic viewer").apply { id = R.id.status })
+            column.addView(button("View Properties") {
+                Dialog(this).apply {
+                    setContentView(label("Synthetic properties"))
+                    show()
+                }
+            })
         } else if (mode == "compose") {
             column.addView(ComposeView(this).apply {
                 setContent {

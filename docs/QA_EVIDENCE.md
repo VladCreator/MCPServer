@@ -1,15 +1,15 @@
-# QA Evidence - 0.3.0
+# QA Evidence - 0.3.1
 
 The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 640 dp or more. Narrow screens stack the two cards to keep their contents usable.
-Activity also groups entries by local calendar day, newest first. Each date starts
-collapsed and shows its activity count; tap it to expand or collapse that day's
-entries. All retained activity dates are available in the scrollable list,
-replacing the four-entry preview and Show all control. Individual activity rows
-still expand separately to show arguments and results.
+Activity entries are shown as one newest-first sequence, without date or flow
+grouping. Every row displays its **Flow #N** or **Unlinked** label beside the tool
+name, so activities from the same flow can be followed across dates. Tied
+timestamps are ordered by descending activity ID. Individual rows expand to show
+arguments and results.
 No sandbox path copying, ADB, broad storage permission or cloud account is needed.
 Refresh the card after collecting evidence; it also refreshes on returning to Tester.
-Evidence is grouped by calendar day in the device's time zone, newest first.
+Evidence files remain grouped by calendar day in the device's time zone, newest first.
 All days start collapsed: tap a date to expand or collapse its complete file list.
 Each date shows its file count; all dates are available in the scrollable list.
 View/Open and Share sit beside each filename; the source and local time appear
@@ -23,9 +23,9 @@ receives a stable local **Flow #N**. IDs are per test/run, not per connection:
 one agent can have many flows. Retrying a deduplicated native submission keeps
 its ID; a route inside a manual QA session gets a separate run ID.
 
-Connected agents show the IDs they originated. Within each expanded day,
-Activity and QA Evidence group records by the same flow ID. Each agent has its
-own manual QA session; its tool calls between begin/end belong to that session.
+Connected agents show the IDs they originated. Each Activity row and QA Evidence
+item displays the same flow ID. Each agent has its own manual QA session; its tool
+calls between begin/end belong to that session.
 Native run operations use their explicitly owned run instead, including async
 runs and later artifact exports. Run steps remain in the native run timeline,
 not duplicated as individual Activity calls.

@@ -4,9 +4,11 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
+import com.vlad.mcpserver.mcp.ActionEligibility
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
@@ -66,28 +68,40 @@ object ScreenNavigator {
     @Volatile
     private var lastNodes: List<AccessibilityNodeInfo> = emptyList()
 
+    fun clearLegacyNodes() {
+        lastNodes = emptyList()
+    }
+
     /**
      * Returns a compact, indented text description of the active window.
      * Only meaningful nodes (text, description or interactive) are listed.
      */
-    fun dumpTree(service: AccessibilityService, maxNodes: Int): String? {
-        val root = service.rootInActiveWindow ?: return null
+    fun dumpTree(service: AccessibilityService, maxNodes: Int, root: AccessibilityNodeInfo? = service.rootInActiveWindow,
+                 deadlineMs: Long = Long.MAX_VALUE): String? {
+        if (root == null) return null
         val nodes = mutableListOf<AccessibilityNodeInfo>()
         val metrics = service.resources.displayMetrics
         val out = StringBuilder()
         out.appendLine("Package: ${root.packageName}")
         out.appendLine("Screen: ${metrics.widthPixels}x${metrics.heightPixels}")
         var truncated = false
+        var visited = 0
 
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
             if (truncated || !node.isVisibleToUser) return
+            if (visited++ >= 5000 || depth > 100 || SystemClock.elapsedRealtime() >= deadlineMs) {
+                truncated = true
+                return
+            }
             var childDepth = depth
             if (isMeaningful(node)) {
                 if (nodes.size >= maxNodes) {
                     truncated = true
                     return
                 }
-                out.append("  ".repeat(depth)).appendLine(describe(nodes.size, node))
+                out.append("  ".repeat(depth)).append(describe(nodes.size, node))
+                val assessment = eligibility(node, "fully_visible", service)
+                out.appendLine(" eligibility=${assessment.firstOrNull() ?: "eligible"}")
                 nodes += node
                 childDepth = depth + 1
             }
@@ -99,7 +113,7 @@ object ScreenNavigator {
         visit(root, 0)
         lastNodes = nodes
         if (nodes.isEmpty()) {
-            out.appendLine("(no readable elements; try take_screenshot)")
+            out.appendLine("(empty readable accessibility snapshot; use observe_screen before optional screenshot capture)")
         }
         if (truncated) {
             out.appendLine("... truncated at $maxNodes elements")
@@ -181,6 +195,31 @@ object ScreenNavigator {
             (policy == "intersecting" || (visible == bounds(node) && !reportsClipping(node)))
     }
 
+    fun eligibility(node: AccessibilityNodeInfo, policy: String, service: AccessibilityService): List<String> {
+        val visible = visibleBounds(node, service)
+        return ActionEligibility.failures(node.isEnabled, node.isVisibleToUser, !visible.isEmpty,
+            visible == bounds(node), reportsClipping(node), policy)
+    }
+
+    /** Only stable target-local child geometry can provide evidence of scrolling. */
+    fun scrollAnchors(node: AccessibilityNodeInfo): Map<List<Int>, Pair<String, Rect>> {
+        val anchors = mutableMapOf<List<Int>, Pair<String, Rect>>()
+        val origin = bounds(node)
+        var visited = 0
+        fun visit(current: AccessibilityNodeInfo, path: List<Int>) {
+            if (visited++ >= 200 || path.size > 20) return
+            if (path.isNotEmpty() && current.isVisibleToUser && isMeaningful(current)) {
+                val rect = bounds(current)
+                rect.offset(-origin.left, -origin.top)
+                anchors[path] = listOf(current.viewIdResourceName, current.className,
+                    if (current.isPassword) "<password>" else current.text, current.contentDescription).joinToString("|") to rect
+            }
+            for (i in 0 until current.childCount) current.getChild(i)?.let { visit(it, path + i) }
+        }
+        visit(node, emptyList())
+        return anchors
+    }
+
     @Suppress("DEPRECATION")
     fun reportsClipping(node: AccessibilityNodeInfo): Boolean {
         // Android may already clip screen/window bounds. Parent-local geometry can
@@ -205,7 +244,7 @@ object ScreenNavigator {
     data class TreeSnapshot(val nodes: List<TreeNode>, val allNodes: List<TreeNode>, val truncated: Boolean, val webViews: Int,
                             val readableWebViews: Int)
 
-    fun snapshot(root: AccessibilityNodeInfo, maxNodes: Int): TreeSnapshot {
+    fun snapshot(root: AccessibilityNodeInfo, maxNodes: Int, deadlineMs: Long = Long.MAX_VALUE): TreeSnapshot {
         val nodes = mutableListOf<TreeNode>()
         val allNodes = mutableListOf<TreeNode>()
         var truncated = false
@@ -213,7 +252,7 @@ object ScreenNavigator {
         var readableWebViews = 0
         var visited = 0
         fun visit(node: AccessibilityNodeInfo, path: List<Int>, insideWeb: Boolean): Boolean {
-            if (visited++ >= 5000 || path.size > 100 || nodes.size >= maxNodes) {
+            if (visited++ >= 5000 || path.size > 100 || nodes.size >= maxNodes || SystemClock.elapsedRealtime() >= deadlineMs) {
                 truncated = true
                 return false
             }
@@ -363,9 +402,10 @@ object ScreenNavigator {
     suspend fun scroll(
         service: McpTouchAccessibilityService,
         node: AccessibilityNodeInfo?,
-        direction: String
+        direction: String,
+        gestureOnly: Boolean = false
     ): String? {
-        if (node != null) {
+        if (node != null && !gestureOnly) {
             val directional = when (direction) {
                 "up" -> AccessibilityAction.ACTION_SCROLL_UP
                 "down" -> AccessibilityAction.ACTION_SCROLL_DOWN
@@ -385,9 +425,7 @@ object ScreenNavigator {
             }
         }
 
-        val metrics = service.resources.displayMetrics
-        val area = node?.let(::bounds)?.takeIf { !it.isEmpty }
-            ?: Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
+        val area = node?.let { visibleBounds(it, service) }?.takeIf { !it.isEmpty } ?: return null
         val cx = area.exactCenterX()
         val cy = area.exactCenterY()
         val dx = area.width() * SWIPE_FRACTION / 2f
@@ -466,7 +504,7 @@ object ScreenNavigator {
         else -> "Internal error ($code)."
     }
 
-    private fun isMeaningful(node: AccessibilityNodeInfo): Boolean =
+    internal fun isMeaningful(node: AccessibilityNodeInfo): Boolean =
         !node.text.isNullOrBlank() ||
             !node.contentDescription.isNullOrBlank() ||
             !node.hintText.isNullOrBlank() ||

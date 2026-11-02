@@ -177,7 +177,7 @@ internal object YamlRouteParser {
         val allowed = when (command) {
             "tap" -> selectors + "long_press"
             "input_text" -> selectors + setOf("match_text")
-            "scroll" -> selectors + setOf("direction")
+            "scroll" -> selectors + setOf("direction", "method", "verify_movement")
             "wait", "assert" -> selectors + setOf("condition", "expected", "timeout_ms")
             "delay" -> setOf("milliseconds")
             "device_state" -> setOf("rotation", "font_scale", "animations", "volume", "keep_awake")
@@ -187,7 +187,7 @@ internal object YamlRouteParser {
         args.keysOnly(allowed)
         args.forEach { (key, value) ->
             when (key) {
-                "text_exact", "long_press", "animations", "keep_awake" -> require(value is JsonPrimitive && !value.isString && value.booleanOrNull != null) {
+                "text_exact", "long_press", "animations", "keep_awake", "verify_movement" -> require(value is JsonPrimitive && !value.isString && value.booleanOrNull != null) {
                     "$key must be a boolean."
                 }
                 "timeout_ms" -> args.integer(key, 250..30000)
@@ -231,7 +231,15 @@ internal object YamlRouteParser {
                     "input_text requires an explicit field selector."
                 }
             }
-            "scroll" -> require(args.string("direction") in McpTools.SCROLL_DIRECTIONS) { "Invalid scroll direction." }
+            "scroll" -> {
+                require(args.string("direction") in McpTools.SCROLL_DIRECTIONS) { "Invalid scroll direction." }
+                args["method"]?.let { require(it is JsonPrimitive && it.isString && it.content in setOf("auto", "gesture")) {
+                    "Invalid scroll method."
+                } }
+                args["verify_movement"]?.let { require(it is JsonPrimitive && !it.isString && it.booleanOrNull != null) {
+                    "verify_movement must be a boolean."
+                } }
+            }
             "delay" -> args.integer("milliseconds", 0..5000)
             "wait", "assert" -> {
                 val condition = args.string("condition")
