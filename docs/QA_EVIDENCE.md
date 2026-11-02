@@ -2,14 +2,16 @@
 
 The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 640 dp or more. Narrow screens stack the two cards to keep their contents usable.
-Activity entries are shown as one newest-first sequence, without date or flow
-grouping. Every row displays its **Flow #N** or **Unlinked** label beside the tool
-name, so activities from the same flow can be followed across dates. Tied
+Activity entries are grouped by calendar day in the device's time zone, newest
+first, with up to **800** recent entries retained for display and after restart.
+Date headers show entry counts and can collapse or expand a day's activities;
+Activity days start expanded. Every row displays its **Flow #N** or **Unlinked**
+label beside the tool name, so activities from the same flow can be followed across dates. Tied
 timestamps are ordered by descending activity ID. Individual rows expand to show
 arguments and results.
 No sandbox path copying, ADB, broad storage permission or cloud account is needed.
-The card refreshes after a `qa_session` call and when returning to Tester; use
-Refresh after evidence is saved by another tool or process.
+The card refreshes after QA sessions, screenshots, photos, baselines and run evidence
+tools, and when returning to Tester; use Refresh for files saved by another process.
 Evidence files remain grouped by calendar day in the device's time zone, newest first.
 All days start collapsed: tap a date to expand or collapse its complete file list.
 Each date shows its file count; all dates are available in the scrollable list.
@@ -31,7 +33,7 @@ Native run operations use their explicitly owned run instead, including async
 runs and later artifact exports. Run steps remain in the native run timeline,
 not duplicated as individual Activity calls.
 
-Saved QA report pairs, per-step records, approved step screenshots, camera photos
+Saved QA report pairs, cumulative step lists, approved screenshots, camera photos
 and visual baselines created within a manual session are linked automatically.
 Native reports and retained artifacts use the run's ID. Old records and files
 without known provenance appear as **Unlinked**; Tester does not infer a link
@@ -54,16 +56,22 @@ and text/data documents have distinct treatments.
 ## What appears
 
 - Existing JSON/Markdown `qa_session` reports in private `files/qa/reports`.
-- A short TXT trace for each successful `qa_session action=step`, in
-  `files/qa/evidence` (for example `s01-1a2b3c4d.txt`). Each trace records the
-  sequence number, flow, time, status, expected/actual result, notes, and
-  screenshot outcome. These files supplement the final JSON/Markdown reports.
+- One cumulative TXT file per `qa_session`, in `files/qa/evidence`, updated after
+  every recorded step (shown as `steps-1a2b3c4d.txt`). It lists actions in order,
+  for example `1. Open Project`, `2. Tap Drawings`, `3. Open Drawing`, and records
+  the flow, time, status, expected/actual result, notes, and screenshot outcome.
+  The list survives an interruption without needing `action=end`; final
+  JSON/Markdown reports remain available. Older per-step TXT files are preserved.
 - Optional JPEG screen evidence for an individual step. Request it explicitly
   with `capture_screenshot=true`; Tester asks for approval for that screenshot
-  and saves it beside the step trace. Screenshots are never captured by default.
+  and saves it beside the cumulative step list. Screenshots are never captured by default.
   If the accessibility screenshot service is unavailable or capture is blocked,
   the step trace and tool result report that failure rather than substituting a
   camera image.
+- JPEGs explicitly requested using `take_screenshot` are now also saved in
+  `files/qa/evidence`, not just returned inline to the agent. They are linked to
+  the active session's flow and appear with **View** and **Share** actions.
+  A storage failure is reported as an error; no screenshot is captured automatically.
 - Retained native run timelines as Markdown, JSON and JUnit, plus existing run
   artifacts. The dashboard is local user access; remote MCP run-key and sensitive
   tool approval checks are unchanged. Timelines are snapshots at refresh time.
@@ -76,15 +84,16 @@ and PDF. Only these specific evidence locations are browsed, not arbitrary app
 files, preferences, TLS keys, recovery journals or databases. Symbolic links
 outside an approved directory are rejected.
 
-Inline-only MCP screenshots and host-side gateway/CI reports are not automatically
-saved to the phone. This adds **no recording or new capture permission**; videos
+Images returned only by other observation/assertion tools and host-side gateway/CI
+reports are not automatically saved to the phone. Previously returned inline-only
+screenshots cannot be recovered. This adds **no recording or new capture permission**; videos
 appear only if already saved in a supported evidence folder. Retained native
 runs/artifacts still follow their existing retention and quota limits.
 
 Names shown in QA Evidence and used for staged sharing are compact and unique
 within the evidence source (for example `r-<12 hex>.md` for native reports,
-`p-<12 hex>.jpg` for legacy camera photos, and `s01-<8 hex>.txt` for step
-records). Original file paths and validation are unchanged.
+`p-<12 hex>.jpg` for legacy camera photos, `steps-<8 hex>.txt` for session
+lists, and `s01-<8 hex>.jpg` for step screenshots). Original file paths and validation are unchanged.
 
 ## Viewing and sharing
 

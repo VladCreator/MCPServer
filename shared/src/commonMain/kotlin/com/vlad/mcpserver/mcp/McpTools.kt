@@ -196,7 +196,7 @@ object McpTools {
     val takeScreenshot: ToolDefinition = ToolDefinition(
         name = "take_screenshot",
         description = "Capture the current screen as a JPEG image, after waiting for the UI to " +
-            "settle. The result text includes the capture timestamp and foreground package. Use " +
+            "settle. On Android, the JPEG is also saved in QA Evidence. The result text includes the capture timestamp and foreground package. Use " +
             "when get_screen_tree is empty or not enough (games, maps, canvas). Requires MCP Touch Service.",
         inputSchema = schema(emptyList()) {
             putJsonObject("max_dimension") {
@@ -380,7 +380,7 @@ object McpTools {
 
     val qaSession: ToolDefinition = ToolDefinition(
         name = "qa_session",
-        description = "QA test session: begin, record each step as a short evidence file, check status or end and write a JSON/Markdown report. " +
+        description = "QA test session: begin, record steps in one numbered evidence file per Android session, check status or end and write a JSON/Markdown report. " +
             "Use step for every action/assertion. On Android, set capture_screenshot=true to save the current screen in QA Evidence; " +
             "each requested image requires explicit approval and secure/unavailable screens are reported as capture failures. " +
             "On Android, each agent has its own active session; flow_id links dashboard Activity and saved evidence.",

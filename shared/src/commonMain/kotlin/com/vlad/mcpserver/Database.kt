@@ -5,6 +5,8 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+internal const val MAX_ACTIVITY_HISTORY = 800
+
 /**
  * Data class representing a connected AI client instance.
  */
@@ -177,7 +179,7 @@ class AppDatabase(dbPath: String) {
         list
     }
 
-    suspend fun pruneHistory(keep: Int = 500) = mutex.withLock {
+    suspend fun pruneHistory(keep: Int = MAX_ACTIVITY_HISTORY) = mutex.withLock {
         connection.prepare(
             "DELETE FROM command_history WHERE id NOT IN " +
                 "(SELECT id FROM command_history ORDER BY id DESC LIMIT ?)"
@@ -187,7 +189,7 @@ class AppDatabase(dbPath: String) {
         }
     }
 
-    private fun pruneHistoryLocked(keep: Int = 500) {
+    private fun pruneHistoryLocked(keep: Int = MAX_ACTIVITY_HISTORY) {
         connection.prepare(
             "DELETE FROM command_history WHERE id NOT IN " +
                 "(SELECT id FROM command_history ORDER BY id DESC LIMIT ?)"

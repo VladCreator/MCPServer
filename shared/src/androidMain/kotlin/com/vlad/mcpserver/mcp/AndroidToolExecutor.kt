@@ -1007,6 +1007,14 @@ class AndroidToolExecutor(
         val foreground = service.rootInActiveWindow?.packageName
         return captureScreenshot(service, maxDimension).fold(
             onSuccess = { shot ->
+                val file = File(context.filesDir, "qa/evidence/screenshot-${UUID.randomUUID()}.jpg")
+                try {
+                    writeQaEvidenceFile(file) { it.writeBytes(shot.jpegBytes) }
+                } catch (error: Exception) {
+                    return@fold ToolResult("Screenshot captured but unable to save QA Evidence: ${error.message}",
+                        isError = true,
+                        structuredContent = buildJsonObject { put("reason", "evidence_storage_failed") })
+                }
                 ToolResult(
                     text = "Captured at ${java.time.Instant.now()}" +
                         (foreground?.let { " (foreground: $it)" } ?: "") +
@@ -1015,9 +1023,11 @@ class AndroidToolExecutor(
                         ". Screenshot ${shot.width}x${shot.height} (screen " +
                         "${shot.screenWidth}x${shot.screenHeight}). Multiply image coordinates by " +
                         "${"%.3f".format(shot.screenWidth.toFloat() / shot.width)} to get screen " +
-                        "coordinates for touch_test.",
+                        "coordinates for touch_test. Saved in QA Evidence: ${file.name}.",
                     imageBase64 = java.util.Base64.getEncoder().encodeToString(shot.jpegBytes),
-                    imageMimeType = "image/jpeg"
+                    imageMimeType = "image/jpeg",
+                    evidencePaths = listOf(file.absolutePath),
+                    structuredContent = buildJsonObject { put("screenshot_file", file.name) }
                 )
             },
             onFailure = { ToolResult("Screenshot failed: ${it.message}", isError = true) }

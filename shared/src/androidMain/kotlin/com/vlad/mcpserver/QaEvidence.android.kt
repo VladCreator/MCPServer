@@ -156,7 +156,7 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
             if (loading || busy) CircularProgressIndicator(Modifier.size(24.dp))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (!loading && entries.isEmpty() && error == null) {
-                Text("No saved evidence yet. Finish a QA session or retain a run artifact. Inline-only screenshots and host reports are not stored here.",
+                Text("No saved evidence yet. Record a QA step, request a screenshot, or retain a run artifact. Host reports are not stored here.",
                     style = MaterialTheme.typography.bodySmall)
             }
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

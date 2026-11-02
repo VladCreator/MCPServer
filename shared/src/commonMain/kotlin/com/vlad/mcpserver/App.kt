@@ -100,6 +100,7 @@ import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.ToolDefinition
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -942,7 +943,8 @@ private fun ActivityCard(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    val orderedLogs = activityLogsInSequence(logs)
+    val groupedLogs = groupActivityByDay(logs)
+    var collapsedDays by remember { mutableStateOf(emptySet<LocalDate>()) }
     OutlinedCard(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -967,9 +969,34 @@ private fun ActivityCard(
                 Text("No activity yet.", style = MaterialTheme.typography.bodySmall)
             }
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                items(orderedLogs, key = { it.id }) { log ->
-                    ActivityRow(log)
-                    HorizontalDivider(color = colors.outlineVariant)
+                groupedLogs.forEach { (day, dayLogs) ->
+                    val expanded = day !in collapsedDays
+                    item(key = "activity-day:$day") {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+                                .clickable(
+                                    role = Role.Button,
+                                    onClickLabel = if (expanded) "Collapse day" else "Expand day"
+                                ) {
+                                    collapsedDays = if (expanded) collapsedDays + day else collapsedDays - day
+                                }
+                                .heightIn(min = 48.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                contentDescription = null, modifier = Modifier.size(20.dp))
+                            Text(day.toString(), Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleSmall, color = colors.primary)
+                            Text("${dayLogs.size}", style = MaterialTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant)
+                        }
+                    }
+                    if (expanded) items(dayLogs, key = { it.id }) { log ->
+                        ActivityRow(log)
+                        HorizontalDivider(color = colors.outlineVariant)
+                    }
                 }
             }
         }
@@ -978,6 +1005,13 @@ private fun ActivityCard(
 
 internal fun activityLogsInSequence(logs: List<ToolExecutionLog>): List<ToolExecutionLog> =
     logs.sortedWith(compareByDescending<ToolExecutionLog> { it.timestamp }.thenByDescending { it.id })
+
+internal fun groupActivityByDay(
+    logs: List<ToolExecutionLog>,
+    timeZone: TimeZone = TimeZone.currentSystemDefault()
+): Map<LocalDate, List<ToolExecutionLog>> = activityLogsInSequence(logs).groupBy {
+    Instant.fromEpochMilliseconds(it.timestamp).toLocalDateTime(timeZone).date
+}
 
 @Composable
 private fun ActivityRow(log: ToolExecutionLog) {

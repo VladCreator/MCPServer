@@ -275,7 +275,7 @@ class AppViewModel(
         val storedDark = opened.getSetting("dark_mode")?.toBooleanStrictOrNull()
         val storedConfirmTools = opened.getSetting("confirm_tools")?.toBooleanStrictOrNull()
         val tokenToPersist = if (storedToken == null) bearerToken else null
-        val logs = opened.getCommandHistories(limit = MAX_VISIBLE_LOGS)
+        val logs = opened.getCommandHistories(limit = MAX_ACTIVITY_HISTORY)
 
         withContext(uiDispatcher) {
             if (storedToken != null) bearerToken = storedToken
@@ -284,7 +284,7 @@ class AppViewModel(
             storedConfirmTools?.let { confirmSensitiveTools = it }
             executionLogsState.update { current ->
                 (current + logs.filter { stored -> current.none { it.id == stored.id } })
-                    .take(MAX_VISIBLE_LOGS)
+                    .take(MAX_ACTIVITY_HISTORY)
             }
         }
 
@@ -441,8 +441,11 @@ class AppViewModel(
     }
 
     private fun appendLog(log: ToolExecutionLog) {
-        executionLogsState.update { logs -> (listOf(log) + logs).take(MAX_VISIBLE_LOGS) }
-        if (log.toolName == "qa_session") qaEvidenceRevisionState.update { it + 1 }
+        executionLogsState.update { logs -> (listOf(log) + logs).take(MAX_ACTIVITY_HISTORY) }
+        if (log.toolName in setOf("qa_session", "take_screenshot", "take_photo", "ui_diff",
+                "run_route", "collect_failure_bundle", "export_run")) {
+            qaEvidenceRevisionState.update { it + 1 }
+        }
         updateServerActivity(log.toolName, log.status, log.timestamp)
     }
 
@@ -467,6 +470,5 @@ class AppViewModel(
     companion object {
         private const val HTTP_PORT = 8080
         private const val HTTPS_PORT = 8443
-        private const val MAX_VISIBLE_LOGS = 500
     }
 }

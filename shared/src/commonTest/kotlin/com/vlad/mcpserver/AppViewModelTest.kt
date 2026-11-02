@@ -26,6 +26,26 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModelTest {
     @Test
+    fun retainsExactly800RecentActivitiesAndRefreshesSavedScreenshots() = runTest {
+        val host = FakeMcpServerHost()
+        val model = viewModel(host)
+        repeat(805) { number ->
+            host.emit(ServerEvent.ToolCalled(ToolCallRecord(
+                "c1", "ui_find", "{}", ToolCallOutcome.SUCCESS, "", number.toLong()
+            )))
+        }
+        assertEquals(800, model.executionLogs.value.size)
+        assertEquals(804L, model.executionLogs.value.first().timestamp)
+        assertEquals(5L, model.executionLogs.value.last().timestamp)
+        val revision = model.qaEvidenceRevision.value
+        host.emit(ServerEvent.ToolCalled(ToolCallRecord(
+            "c1", "take_screenshot", "{}", ToolCallOutcome.SUCCESS, "", 805
+        )))
+        assertEquals(revision + 1, model.qaEvidenceRevision.value)
+        assertEquals(800, model.executionLogs.value.size)
+    }
+
+    @Test
     fun keepsFlowOnActivityAndLoadsSeparateFlowsForOneAgent() = runTest {
         val host = FakeMcpServerHost()
         val flows = listOf(QaFlow(1, "c1", "qa", "test1"), QaFlow(2, "c1", "run", "run1"))

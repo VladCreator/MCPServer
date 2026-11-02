@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.3.1** (Activity history is shown in sequence with per-entry flow IDs; Android QA Evidence browser and sharing; P5 authenticated loopback run Viewer; recording deferred; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.3.1** (Activity history is grouped by date with per-entry flow IDs; Android QA Evidence browser and sharing; P5 authenticated loopback run Viewer; recording deferred; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
 
 **QA Evidence** now appears beside Activity on wide screens (stacked on phones).
 View saved reports and images in Tester, or explicitly share/open evidence with
@@ -39,8 +39,8 @@ privacy and supported evidence types.
   fingerprint is shown in the dashboard.
 - **SQLite** persistence for settings and command history (WAL, real timestamps,
   bounded history).
-- **Browsable activity history**: the dashboard previews four entries; **Show all**
-  opens a scrollable list of up to 500 recent activities. Storage failures appear
+- **Browsable activity history**: the Activity card shows up to 800 recent activities,
+  grouped by local calendar date with expandable date headers. Storage failures appear
   on the dashboard; affected entries remain visible in memory but are not saved.
   History callback failures are reported in diagnostic logs without breaking tool responses.
 - **Dashboard**: server status, pending requests with remote address, connected agents,

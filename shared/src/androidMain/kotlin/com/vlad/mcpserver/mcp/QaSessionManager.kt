@@ -17,11 +17,11 @@ import java.io.IOException
 
 /**
  * In-memory QA session plus JSON/Markdown reports in the app sandbox.
- * One session per agent is active at a time; the report is written by end().
+ * One session per agent is active at a time; a cumulative trace is saved on each step.
  */
 class QaSessionManager(private val context: Context, private val clientId: String) {
 
-    private data class Step(
+    internal data class Step(
         val number: Int,
         val title: String,
         val expected: String,
@@ -98,7 +98,7 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             return ToolResult("status must be pass, fail, blocked or info.", isError = true)
         }
         val number = session.steps.size + 1
-        val names = qaStepEvidenceNames(number, session.id.substringAfterLast('-'))
+        val screenshotName = qaStepScreenshotName(number, session.id.substringAfterLast('-'))
         val evidenceDirectory = File(context.filesDir, "qa/evidence")
         if (!evidenceDirectory.isDirectory && !evidenceDirectory.mkdirs()) {
             return ToolResult("Unable to create QA step evidence folder.", isError = true,
@@ -112,52 +112,29 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             status = normalized,
             notes = notes.take(2_000),
             at = now(),
-            evidenceName = names.first,
-            screenshotName = screenshot?.let { names.second },
+            evidenceName = "steps-${session.id}.txt",
+            screenshotName = screenshot?.let { screenshotName },
             screenshotRequested = screenshotRequested,
-            screenshotError = screenshotError?.take(300)
+            screenshotError = (screenshotError
+                ?: if (screenshotRequested && screenshot == null) "Requested screenshot was not captured." else null)?.take(300)
         )
         val trace = File(evidenceDirectory, step.evidenceName)
         val photo = step.screenshotName?.let { File(evidenceDirectory, it) }
-        val traceTemp = File(evidenceDirectory, "${step.evidenceName}.tmp")
-        val photoTemp = step.screenshotName?.let { File(evidenceDirectory, "$it.tmp") }
         try {
-            check(!trace.exists() && (photo == null || !photo.exists())) { "Step evidence filename already exists." }
-            traceTemp.writeText(buildString {
-                appendLine("QA step ${step.number}: ${step.title}")
-                appendLine("Flow: #${session.flowId}")
-                appendLine("Recorded: ${step.at}")
-                appendLine("Status: ${step.status.uppercase()}")
-                if (step.expected.isNotBlank()) appendLine("Expected: ${step.expected}")
-                if (step.actual.isNotBlank()) appendLine("Actual: ${step.actual}")
-                if (step.notes.isNotBlank()) appendLine("Notes: ${step.notes}")
-                appendLine("Screenshot: ${when {
-                    screenshot != null -> step.screenshotName
-                    screenshotError != null -> "not captured (${screenshotError.take(300)})"
-                    !step.screenshotRequested -> "not requested"
-                    else -> "requested, not captured"
-                }}")
-            })
-            if (screenshot != null) checkNotNull(photoTemp).writeBytes(screenshot)
-            if (screenshot != null && !checkNotNull(photoTemp).renameTo(checkNotNull(photo))) {
-                throw IOException("Unable to finalize QA step screenshot.")
-            }
-            if (!traceTemp.renameTo(trace)) throw IOException("Unable to finalize QA step record.")
+            val text = qaSessionEvidenceText(session.testCase, session.flowId, session.startedAt, session.steps + step)
+            writeQaStepEvidence(trace, text, photo, screenshot)
         } catch (error: Exception) {
-            if (traceTemp.exists()) traceTemp.delete()
-            if (photoTemp?.exists() == true) photoTemp.delete()
-            if (trace.exists() && !trace.delete()) error.addSuppressed(IllegalStateException("Unable to remove incomplete step record."))
-            if (photo?.exists() == true && !photo.delete()) error.addSuppressed(IllegalStateException("Unable to remove incomplete step photo."))
             return ToolResult("Unable to save QA step evidence: ${error.message}", isError = true,
                 structuredContent = buildJsonObject { put("reason", "evidence_storage_failed") })
         }
         session.steps += step
         val paths = listOfNotNull(trace.absolutePath, photo?.takeIf { it.isFile }?.absolutePath)
-        val captureFailed = screenshotError != null
+        val captureFailed = screenshotRequested && screenshot == null
+        val captureError = screenshotError ?: "Requested screenshot was not captured."
         return ToolResult(
             "Step ${step.number} recorded [$normalized]: ${step.title}" +
                 (if (expected.isNotBlank()) " (expected: ${expected.take(200)})" else "") +
-                (if (captureFailed) ". Screenshot evidence failed: ${screenshotError.take(300)}" else
+                (if (captureFailed) ". Screenshot evidence failed: ${captureError.take(300)}" else
                     ". Evidence saved: ${listOfNotNull(step.evidenceName, step.screenshotName).joinToString(", ")}"),
             isError = captureFailed,
             flowId = session.flowId,
@@ -166,7 +143,7 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                 put("step", step.number); put("status", normalized)
                 put("evidence_file", step.evidenceName)
                 step.screenshotName?.let { put("screenshot_file", it) }
-                if (screenshotError != null) put("screenshot_error", screenshotError.take(300))
+                if (captureFailed) put("screenshot_error", captureError.take(300))
                 put("screenshot_requested", screenshotRequested)
                 putJsonArray("evidence_files") { paths.forEach { add(it.substringAfterLast('/')) } }
                 put("flow_id", session.flowId)
@@ -291,8 +268,65 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).format(Date())
 }
 
-internal fun qaStepEvidenceNames(number: Int, sessionKey: String): Pair<String, String> {
+internal fun qaStepScreenshotName(number: Int, sessionKey: String): String {
     require(number > 0 && sessionKey.matches(Regex("[a-fA-F0-9]{8}"))) { "Invalid QA step evidence identity." }
     val prefix = "s${number.toString().padStart(2, '0')}-${sessionKey.lowercase()}"
-    return "$prefix.txt" to "$prefix.jpg"
+    return "$prefix.jpg"
+}
+
+internal fun qaSessionEvidenceText(
+    testCase: String, flowId: Long, startedAt: String, steps: List<QaSessionManager.Step>
+): String = buildString {
+    appendLine("QA steps: $testCase")
+    appendLine("Flow: #$flowId")
+    appendLine("Started: $startedAt")
+    appendLine()
+    steps.forEach { step ->
+        appendLine("${step.number}. ${step.title}")
+        appendLine("   Recorded: ${step.at}")
+        appendLine("   Status: ${step.status.uppercase()}")
+        if (step.expected.isNotBlank()) appendLine("   Expected: ${step.expected}")
+        if (step.actual.isNotBlank()) appendLine("   Actual: ${step.actual}")
+        if (step.notes.isNotBlank()) appendLine("   Notes: ${step.notes}")
+        appendLine("   Screenshot: ${when {
+            step.screenshotName != null -> step.screenshotName
+            step.screenshotError != null -> "not captured (${step.screenshotError})"
+            !step.screenshotRequested -> "not requested"
+            else -> "requested, not captured"
+        }}")
+        appendLine()
+    }
+}
+
+internal fun writeQaStepEvidence(trace: File, text: String, photo: File?, screenshot: ByteArray?) {
+    var photoSaved = false
+    try {
+        if (screenshot != null) {
+            val target = checkNotNull(photo)
+            check(!target.exists()) { "Step screenshot filename already exists." }
+            writeQaEvidenceFile(target) { it.writeBytes(screenshot) }
+            photoSaved = true
+        }
+        writeQaEvidenceFile(trace) { it.writeText(text) }
+    } catch (error: Exception) {
+        if (photoSaved && photo != null && !photo.delete()) {
+            error.addSuppressed(IOException("Unable to remove incomplete step screenshot."))
+        }
+        throw error
+    }
+}
+
+internal fun writeQaEvidenceFile(file: File, write: (File) -> Unit) {
+    val directory = checkNotNull(file.parentFile)
+    check(directory.isDirectory || directory.mkdirs()) { "Unable to create QA evidence folder." }
+    val temporary = File(directory, "${file.name}.tmp")
+    try {
+        write(temporary)
+        if (!temporary.renameTo(file)) throw IOException("Unable to finalize QA evidence: ${file.name}")
+    } catch (error: Exception) {
+        if (temporary.exists() && !temporary.delete()) {
+            error.addSuppressed(IOException("Unable to remove incomplete QA evidence."))
+        }
+        throw error
+    }
 }

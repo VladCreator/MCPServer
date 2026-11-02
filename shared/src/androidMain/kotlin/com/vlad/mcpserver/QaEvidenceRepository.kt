@@ -37,6 +37,9 @@ internal object QaEvidenceNames {
         if (Regex("s[0-9]+-[a-f0-9]{8}\\.(txt|jpg)", RegexOption.IGNORE_CASE).matches(fileName)) {
             return fileName
         }
+        if (Regex("steps-qa-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}\\.txt").matches(fileName)) {
+            return "steps-${fileName.substringAfterLast('-')}"
+        }
         return compact("f", uniqueKey, extension)
     }
 }
