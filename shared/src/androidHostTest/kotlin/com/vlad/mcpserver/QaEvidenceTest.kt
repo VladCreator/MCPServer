@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import com.vlad.mcpserver.mcp.qaStepEvidenceNames
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -40,7 +41,7 @@ class QaEvidenceTest {
             reports.resolve("token.secret").writeText("not evidence")
             directory.resolve("private.json").writeText("{}")
             val files = EvidenceFiles(listOf(reports))
-            assertEquals(listOf("qa.md"), files.list().map { it.name })
+            assertEquals(listOf(QaEvidenceNames.stored("qa.md", report.canonicalPath)), files.list().map { it.name })
             assertEquals(report.canonicalFile, files.checked(report))
             assertFailsWith<IllegalArgumentException> { files.checked(directory.resolve("private.json")) }
             assertTrue(report.delete())
@@ -103,5 +104,16 @@ class QaEvidenceTest {
         assertTrue(isEvidenceText("text/markdown"))
         assertTrue(isEvidenceText("application/json"))
         assertFalse(isEvidenceText("image/jpeg"))
+    }
+
+    @Test
+    fun evidenceNamesAreShortAndStepNamesRemainReproducible() {
+        val compact = QaEvidenceNames.compact("r", "very-long-run-identifier:markdown", "md")
+        assertTrue(compact.length <= 18)
+        assertEquals(compact, QaEvidenceNames.compact("r", "very-long-run-identifier:markdown", "md"))
+        assertTrue(QaEvidenceNames.stored("qa-20260101-120000-0123456789abcdef.md").startsWith("f-"))
+        assertEquals("s01-0123abcd.txt", QaEvidenceNames.stored("s01-0123abcd.txt"))
+        assertTrue(QaEvidenceNames.stored("mcp_1760000000000.jpg").length < "mcp_1760000000000.jpg".length)
+        assertEquals("s03-0123abcd.txt" to "s03-0123abcd.jpg", qaStepEvidenceNames(3, "0123ABCD"))
     }
 }

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.io.File
+import java.security.MessageDigest
 import java.util.UUID
 
 internal sealed interface EvidenceSource {
@@ -23,13 +24,31 @@ internal data class QaEvidence(
     val origin: String, val source: EvidenceSource, val flowId: Long? = null
 )
 
+internal object QaEvidenceNames {
+    fun compact(prefix: String, key: String, extension: String): String {
+        require(prefix.matches(Regex("[a-z]")) && extension.matches(Regex("[a-z0-9]{1,8}")))
+        val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
+            .take(6).joinToString("") { byte -> "%02x".format(byte) }
+        return "$prefix-$digest.$extension"
+    }
+
+    fun stored(fileName: String, uniqueKey: String = fileName): String {
+        val extension = fileName.substringAfterLast('.', "").lowercase()
+        if (Regex("s[0-9]+-[a-f0-9]{8}\\.(txt|jpg)", RegexOption.IGNORE_CASE).matches(fileName)) {
+            return fileName
+        }
+        return compact("f", uniqueKey, extension)
+    }
+}
+
 internal class EvidenceFiles(private val roots: List<File>) {
     fun list(): List<QaEvidence> = roots.flatMap { root ->
         if (!root.exists()) return@flatMap emptyList()
         check(root.isDirectory) { "Evidence location is not a directory: ${root.name}" }
         val files = checkNotNull(root.listFiles()) { "Unable to list evidence: ${root.name}" }
         files.filter { it.isFile && permitted(it) && mime(it.name) != null }.map { file ->
-            QaEvidence(file.canonicalPath, file.name, checkNotNull(mime(file.name)), file.lastModified(),
+            QaEvidence(file.canonicalPath, QaEvidenceNames.stored(file.name, file.canonicalPath),
+                checkNotNull(mime(file.name)), file.lastModified(),
                 root.name, EvidenceSource.StoredFile(file))
         }
     }.distinctBy { it.id }
@@ -96,12 +115,12 @@ internal class QaEvidenceRepository(context: Context) {
         val legacy = files.list() + checkNotNull(context.filesDir.listFiles()) { "Unable to list legacy camera evidence." }
             .filter { it.isFile && Regex("mcp_[0-9]+\\.jpg").matches(it.name) &&
                 it.canonicalFile.parentFile == context.filesDir.canonicalFile }
-            .map { QaEvidence(it.canonicalPath, it.name, "image/jpeg", it.lastModified(),
+            .map { QaEvidence(it.canonicalPath, QaEvidenceNames.compact("p", it.name, "jpg"), "image/jpeg", it.lastModified(),
                 "Camera", EvidenceSource.StoredFile(it)) }
         val reports = store.localRuns().flatMap { run ->
             val id = checkNotNull(run.string("run_id"))
             listOf("markdown" to "md", "json" to "json", "junit" to "xml").map { (format, ext) ->
-                QaEvidence("run:$id:$format", "run-$id.$ext",
+                QaEvidence("run:$id:$format", QaEvidenceNames.compact("r", "$id:$format", ext),
                     if (format == "junit") "application/xml" else if (format == "json") "application/json" else "text/markdown",
                     run["created_at_ms"]?.jsonPrimitive?.longOrNull ?: 0L,
                     "Run ${run.string("status")}", EvidenceSource.RunReport(run, format), runLinks[id])
@@ -109,7 +128,7 @@ internal class QaEvidenceRepository(context: Context) {
         }
         val artifacts = store.localArtifacts().mapNotNull { artifact ->
             val ext = EvidenceFiles.extension(artifact.mime) ?: return@mapNotNull null
-            QaEvidence("artifact:${artifact.id}", "${artifact.id}.$ext", artifact.mime,
+            QaEvidence("artifact:${artifact.id}", QaEvidenceNames.compact("a", artifact.id, ext), artifact.mime,
                 artifact.created, "Run ${artifact.runId}", EvidenceSource.Artifact(artifact.runId, artifact.id), runLinks[artifact.runId])
         }
         val linkedFiles = legacy.map { it.copy(flowId = fileLinks[it.id]) }
@@ -118,7 +137,7 @@ internal class QaEvidenceRepository(context: Context) {
 
     fun stage(item: QaEvidence): File {
         check(shareDir.isDirectory || shareDir.mkdirs()) { "Unable to create evidence share folder." }
-        val target = File(shareDir, "${UUID.randomUUID()}-${item.name}")
+        val target = File(shareDir, "${UUID.randomUUID().toString().take(8)}-${item.name}")
         try {
             when (val source = item.source) {
                 is EvidenceSource.StoredFile -> {

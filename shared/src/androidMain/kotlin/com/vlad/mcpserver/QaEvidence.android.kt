@@ -76,7 +76,7 @@ private data class EvidencePreview(val title: String, val text: String? = null, 
 private data class EvidenceTransfer(val item: QaEvidence, val share: Boolean)
 
 @Composable
-actual fun QaEvidenceCard(modifier: Modifier) {
+actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     val context = LocalContext.current
     val repository = remember(context) { QaEvidenceRepository(context) }
     val scope = rememberCoroutineScope()
@@ -84,13 +84,13 @@ actual fun QaEvidenceCard(modifier: Modifier) {
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var revision by remember { mutableStateOf(0) }
+    var refreshRevision by remember { mutableStateOf(0) }
     var expandedDays by remember { mutableStateOf(emptySet<LocalDate>()) }
     var preview by remember { mutableStateOf<EvidencePreview?>(null) }
     var transfer by remember { mutableStateOf<EvidenceTransfer?>(null) }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++ }
-    LaunchedEffect(revision) {
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshRevision++ }
+    LaunchedEffect(refreshRevision, evidenceRevision) {
         loading = true
         try {
             entries = withContext(Dispatchers.IO) { repository.list() }
@@ -149,7 +149,7 @@ actual fun QaEvidenceCard(modifier: Modifier) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("QA Evidence", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                TextButton(onClick = { revision++ }, enabled = !loading && !busy) { Text("Refresh") }
+                TextButton(onClick = { refreshRevision++ }, enabled = !loading && !busy) { Text("Refresh") }
             }
             Text("Reports, retained run artifacts and saved media. Sharing sends a copy to an app you choose.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -199,7 +199,7 @@ actual fun QaEvidenceCard(modifier: Modifier) {
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 EvidenceFileIcon(item.mime)
                                 Column(Modifier.weight(1f)) {
-                                    Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text("${item.origin} | ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(item.created))}",
                                         style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }

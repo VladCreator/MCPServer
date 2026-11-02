@@ -8,7 +8,8 @@ name, so activities from the same flow can be followed across dates. Tied
 timestamps are ordered by descending activity ID. Individual rows expand to show
 arguments and results.
 No sandbox path copying, ADB, broad storage permission or cloud account is needed.
-Refresh the card after collecting evidence; it also refreshes on returning to Tester.
+The card refreshes after a `qa_session` call and when returning to Tester; use
+Refresh after evidence is saved by another tool or process.
 Evidence files remain grouped by calendar day in the device's time zone, newest first.
 All days start collapsed: tap a date to expand or collapse its complete file list.
 Each date shows its file count; all dates are available in the scrollable list.
@@ -30,9 +31,9 @@ Native run operations use their explicitly owned run instead, including async
 runs and later artifact exports. Run steps remain in the native run timeline,
 not duplicated as individual Activity calls.
 
-Saved QA report pairs, camera photos and visual baselines created within a manual
-session are linked automatically. Native reports and retained artifacts use the
-run's ID. Inline images are still not automatically saved. Old records and files
+Saved QA report pairs, per-step records, approved step screenshots, camera photos
+and visual baselines created within a manual session are linked automatically.
+Native reports and retained artifacts use the run's ID. Old records and files
 without known provenance appear as **Unlinked**; Tester does not infer a link
 from matching timestamps or filenames. Overwriting a baseline outside a session
 removes its old link.
@@ -53,6 +54,16 @@ and text/data documents have distinct treatments.
 ## What appears
 
 - Existing JSON/Markdown `qa_session` reports in private `files/qa/reports`.
+- A short TXT trace for each successful `qa_session action=step`, in
+  `files/qa/evidence` (for example `s01-1a2b3c4d.txt`). Each trace records the
+  sequence number, flow, time, status, expected/actual result, notes, and
+  screenshot outcome. These files supplement the final JSON/Markdown reports.
+- Optional JPEG screen evidence for an individual step. Request it explicitly
+  with `capture_screenshot=true`; Tester asks for approval for that screenshot
+  and saves it beside the step trace. Screenshots are never captured by default.
+  If the accessibility screenshot service is unavailable or capture is blocked,
+  the step trace and tool result report that failure rather than substituting a
+  camera image.
 - Retained native run timelines as Markdown, JSON and JUnit, plus existing run
   artifacts. The dashboard is local user access; remote MCP run-key and sensitive
   tool approval checks are unchanged. Timelines are snapshots at refresh time.
@@ -66,9 +77,14 @@ files, preferences, TLS keys, recovery journals or databases. Symbolic links
 outside an approved directory are rejected.
 
 Inline-only MCP screenshots and host-side gateway/CI reports are not automatically
-saved to the phone. This release adds **no recording or new capture permission**;
-videos appear only if already saved in a supported evidence folder. Retained
-native runs/artifacts still follow their existing retention and quota limits.
+saved to the phone. This adds **no recording or new capture permission**; videos
+appear only if already saved in a supported evidence folder. Retained native
+runs/artifacts still follow their existing retention and quota limits.
+
+Names shown in QA Evidence and used for staged sharing are compact and unique
+within the evidence source (for example `r-<12 hex>.md` for native reports,
+`p-<12 hex>.jpg` for legacy camera photos, and `s01-<8 hex>.txt` for step
+records). Original file paths and validation are unchanged.
 
 ## Viewing and sharing
 

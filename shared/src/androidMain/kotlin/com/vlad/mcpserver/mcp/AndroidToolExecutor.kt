@@ -179,7 +179,11 @@ class AndroidToolExecutor(
             } catch (error: IllegalStateException) {
                 targetingError("policy_unavailable", error.message ?: "Policy unavailable.")
             }
-            if (McpTools.isSensitive(toolName) && !consent(clientId, toolName, approvalArguments)) {
+            val capturesQaStep = toolName == "qa_session" && arguments.string("action") == "step" &&
+                arguments.bool("capture_screenshot")
+            if ((McpTools.isSensitive(toolName) || capturesQaStep) &&
+                !consent(clientId, toolName, approvalArguments)) {
+                if (capturesQaStep) return@withContext qaSession(clientId, arguments, screenshotDenied = true)
                 return@withContext ToolResult("User rejected the tool call.", isError = true,
                     structuredContent = buildJsonObject { put("reason", "consent_denied"); put("retryable", false) })
             }
@@ -1193,7 +1197,11 @@ class AndroidToolExecutor(
     }
 
 
-    private suspend fun qaSession(clientId: String, arguments: JsonObject): ToolResult {
+    private suspend fun qaSession(
+        clientId: String,
+        arguments: JsonObject,
+        screenshotDenied: Boolean = false
+    ): ToolResult {
         val qa = qaSessions.getOrPut(clientId) { QaSessionManager(context, clientId) }
         val action = arguments.string("action")?.lowercase()
             ?: return ToolResult("Missing required argument: action", isError = true)
@@ -1205,13 +1213,32 @@ class AndroidToolExecutor(
                 val device = deviceState.readText()
                 qa.begin(testCase, platform, device, arguments.string("notes").orEmpty())
             }
-            "step" -> qa.step(
-                title = arguments.string("title").orEmpty(),
-                expected = arguments.string("expected").orEmpty(),
-                actual = arguments.string("actual").orEmpty(),
-                status = arguments.string("status").orEmpty(),
-                notes = arguments.string("notes").orEmpty()
-            )
+            "step" -> {
+                val title = arguments.string("title").orEmpty()
+                val status = arguments.string("status").orEmpty()
+                val validStep = qa.activeFlowId() != null && title.isNotBlank() &&
+                    status.lowercase().ifBlank { "info" } in setOf("pass", "fail", "blocked", "info")
+                val capture = if (arguments.bool("capture_screenshot") && validStep && !screenshotDenied) {
+                    val service = touchService()
+                    val root = service?.rootInActiveWindow
+                    when {
+                        service == null -> Result.failure(IllegalStateException("Accessibility screenshot service is unavailable."))
+                        root == null -> Result.failure(IllegalStateException("No active window is available."))
+                        else -> captureScreenshot(service, DEFAULT_SCREENSHOT_DIMENSION, root.windowId)
+                    }
+                } else null
+                qa.step(
+                    title = title,
+                    expected = arguments.string("expected").orEmpty(),
+                    actual = arguments.string("actual").orEmpty(),
+                    status = status,
+                    notes = arguments.string("notes").orEmpty(),
+                    screenshot = capture?.getOrNull()?.jpegBytes,
+                    screenshotError = if (screenshotDenied) "User denied screenshot approval."
+                        else capture?.exceptionOrNull()?.message,
+                    screenshotRequested = arguments.bool("capture_screenshot") || screenshotDenied
+                )
+            }
             "status" -> qa.status()
             "end" -> {
                 val restore = if (!deviceState.hasSnapshot()) ToolResult("No state changes to restore.")
@@ -1818,7 +1845,7 @@ class AndroidToolExecutor(
                     "artifact_id", "package_name", "format", "route_id", "version", "digest", "policy_id")) arguments[name]?.let {
                 require(it is JsonPrimitive && it.isString && it.content.isNotBlank()) { "$name must be a nonempty string." }
             }
-            for (name in listOf("privacy_sensitive", "include_screenshot")) arguments[name]?.let {
+            for (name in listOf("privacy_sensitive", "include_screenshot", "capture_screenshot")) arguments[name]?.let {
                 require(it is JsonPrimitive && !it.isString && it.booleanOrNull != null) { "$name must be a boolean." }
             }
             for (name in listOf("queue_timeout_ms", "timeout_ms", "interval_ms")) arguments[name]?.let {

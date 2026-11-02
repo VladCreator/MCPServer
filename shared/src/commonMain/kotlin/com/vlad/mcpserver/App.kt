@@ -117,6 +117,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
     val connectedClients by viewModel.connectedClients.collectAsState()
     val pendingClients by viewModel.pendingClients.collectAsState()
     val executionLogs by viewModel.executionLogs.collectAsState()
+    val qaEvidenceRevision by viewModel.qaEvidenceRevision.collectAsState()
     val qaFlows by viewModel.qaFlows.collectAsState()
     val toolApprovalRequests by viewModel.toolApprovalRequests.collectAsState()
 
@@ -262,14 +263,14 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                         logs = executionLogs,
                                         modifier = Modifier.weight(1f)
                                     )
-                                    QaEvidenceCard(Modifier.weight(1f))
+                                    QaEvidenceCard(Modifier.weight(1f), qaEvidenceRevision)
                                 }
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ActivityCard(
                                         logs = executionLogs
                                     )
-                                    QaEvidenceCard(Modifier.fillMaxWidth())
+                                    QaEvidenceCard(Modifier.fillMaxWidth(), qaEvidenceRevision)
                                 }
                             }
                         }

@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-actual fun QaEvidenceCard(modifier: Modifier) {
+actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     OutlinedCard(modifier) {
         Column(Modifier.padding(14.dp)) {
             Text("QA Evidence", style = MaterialTheme.typography.titleSmall)

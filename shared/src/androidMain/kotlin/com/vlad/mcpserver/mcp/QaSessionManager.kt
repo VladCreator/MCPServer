@@ -7,11 +7,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.serialization.json.add
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.io.IOException
 
 /**
  * In-memory QA session plus JSON/Markdown reports in the app sandbox.
@@ -26,7 +28,11 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
         val actual: String,
         val status: String,
         val notes: String,
-        val at: String
+        val at: String,
+        val evidenceName: String,
+        val screenshotName: String?,
+        val screenshotRequested: Boolean,
+        val screenshotError: String?
     )
 
     private data class Session(
@@ -52,7 +58,8 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             )
         }
         if (testCase.isBlank()) return ToolResult("Missing required argument: test_case", isError = true)
-        val id = "qa-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-" + UUID.randomUUID()
+        val id = "qa-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) +
+            "-" + UUID.randomUUID().toString().take(8)
         val flowId = QaFlowStore.get(context).ensure("qa", id, clientId)
         current = Session(
             id = id,
@@ -76,7 +83,10 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
         expected: String,
         actual: String,
         status: String,
-        notes: String
+        notes: String,
+        screenshot: ByteArray? = null,
+        screenshotError: String? = null,
+        screenshotRequested: Boolean = screenshot != null || screenshotError != null
     ): ToolResult {
         val session = current ?: return ToolResult(
             "No active QA session. Call qa_session with action=begin first.",
@@ -87,19 +97,80 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
         if (normalized !in setOf("pass", "fail", "blocked", "info")) {
             return ToolResult("status must be pass, fail, blocked or info.", isError = true)
         }
+        val number = session.steps.size + 1
+        val names = qaStepEvidenceNames(number, session.id.substringAfterLast('-'))
+        val evidenceDirectory = File(context.filesDir, "qa/evidence")
+        if (!evidenceDirectory.isDirectory && !evidenceDirectory.mkdirs()) {
+            return ToolResult("Unable to create QA step evidence folder.", isError = true,
+                structuredContent = buildJsonObject { put("reason", "evidence_storage_failed") })
+        }
         val step = Step(
-            number = session.steps.size + 1,
+            number = number,
             title = title.take(300),
             expected = expected.take(2_000),
             actual = actual.take(2_000),
             status = normalized,
             notes = notes.take(2_000),
-            at = now()
+            at = now(),
+            evidenceName = names.first,
+            screenshotName = screenshot?.let { names.second },
+            screenshotRequested = screenshotRequested,
+            screenshotError = screenshotError?.take(300)
         )
+        val trace = File(evidenceDirectory, step.evidenceName)
+        val photo = step.screenshotName?.let { File(evidenceDirectory, it) }
+        val traceTemp = File(evidenceDirectory, "${step.evidenceName}.tmp")
+        val photoTemp = step.screenshotName?.let { File(evidenceDirectory, "$it.tmp") }
+        try {
+            check(!trace.exists() && (photo == null || !photo.exists())) { "Step evidence filename already exists." }
+            traceTemp.writeText(buildString {
+                appendLine("QA step ${step.number}: ${step.title}")
+                appendLine("Flow: #${session.flowId}")
+                appendLine("Recorded: ${step.at}")
+                appendLine("Status: ${step.status.uppercase()}")
+                if (step.expected.isNotBlank()) appendLine("Expected: ${step.expected}")
+                if (step.actual.isNotBlank()) appendLine("Actual: ${step.actual}")
+                if (step.notes.isNotBlank()) appendLine("Notes: ${step.notes}")
+                appendLine("Screenshot: ${when {
+                    screenshot != null -> step.screenshotName
+                    screenshotError != null -> "not captured (${screenshotError.take(300)})"
+                    !step.screenshotRequested -> "not requested"
+                    else -> "requested, not captured"
+                }}")
+            })
+            if (screenshot != null) checkNotNull(photoTemp).writeBytes(screenshot)
+            if (screenshot != null && !checkNotNull(photoTemp).renameTo(checkNotNull(photo))) {
+                throw IOException("Unable to finalize QA step screenshot.")
+            }
+            if (!traceTemp.renameTo(trace)) throw IOException("Unable to finalize QA step record.")
+        } catch (error: Exception) {
+            if (traceTemp.exists()) traceTemp.delete()
+            if (photoTemp?.exists() == true) photoTemp.delete()
+            if (trace.exists() && !trace.delete()) error.addSuppressed(IllegalStateException("Unable to remove incomplete step record."))
+            if (photo?.exists() == true && !photo.delete()) error.addSuppressed(IllegalStateException("Unable to remove incomplete step photo."))
+            return ToolResult("Unable to save QA step evidence: ${error.message}", isError = true,
+                structuredContent = buildJsonObject { put("reason", "evidence_storage_failed") })
+        }
         session.steps += step
+        val paths = listOfNotNull(trace.absolutePath, photo?.takeIf { it.isFile }?.absolutePath)
+        val captureFailed = screenshotError != null
         return ToolResult(
             "Step ${step.number} recorded [$normalized]: ${step.title}" +
-                if (expected.isNotBlank()) " (expected: ${expected.take(200)})" else ""
+                (if (expected.isNotBlank()) " (expected: ${expected.take(200)})" else "") +
+                (if (captureFailed) ". Screenshot evidence failed: ${screenshotError.take(300)}" else
+                    ". Evidence saved: ${listOfNotNull(step.evidenceName, step.screenshotName).joinToString(", ")}"),
+            isError = captureFailed,
+            flowId = session.flowId,
+            evidencePaths = paths,
+            structuredContent = buildJsonObject {
+                put("step", step.number); put("status", normalized)
+                put("evidence_file", step.evidenceName)
+                step.screenshotName?.let { put("screenshot_file", it) }
+                if (screenshotError != null) put("screenshot_error", screenshotError.take(300))
+                put("screenshot_requested", screenshotRequested)
+                putJsonArray("evidence_files") { paths.forEach { add(it.substringAfterLast('/')) } }
+                put("flow_id", session.flowId)
+            }
         )
     }
 
@@ -153,6 +224,10 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                         put("status", step.status)
                         put("notes", step.notes)
                         put("at", step.at)
+                        put("evidence_file", step.evidenceName)
+                        step.screenshotName?.let { put("screenshot_file", it) }
+                        put("screenshot_requested", step.screenshotRequested)
+                        step.screenshotError?.let { put("screenshot_error", it) }
                     })
                 }
             }
@@ -183,6 +258,12 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                     if (step.expected.isNotBlank()) appendLine("- Expected: ${step.expected}")
                     if (step.actual.isNotBlank()) appendLine("- Actual: ${step.actual}")
                     if (step.notes.isNotBlank()) appendLine("- Notes: ${step.notes}")
+                    appendLine("- Screenshot: ${when {
+                        step.screenshotName != null -> step.screenshotName
+                        step.screenshotError != null -> "not captured (${step.screenshotError})"
+                        else -> "not requested"
+                    }}")
+                    appendLine("- Evidence: ${listOfNotNull(step.evidenceName, step.screenshotName).joinToString(", ")}")
                     appendLine()
                 }
             }
@@ -196,7 +277,7 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             current = null
             ToolResult(
                 "QA session ${session.id} closed: $finalResult. " +
-                    "View or share these reports in Tester's QA Evidence dashboard section (tap Refresh).\n" +
+                    "View or share these reports in Tester's QA Evidence dashboard section.\n" +
                     "JSON: ${jsonFile.path}\nMarkdown: ${markdownFile.path}",
                 flowId = session.flowId,
                 structuredContent = buildJsonObject { put("flow_id", session.flowId) }
@@ -208,4 +289,10 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
 
     private fun now(): String =
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).format(Date())
+}
+
+internal fun qaStepEvidenceNames(number: Int, sessionKey: String): Pair<String, String> {
+    require(number > 0 && sessionKey.matches(Regex("[a-fA-F0-9]{8}"))) { "Invalid QA step evidence identity." }
+    val prefix = "s${number.toString().padStart(2, '0')}-${sessionKey.lowercase()}"
+    return "$prefix.txt" to "$prefix.jpg"
 }

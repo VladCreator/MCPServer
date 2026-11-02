@@ -88,6 +88,8 @@ class AppViewModel(
 
     private val executionLogsState = MutableStateFlow<List<ToolExecutionLog>>(emptyList())
     val executionLogs: StateFlow<List<ToolExecutionLog>> = executionLogsState.asStateFlow()
+    private val qaEvidenceRevisionState = MutableStateFlow(0)
+    val qaEvidenceRevision: StateFlow<Int> = qaEvidenceRevisionState.asStateFlow()
     private val qaFlowsState = MutableStateFlow<List<QaFlow>>(emptyList())
     val qaFlows: StateFlow<List<QaFlow>> = qaFlowsState.asStateFlow()
 
@@ -440,6 +442,7 @@ class AppViewModel(
 
     private fun appendLog(log: ToolExecutionLog) {
         executionLogsState.update { logs -> (listOf(log) + logs).take(MAX_VISIBLE_LOGS) }
+        if (log.toolName == "qa_session") qaEvidenceRevisionState.update { it + 1 }
         updateServerActivity(log.toolName, log.status, log.timestamp)
     }
 

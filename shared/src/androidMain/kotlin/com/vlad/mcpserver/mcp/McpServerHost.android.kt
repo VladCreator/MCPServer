@@ -58,6 +58,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import java.io.Writer
 import java.security.SecureRandom
 import java.util.Base64
@@ -591,7 +593,11 @@ private class AndroidMcpServerHost(
         toolName: String,
         arguments: kotlinx.serialization.json.JsonObject
     ): Boolean {
-        if (toolName != "route_policy" && (!shouldConfirmTools() || !McpTools.isSensitive(toolName))) return true
+        val screenshotRequested =
+            (arguments["action"] as? JsonPrimitive)?.content?.equals("step", ignoreCase = true) == true &&
+                (arguments["capture_screenshot"] as? JsonPrimitive)?.booleanOrNull == true
+        if (toolName != "route_policy" && !screenshotRequested &&
+            (!shouldConfirmTools() || !McpTools.isSensitive(toolName))) return true
 
         val client = sessions[clientId]?.client
         val request = ToolApprovalRequest(

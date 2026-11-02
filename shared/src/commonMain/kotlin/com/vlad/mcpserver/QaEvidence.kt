@@ -4,4 +4,4 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 @Composable
-expect fun QaEvidenceCard(modifier: Modifier = Modifier)
+expect fun QaEvidenceCard(modifier: Modifier = Modifier, evidenceRevision: Int = 0)
