@@ -1,6 +1,7 @@
 package com.vlad.tester.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +36,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
@@ -57,14 +61,19 @@ fun main() = application {
         icon = painterResource("tester-icon.png"),
         state = rememberWindowState(width = 1100.dp, height = 800.dp)
     ) {
-        MaterialTheme(colorScheme = darkColorScheme(
+        val dark = isSystemInDarkTheme()
+        MaterialTheme(colorScheme = if (dark) darkColorScheme(
             primary = Color(0xFF8B93FF), secondary = Color(0xFF3DD9EB), tertiary = Color(0xFF4ADE80),
             background = Color(0xFF070A12), surface = Color(0xFF0C111C),
             surfaceVariant = Color(0xFF161E2C), onBackground = Color(0xFFE8EDF7),
             onSurface = Color(0xFFE8EDF7), onSurfaceVariant = Color(0xFF94A3B8),
             error = Color(0xFFFCA5A5)
+        ) else lightColorScheme(
+            primary = Color(0xFF4F46E5), secondary = Color(0xFF0891B2), tertiary = Color(0xFF059669),
+            background = Color(0xFFF6F7FB), surface = Color.White,
+            surfaceVariant = Color(0xFFEDF0F7), onSurfaceVariant = Color(0xFF5B6678)
         )) {
-            DesktopDashboard(busy, { busy = it })
+            Surface(Modifier.fillMaxSize()) { DesktopDashboard(busy, { busy = it }) }
             if (closeWarning) AlertDialog(
                 onDismissRequest = { closeWarning = false },
                 title = { Text("Operation in progress") },
@@ -112,7 +121,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
     LaunchedEffect(Unit) {
         while (true) {
             if (!currentBusy && !scanning && pending.isEmpty()) refresh()
-            delay(5000)
+            delay(10000)
         }
     }
 
@@ -126,7 +135,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
             OutlinedButton(onClick = { scope.launch { refresh() } },
                 enabled = !busy && !scanning && pending.isEmpty()) { Text(if (scanning) "Scanning..." else "Refresh devices") }
         }
-        Text("Scan every 5 seconds. Last scan: $scannedAt. Physical iOS installation is deferred.",
+        Text("Scan every 10 seconds. Last scan: $scannedAt. Physical iOS installation is deferred.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SelectionContainer {
             Text("ADB: ${manager.adbPath ?: "Not found - install platform-tools or set ANDROID_HOME"}",
@@ -139,22 +148,21 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                 SelectionContainer(Modifier.weight(1f)) { Text(error!!, color = MaterialTheme.colorScheme.error) }
                 TextButton(onClick = { error = null }) { Text("Dismiss") }
             }
+            EvidenceInbox(manager, discovery.devices, busy, ::record)
         }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Installation files", style = MaterialTheme.typography.titleLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        BuildDropZone(false, !busy && pending.isEmpty(), { apk = it }, ::fail,
-                            Modifier.fillMaxWidth().height(60.dp))
-                        BuildSelection(apk, !busy && pending.isEmpty()) { apk = null }
-                    }
-                    Column(Modifier.weight(1f)) {
-                        BuildDropZone(true, !busy && pending.isEmpty(), { app = it }, ::fail,
-                            Modifier.fillMaxWidth().height(60.dp))
-                        BuildSelection(app, !busy && pending.isEmpty()) { app = null }
-                    }
-                }
+                BuildDropZone(!busy && pending.isEmpty(), { file ->
+                    val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
+                    apk = if (platform == Platform.ANDROID) file else null
+                    app = if (platform == Platform.IOS_SIMULATOR) file else null
+                    selected = discovery.devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
+                }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
+                    java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
+                    java.awt.Color(MaterialTheme.colorScheme.tertiary.toArgb(), true),
+                    Modifier.fillMaxWidth().height(60.dp))
+                BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
                     Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty(),
@@ -201,9 +209,10 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                         items(discovery.devices, key = { it.key }) { device ->
                             Column {
                                 Row {
-                                    Column(Modifier.padding(top = 12.dp)) { PlatformIcon(device.platform) }
                                     Checkbox(checked = device.key in selected,
-                                        enabled = device.canInstall && !busy && pending.isEmpty(),
+                                        enabled = device.canInstall && !busy && pending.isEmpty() &&
+                                            ((device.platform == Platform.ANDROID && apk != null) ||
+                                                (device.platform == Platform.IOS_SIMULATOR && app != null)),
                                         onCheckedChange = {
                                             selected = if (it) selected + device.key else selected - device.key
                                         })
@@ -281,6 +290,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                                             }
                                         }) { Text("Boot") }
                                     }
+                                    Column(Modifier.padding(top = 12.dp)) { PlatformIcon(device.platform) }
                                 }
                                 HorizontalDivider()
                             }

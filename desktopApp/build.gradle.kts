@@ -39,6 +39,7 @@ kotlin {
             implementation(libs.compose.material3)
             implementation(libs.kotlinx.serialization.json)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
+            implementation("org.bouncycastle:bcpkix-jdk18on:1.80.2")
         }
         jvmTest.dependencies {
             implementation(libs.kotlin.testJunit)
@@ -51,6 +52,7 @@ compose.desktop {
         mainClass = "com.vlad.tester.desktop.MainKt"
         javaHome = providers.environmentVariable("JAVA_HOME").orElse(providers.systemProperty("java.home")).get()
         nativeDistributions {
+            modules("jdk.httpserver", "java.desktop", "jdk.crypto.ec")
             targetFormats(TargetFormat.Dmg)
             packageName = "Tester Desktop"
             // jpackage requires a positive major version even for prerelease apps.

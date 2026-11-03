@@ -288,6 +288,9 @@ class DeviceManagerTest {
         try {
             assertEquals(apk, droppedBuild(listOf(apk), false))
             assertEquals(app, droppedBuild(listOf(app), true))
+            assertEquals(apk, droppedBuild(listOf(apk)))
+            assertEquals(app, droppedBuild(listOf(app)))
+            assertFailsWith<DesktopFailure> { droppedBuild(listOf(apk, app)) }
             assertFailsWith<DesktopFailure> { droppedBuild(emptyList(), false) }
             assertFailsWith<DesktopFailure> { droppedBuild(listOf(apk, apk), false) }
             assertFailsWith<DesktopFailure> { droppedBuild(listOf(apk), true) }
@@ -297,6 +300,31 @@ class DeviceManagerTest {
             apk.delete()
             app.delete()
             directory.delete()
+        }
+
+    }
+
+    @Test
+    fun evidenceUsbRouteIsPinnedAndNeverRebindsConflicts() {
+        val device = Device("one", "Phone", Platform.ANDROID, "device")
+        for (conflict in listOf(false, true)) {
+            val calls = mutableListOf<List<String>>()
+            var enabled = false
+            val manager = DeviceManager(CommandRunner { command, _ ->
+                calls += command
+                if (command.contains("--list")) {
+                    if (conflict) "UsbFfs tcp:8766 tcp:9000"
+                    else if (enabled) "UsbFfs tcp:8766 tcp:8766" else ""
+                } else { enabled = true; "" }
+            }, adb = "/fake/adb")
+            if (conflict) {
+                assertFailsWith<DesktopFailure> { manager.enableEvidenceUsb(device) }
+                assertTrue(calls.none { it.contains("--no-rebind") })
+            } else {
+                manager.enableEvidenceUsb(device)
+                assertEquals(listOf("/fake/adb", "-s", "one", "reverse", "--no-rebind", "tcp:8766", "tcp:8766"),
+                    calls.single { it.contains("--no-rebind") })
+            }
         }
     }
 }

@@ -6,5 +6,7 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Tester uses the camera to capture QA evidence.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Tester connects to your explicitly paired Tester Desktop to check its availability.</string>
 </dict>
 </plist>

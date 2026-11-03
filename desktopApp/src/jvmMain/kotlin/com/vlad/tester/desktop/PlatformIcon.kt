@@ -10,9 +10,11 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.MaterialTheme
 
 @Composable
 internal fun PlatformIcon(platform: Platform) {
+    val appleColor = MaterialTheme.colorScheme.onSurface
     Canvas(Modifier.size(28.dp).semantics {
         contentDescription = if (platform == Platform.ANDROID) "Android" else "Apple iOS"
     }) {
@@ -39,7 +41,7 @@ internal fun PlatformIcon(platform: Platform) {
                     moveTo(12f, 5f)
                     cubicTo(12f, 1f, 15f, 1f, 17f, 0f)
                     cubicTo(17f, 3f, 15f, 5f, 12f, 5f); close()
-                }, Color(0xFFE8EDF7))
+                }, appleColor)
             }
         }
     }

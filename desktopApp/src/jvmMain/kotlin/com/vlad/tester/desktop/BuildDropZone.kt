@@ -30,20 +30,26 @@ internal fun droppedBuild(files: List<File>, simulator: Boolean): File {
     return file
 }
 
+internal fun droppedBuild(files: List<File>): File {
+    if (files.size != 1) throw DesktopFailure("Drop exactly one APK or simulator .app.")
+    return droppedBuild(files, files.single().extension.equals("app", true))
+}
+
 @Composable
 internal fun BuildDropZone(
-    simulator: Boolean, enabled: Boolean, onDrop: (File) -> Unit, onError: (String) -> Unit, modifier: Modifier
+    enabled: Boolean, onDrop: (File) -> Unit, onError: (String) -> Unit,
+    background: Color, foreground: Color, accent: Color, modifier: Modifier
 ) {
     val currentEnabled by rememberUpdatedState(enabled)
     val currentDrop by rememberUpdatedState(onDrop)
     val currentError by rememberUpdatedState(onError)
     SwingPanel(modifier = modifier, factory = {
         val label = JLabel(
-            if (simulator) "Drop simulator .app here" else "Drop Android APK here", SwingConstants.CENTER
-        ).apply { foreground = Color(0x94, 0xA3, 0xB8) }
+            "Drop Android APK or iOS simulator .app here", SwingConstants.CENTER
+        ).apply { this.foreground = foreground }
         val panel = JPanel(BorderLayout()).apply {
-            background = Color(0x16, 0x1E, 0x2C)
-            border = BorderFactory.createDashedBorder(Color(0x4A, 0xDE, 0x80))
+            this.background = background
+            border = BorderFactory.createDashedBorder(accent)
             add(label, BorderLayout.CENTER)
         }
         val listener = object : DropTargetAdapter() {
@@ -62,7 +68,7 @@ internal fun BuildDropZone(
                     val value = event.transferable.getTransferData(DataFlavor.javaFileListFlavor)
                     val list = value as? List<*> ?: throw DesktopFailure("The dropped content is not a file list.")
                     val files = list.map { it as? File ?: throw DesktopFailure("Drop local files only.") }
-                    currentDrop(droppedBuild(files, simulator))
+                    currentDrop(droppedBuild(files))
                     event.dropComplete(true)
                 } catch (error: DesktopFailure) {
                     event.dropComplete(false)
@@ -81,5 +87,8 @@ internal fun BuildDropZone(
         panel
     }, update = { panel ->
         panel.isEnabled = enabled
+        panel.background = background
+        (panel.getComponent(0) as JLabel).foreground = foreground
+        panel.border = BorderFactory.createDashedBorder(accent)
     })
 }

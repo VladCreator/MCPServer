@@ -11,8 +11,29 @@ struct ComposeView: UIViewControllerRepresentable {
 }
 
 struct ContentView: View {
+    @StateObject private var desktop = DesktopConnection()
+    @State private var showDesktop = false
+
     var body: some View {
         ComposeView()
             .ignoresSafeArea()
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Text(desktop.paired ? desktop.status : "Desktop not paired")
+                        .font(.caption).lineLimit(1)
+                    Spacer()
+                    Button("Desktop") { showDesktop = true }
+                }.padding(10).background(.regularMaterial)
+            }
+            .sheet(isPresented: $showDesktop) {
+                DesktopConnectionPanel(connection: desktop)
+            }
+            .task {
+                while !Task.isCancelled {
+                    await desktop.refresh()
+                    do { try await Task.sleep(for: .seconds(10)) }
+                    catch { return }
+                }
+            }
     }
 }

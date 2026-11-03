@@ -183,6 +183,24 @@ class DeviceManager(
         throw DesktopFailure("Tester opened, but server startup was not confirmed. Check the device dashboard for errors or permission prompts.")
     }
 
+    fun enableEvidenceUsb(device: Device) {
+        if (device.platform != Platform.ANDROID || !device.canInstall) throw DesktopFailure("Select an authorized Android device.")
+        val tool = requireAdb()
+        val list = runner.run(listOf(tool, "-s", device.id, "reverse", "--list"), 15)
+        val matches = list.lineSequence().filter { it.isNotBlank() }.map { it.trim().split(Regex("\\s+")) }
+            .filter { it.size == 3 && it[1] == "tcp:$EVIDENCE_PORT" }.toList()
+        if (matches.isNotEmpty() && matches.any { it[2] != "tcp:$EVIDENCE_PORT" }) {
+            throw DesktopFailure("Device port $EVIDENCE_PORT is already reversed elsewhere.")
+        }
+        if (matches.isEmpty()) runner.run(listOf(tool, "-s", device.id, "reverse", "--no-rebind",
+            "tcp:$EVIDENCE_PORT", "tcp:$EVIDENCE_PORT"), 15)
+        val after = runner.run(listOf(tool, "-s", device.id, "reverse", "--list"), 15)
+        if (after.lineSequence().none {
+                val fields = it.trim().split(Regex("\\s+"))
+                fields.size == 3 && fields[1] == "tcp:$EVIDENCE_PORT" && fields[2] == "tcp:$EVIDENCE_PORT"
+            }) throw DesktopFailure("USB evidence route was not confirmed.")
+    }
+
     fun boot(device: Device) {
         if (device.platform != Platform.IOS_SIMULATOR || device.state != "Shutdown") {
             throw DesktopFailure("Only a shutdown iOS simulator can be booted.")

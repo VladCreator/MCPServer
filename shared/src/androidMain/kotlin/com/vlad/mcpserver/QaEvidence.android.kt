@@ -110,6 +110,12 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     val context = LocalContext.current
     val repository = remember(context) { QaEvidenceRepository(context) }
     val scope = rememberCoroutineScope()
+    val desktop = remember(context) { DesktopEvidenceClient(context) }
+    var desktopDialog by remember { mutableStateOf(false) }
+    var desktopStatus by remember { mutableStateOf("Desktop not paired") }
+    var sendFlow by remember { mutableStateOf<Long?>(null) }
+    var sendEntries by remember { mutableStateOf<List<QaEvidence>>(emptyList()) }
+    var sendDestination by remember { mutableStateOf("") }
     var entries by remember { mutableStateOf<List<QaEvidence>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -183,6 +189,21 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     }
     val actionsEnabled = !busy && downloadPath == null
 
+    LaunchedEffect(desktop) {
+        while (true) {
+            desktopStatus = try {
+                withContext(Dispatchers.IO) {
+                    if (desktop.pairing() == null) "Desktop not paired" else desktop.status()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                "Desktop unavailable: ${failure.localizedMessage}"
+            }
+            kotlinx.coroutines.delay(10_000)
+        }
+    }
+
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshRevision++ }
     LaunchedEffect(refreshRevision, evidenceRevision) {
         loading = true
@@ -246,8 +267,10 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("QA Evidence", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                TextButton(onClick = { desktopDialog = true }, enabled = actionsEnabled) { Text("Desktop") }
                 TextButton(onClick = { refreshRevision++ }, enabled = !loading && !busy) { Text("Refresh") }
             }
+            Text(desktopStatus, style = MaterialTheme.typography.bodySmall)
             Text("Reports, retained run artifacts and saved media. Sharing sends a copy to an app you choose.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (loading || busy) CircularProgressIndicator(Modifier.size(24.dp))
@@ -307,7 +330,19 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                                     contentDescription = null, modifier = Modifier.size(20.dp))
                                 Text("${flowLabel(flowId)} (${flowEvidence.size})",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary)
+                                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                                if (flowId != null) TextButton(enabled = actionsEnabled, onClick = {
+                                    try {
+                                        val pair = desktop.pairing()
+                                        if (pair == null) desktopDialog = true else {
+                                            sendDestination = pair.url
+                                            sendEntries = entries.filter { it.flowId == flowId }
+                                            sendFlow = flowId
+                                        }
+                                    } catch (failure: Exception) {
+                                        error = "Cannot read Desktop pairing: ${failure.localizedMessage}"
+                                    }
+                                }) { Text("Send") }
                             }
                         }
                         if (flowExpanded) items(flowEvidence, key = { it.id }) { item ->
@@ -340,6 +375,34 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                 }
             }
         }
+    }
+    if (desktopDialog) DesktopPairingDialog(desktop, { desktopDialog = false }) {
+        desktopStatus = it
+        desktopDialog = false
+    }
+    sendFlow?.let { flow ->
+        AlertDialog(onDismissRequest = { sendFlow = null }, title = { Text("Send Flow #$flow to Desktop?") },
+            text = {
+                Text("Send all ${sendEntries.size} saved files for this flow, including reports and photos across dates, " +
+                    "to $sendDestination. Evidence may contain private project data. Originals stay on this device. " +
+                    "Maximum 200 files / 100 MiB. No automatic retry.")
+            },
+            dismissButton = { TextButton(onClick = { sendFlow = null }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = {
+                val ids = sendEntries.map { it.id }.toSet()
+                sendFlow = null
+                busy = true
+                scope.launch {
+                    try {
+                        notice = withContext(Dispatchers.IO) { desktop.sendFlow(repository, flow, ids) }
+                        error = null
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        error = "Evidence Send failed: ${failure.localizedMessage}. Check Desktop inbox before retrying."
+                    } finally { busy = false }
+                }
+            }) { Text("Send") } })
     }
     preview?.let { current ->
         Dialog(onDismissRequest = { preview = null },
