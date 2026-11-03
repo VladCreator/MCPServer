@@ -1,6 +1,9 @@
 package com.vlad.mcpserver
 
 import java.nio.file.Files
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -192,6 +195,47 @@ class QaEvidenceTest {
             assertFalse(directory.resolve("${photo.name}.tmp").exists())
         } finally {
             directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun downloadCopiesTheCompleteBinaryFileAndClosesTheDestination() {
+        val file = Files.createTempFile("qa-download-test", ".jpg").toFile()
+        try {
+            val content = ByteArray(300 * 1024) { (it % 256).toByte() }
+            file.writeBytes(content)
+            var closed = false
+            val output = object : ByteArrayOutputStream() {
+                override fun close() {
+                    closed = true
+                    super.close()
+                }
+            }
+            writeEvidenceDownload(file) { output }
+            assertTrue(output.toByteArray().contentEquals(content))
+            assertTrue(closed)
+            assertTrue(file.readBytes().contentEquals(content))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun downloadSurfacesDestinationFailuresAndPreservesTheOriginal() {
+        val file = Files.createTempFile("qa-download-failure-test", ".txt").toFile()
+        try {
+            file.writeText("Original evidence")
+            assertFailsWith<IllegalStateException> { writeEvidenceDownload(file) { null } }
+            var closed = false
+            val output = object : OutputStream() {
+                override fun write(value: Int) { throw IOException("Destination full") }
+                override fun close() { closed = true }
+            }
+            assertFailsWith<IOException> { writeEvidenceDownload(file) { output } }
+            assertTrue(closed)
+            assertEquals("Original evidence", file.readText())
+        } finally {
+            file.delete()
         }
     }
 }

@@ -34,7 +34,7 @@ class AppViewModelTest {
                 "c1", "ui_find", "{}", ToolCallOutcome.SUCCESS, "", number.toLong()
             )))
         }
-        assertEquals(800, model.executionLogs.value.size)
+        assertEquals(1000, model.executionLogs.value.size)
         assertEquals(804L, model.executionLogs.value.first().timestamp)
         assertEquals(5L, model.executionLogs.value.last().timestamp)
         val revision = model.qaEvidenceRevision.value
@@ -42,7 +42,7 @@ class AppViewModelTest {
             "c1", "take_screenshot", "{}", ToolCallOutcome.SUCCESS, "", 805
         )))
         assertEquals(revision + 1, model.qaEvidenceRevision.value)
-        assertEquals(800, model.executionLogs.value.size)
+        assertEquals(1000, model.executionLogs.value.size)
     }
 
     @Test

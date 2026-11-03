@@ -3,13 +3,15 @@ package com.vlad.mcpserver
 import android.content.ClipData
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -30,10 +32,13 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.VideoFile
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -86,8 +92,72 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     var busy by remember { mutableStateOf(false) }
     var refreshRevision by remember { mutableStateOf(0) }
     var expandedDays by remember { mutableStateOf(emptySet<LocalDate>()) }
+    var expandedFlows by remember { mutableStateOf(emptySet<Pair<LocalDate, Long?>>()) }
     var preview by remember { mutableStateOf<EvidencePreview?>(null) }
     var transfer by remember { mutableStateOf<EvidenceTransfer?>(null) }
+    var downloadPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var downloadName by rememberSaveable { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val downloadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val path = downloadPath
+        val name = downloadName
+        if (path == null) {
+            error = "Unable to save evidence: the pending download is unavailable."
+        } else {
+            busy = true
+            scope.launch {
+                try {
+                    val uri = result.data?.data.takeIf { result.resultCode == Activity.RESULT_OK }
+                    withContext(Dispatchers.IO) { repository.finishDownload(path, uri) }
+                    check(result.resultCode != Activity.RESULT_OK || uri != null) { "No download destination was returned." }
+                    notice = if (uri == null) "Download cancelled." else "Saved $name."
+                    error = null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    error = "Unable to save evidence: ${failure.localizedMessage}. The destination may be incomplete."
+                } finally {
+                    downloadPath = null
+                    downloadName = null
+                    busy = false
+                }
+            }
+        }
+    }
+
+    fun download(item: QaEvidence) {
+        busy = true
+        notice = null
+        scope.launch {
+            var staged: File? = null
+            try {
+                val file = withContext(Dispatchers.IO) { repository.stage(item) }
+                staged = file
+                downloadPath = file.path
+                downloadName = item.name
+                downloadLauncher.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = item.mime
+                    putExtra(Intent.EXTRA_TITLE, item.name)
+                })
+                error = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                staged?.let { file ->
+                    if (file.exists() && !file.delete()) failure.addSuppressed(
+                        IllegalStateException("Unable to remove temporary download.")
+                    )
+                }
+                downloadPath = null
+                downloadName = null
+                error = "Unable to start evidence download: ${failure.localizedMessage}"
+            } finally {
+                busy = false
+            }
+        }
+    }
+    val actionsEnabled = !busy && downloadPath == null
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshRevision++ }
     LaunchedEffect(refreshRevision, evidenceRevision) {
@@ -155,6 +225,7 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (loading || busy) CircularProgressIndicator(Modifier.size(24.dp))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             if (!loading && entries.isEmpty() && error == null) {
                 Text("No saved evidence yet. Record a QA step, request a screenshot, or retain a run artifact. Host reports are not stored here.",
                     style = MaterialTheme.typography.bodySmall)
@@ -188,28 +259,49 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                         }
                     }
                     if (expanded) evidence.groupBy { it.flowId }.forEach { (flowId, flowEvidence) ->
+                        val flowKey = day to flowId
+                        val flowExpanded = flowKey in expandedFlows
                         item(key = "flow:$day:$flowId") {
-                            Text("${flowLabel(flowId)} (${flowEvidence.size})",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(vertical = 4.dp))
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .semantics { stateDescription = if (flowExpanded) "Expanded" else "Collapsed" }
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClickLabel = if (flowExpanded) "Collapse flow" else "Expand flow"
+                                    ) {
+                                        expandedFlows = if (flowExpanded) expandedFlows - flowKey else expandedFlows + flowKey
+                                    }
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(if (flowExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    contentDescription = null, modifier = Modifier.size(20.dp))
+                                Text("${flowLabel(flowId)} (${flowEvidence.size})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
                         }
-                        items(flowEvidence, key = { it.id }) { item ->
+                        if (flowExpanded) items(flowEvidence, key = { it.id }) { item ->
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 EvidenceFileIcon(item.mime)
-                                Column(Modifier.weight(1f)) {
+                                Column(Modifier.weight(1f)
+                                    .clickable(enabled = actionsEnabled, role = Role.Button,
+                                        onClickLabel = "View ${item.name}") { view(item) }
+                                    .heightIn(min = 48.dp),
+                                    verticalArrangement = Arrangement.Center) {
                                     Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text("${item.origin} | ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(item.created))}",
                                         style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }
-                                TextButton(onClick = { view(item) }, enabled = !busy,
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                                    Text(if (isEvidenceText(item.mime) || item.mime.startsWith("image/")) "View" else "Open")
+                                IconButton(onClick = { transfer = EvidenceTransfer(item, share = true) },
+                                    enabled = actionsEnabled) {
+                                    Icon(Icons.Rounded.Share, contentDescription = "Share ${item.name}")
                                 }
-                                TextButton(onClick = { transfer = EvidenceTransfer(item, share = true) }, enabled = !busy,
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                                    Text("Share")
+                                IconButton(onClick = { download(item) }, enabled = actionsEnabled) {
+                                    Icon(Icons.Rounded.Download, contentDescription = "Download ${item.name}")
                                 }
                             }
                         }

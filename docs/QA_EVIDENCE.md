@@ -1,9 +1,9 @@
-# QA Evidence - 0.3.1
+# QA Evidence - 0.3.2
 
 The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 640 dp or more. Narrow screens stack the two cards to keep their contents usable.
 Activity entries are grouped by calendar day in the device's time zone, newest
-first, with up to **800** recent entries retained for display and after restart.
+first, with up to **1000** recent entries retained for display and after restart.
 Date headers show entry counts and can collapse or expand a day's activities;
 Activity days start expanded. Every row displays its **Flow #N** or **Unlinked**
 label beside the tool name, so activities from the same flow can be followed across dates. Tied
@@ -15,8 +15,11 @@ tools, and when returning to Tester; use Refresh for files saved by another proc
 Evidence files remain grouped by calendar day in the device's time zone, newest first.
 All days start collapsed: tap a date to expand or collapse its complete file list.
 Each date shows its file count; all dates are available in the scrollable list.
-View/Open and Share sit beside each filename; the source and local time appear
-underneath the name. Compact rows include file-type icons for images, videos,
+Within each date, **Flow #N** and **Unlinked** headers also collapse or expand
+their file lists independently; flows start collapsed. Tap a filename to view
+its content. Share and Download icon buttons sit beside each filename with
+accessible labels; the source and local time appear underneath the name.
+Compact rows include file-type icons for images, videos,
 PDFs, structured data and text reports.
 
 ## Flow correlation
@@ -70,7 +73,7 @@ and text/data documents have distinct treatments.
   camera image.
 - JPEGs explicitly requested using `take_screenshot` are now also saved in
   `files/qa/evidence`, not just returned inline to the agent. They are linked to
-  the active session's flow and appear with **View** and **Share** actions.
+  the active session's flow and support filename previews, sharing and downloads.
   A storage failure is reported as an error; no screenshot is captured automatically.
 - Retained native run timelines as Markdown, JSON and JUnit, plus existing run
   artifacts. The dashboard is local user access; remote MCP run-key and sensitive
@@ -95,17 +98,25 @@ within the evidence source (for example `r-<12 hex>.md` for native reports,
 `p-<12 hex>.jpg` for legacy camera photos, `steps-<8 hex>.txt` for session
 lists, and `s01-<8 hex>.jpg` for step screenshots). Original file paths and validation are unchanged.
 
-## Viewing and sharing
+## Viewing, sharing and downloading
 
-**View** opens text reports as selectable plain text (no HTML/script execution),
+**Tapping a filename** opens text reports as selectable plain text (no HTML/script execution),
 or a sampled image preview inside Tester. Text previews show up to 256 KiB with
 an explicit truncation notice; sharing preserves the full file. PDF and video
-**Open** uses an installed Android viewer.
+files open in an installed Android viewer after confirmation. There is no separate View button.
 
-**Share** opens Android's Sharesheet, where the user can choose Drive, mail or
+The **Share icon** opens Android's Sharesheet after confirmation, where the user can choose Drive, mail or
 another installed app. Tester does not upload anything itself. External opening
 and sharing require explicit confirmation because legacy QA notes and media may
 contain unredacted sensitive content.
+
+The **Download icon** opens Android's system save picker with the evidence's
+short filename and MIME type. Choose Downloads or another document location to
+save the complete file, not just its preview. Cancelling leaves the original
+evidence unchanged. Copy failures are shown in the card; a failed destination
+may contain an incomplete file. The picker supplies access only to the selected
+destination, so no broad storage permission is needed. Saved copies may contain
+sensitive QA content and are outside Tester's private storage.
 
 Only a staged copy is exposed through a non-exported FileProvider with temporary
 read permission for the chosen app. The provider cannot expose original app

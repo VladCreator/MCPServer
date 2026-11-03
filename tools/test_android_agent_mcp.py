@@ -94,7 +94,7 @@ class AndroidAgentContractTests(unittest.TestCase):
         result = self.call("get_capabilities", {})
         self.assertFalse(result["isError"])
         capabilities = result["structuredContent"]
-        self.assertEqual("0.3.1", capabilities["server_version"])
+        self.assertEqual("0.3.2", capabilities["server_version"])
         tools = capabilities["tools"]
         self.assertEqual(43, len(tools))
         self.assertFalse(capabilities["visibility"]["live_capture"])

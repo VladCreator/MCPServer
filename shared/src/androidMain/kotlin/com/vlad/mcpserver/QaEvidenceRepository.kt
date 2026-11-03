@@ -1,6 +1,7 @@
 package com.vlad.mcpserver
 
 import android.content.Context
+import android.net.Uri
 import android.os.Environment
 import com.vlad.mcpserver.mcp.RunReports
 import com.vlad.mcpserver.mcp.RunStore
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.io.File
+import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -180,6 +182,17 @@ internal class QaEvidenceRepository(context: Context) {
         }
     }
 
+    fun finishDownload(path: String, destination: Uri?) {
+        val file = EvidenceFiles(listOf(shareDir)).checked(File(path))
+        try {
+            if (destination != null) {
+                writeEvidenceDownload(file) { context.contentResolver.openOutputStream(destination, "wt") }
+            }
+        } finally {
+            check(file.delete()) { "Unable to remove temporary download." }
+        }
+    }
+
     private fun cleanShares() {
         if (!shareDir.exists()) return
         checkNotNull(shareDir.listFiles()) { "Unable to inspect shared evidence copies." }.forEach {
@@ -191,5 +204,13 @@ internal class QaEvidenceRepository(context: Context) {
 
     companion object {
         private const val MAX_SHARE_BYTES = 256L * 1024 * 1024
+    }
+}
+
+internal fun writeEvidenceDownload(file: File, openOutput: () -> OutputStream?) {
+    file.inputStream().use { input ->
+        checkNotNull(openOutput()) { "Unable to open the selected download destination." }.use { output ->
+            input.copyTo(output)
+        }
     }
 }

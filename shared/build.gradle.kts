@@ -48,6 +48,7 @@ kotlin {
     
     sourceSets {
         androidMain.dependencies {
+            implementation(libs.androidx.activity.compose)
             implementation("org.yaml:snakeyaml:2.3")
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.compose.uiTooling)

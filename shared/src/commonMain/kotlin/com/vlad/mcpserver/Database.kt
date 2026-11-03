@@ -5,7 +5,7 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal const val MAX_ACTIVITY_HISTORY = 800
+internal const val MAX_ACTIVITY_HISTORY = 1000
 
 /**
  * Data class representing a connected AI client instance.

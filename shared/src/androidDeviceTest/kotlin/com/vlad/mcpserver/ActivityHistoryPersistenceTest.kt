@@ -17,9 +17,9 @@ class ActivityHistoryPersistenceTest {
                 repeat(850) {
                     database.insertCommandHistory("client", "ui_find", "{}", "SUCCESS", null)
                 }
-                assertEquals(800, database.getCommandHistories(1000).size)
+                assertEquals(1000, database.getCommandHistories(1000).size)
                 database.pruneHistory()
-                assertEquals(800, database.getCommandHistories(1000).size)
+                assertEquals(1000, database.getCommandHistories(1000).size)
             } finally {
                 database.close()
             }
@@ -27,7 +27,7 @@ class ActivityHistoryPersistenceTest {
             try {
                 reopened.init()
                 val history = reopened.getCommandHistories(1000)
-                assertEquals(800, history.size)
+                assertEquals(1000, history.size)
                 assertEquals(850L, history.first().id)
                 assertEquals(51L, history.last().id)
             } finally {
