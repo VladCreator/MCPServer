@@ -117,6 +117,29 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
         error = message
         record("FAILED: $message")
     }
+    fun review(targets: List<Device>) {
+        val files = targets.map { it to if (it.platform == Platform.ANDROID) apk else app }
+        if (files.any { it.second == null }) {
+            fail("Drop a matching APK / simulator .app before installing.")
+            return
+        }
+        scope.launch {
+            setBusy(true)
+            error = null
+            try {
+                pending = withContext(Dispatchers.IO) {
+                    files.map { (device, file) ->
+                        val build = requireNotNull(file)
+                        InstallTask(device, build.canonicalFile, manager.inspect(build, device.platform))
+                    }
+                }
+            } catch (failure: DesktopFailure) {
+                fail(failure.message ?: "Build inspection failed.")
+            } catch (failure: IOException) {
+                fail("Cannot read selected build: ${failure.message}")
+            } finally { setBusy(false) }
+        }
+    }
     suspend fun refresh() {
         scanning = true
         try {
@@ -159,12 +182,12 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                 SelectionContainer(Modifier.weight(1f)) { Text(error!!, color = MaterialTheme.colorScheme.error) }
                 TextButton(onClick = { error = null }) { Text("Dismiss") }
             }
-            EvidenceInbox(manager, discovery.devices, busy, ::record)
         }
+        EvidenceInbox(manager, discovery.devices, busy, ::record)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Installation files", style = MaterialTheme.typography.titleLarge)
-                BuildDropZone(!busy && pending.isEmpty(), { file ->
+                BuildDropZone(!busy && pending.isEmpty() && selected.isEmpty(), { file ->
                     val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
                     apk = if (platform == Platform.ANDROID) file else null
                     app = if (platform == Platform.IOS_SIMULATOR) file else null
@@ -174,32 +197,16 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                     java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
                     Modifier.fillMaxWidth().height(60.dp))
                 BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
+                if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
+                    style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
-                    Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty(),
+                    Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty() &&
+                        discovery.devices.filter { it.key in selected }.all {
+                            if (it.platform == Platform.ANDROID) apk != null else app != null
+                        },
                         onClick = {
-                            val targets = discovery.devices.filter { it.key in selected }
-                            val files = targets.map { it to if (it.platform == Platform.ANDROID) apk else app }
-                            if (files.any { it.second == null }) {
-                                fail("Drop the matching APK / simulator .app for every selected device.")
-                            } else scope.launch {
-                                setBusy(true)
-                                error = null
-                                try {
-                                    pending = withContext(Dispatchers.IO) {
-                                        files.map { (device, file) ->
-                                            val build = requireNotNull(file)
-                                            InstallTask(device, build.canonicalFile, manager.inspect(build, device.platform))
-                                        }
-                                    }
-                                } catch (failure: DesktopFailure) {
-                                    fail(failure.message ?: "Build inspection failed.")
-                                } catch (failure: IOException) {
-                                    fail("Cannot read selected build: ${failure.message}")
-                                } finally {
-                                    setBusy(false)
-                                }
-                            }
+                            review(discovery.devices.filter { it.key in selected })
                         }) { Text("Review installation") }
                 }
             }
@@ -221,9 +228,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                             Column {
                                 Row {
                                     Checkbox(checked = device.key in selected,
-                                        enabled = device.canInstall && !busy && pending.isEmpty() &&
-                                            ((device.platform == Platform.ANDROID && apk != null) ||
-                                                (device.platform == Platform.IOS_SIMULATOR && app != null)),
+                                        enabled = device.canInstall && !busy && pending.isEmpty(),
                                         onCheckedChange = {
                                             selected = if (it) selected + device.key else selected - device.key
                                         })
@@ -234,6 +239,11 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                                                 else MaterialTheme.colorScheme.onSurfaceVariant)
                                         Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
                                         SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
+                                        val matchingFile = if (device.platform == Platform.ANDROID) apk else app
+                                        if (device.key in selected && matchingFile != null) {
+                                            Button(enabled = !busy && !scanning && pending.isEmpty(),
+                                                onClick = { review(listOf(device)) }) { Text("Install") }
+                                        }
                                         if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
                                             color = MaterialTheme.colorScheme.error)
                                         if (device.platform == Platform.ANDROID) {

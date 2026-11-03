@@ -89,6 +89,8 @@ internal fun BuildDropZone(
         panel.isEnabled = enabled
         panel.background = background
         (panel.getComponent(0) as JLabel).foreground = foreground
+        (panel.getComponent(0) as JLabel).text = if (enabled)
+            "Drop Android APK or iOS simulator .app here" else "Drop disabled - uncheck devices or finish the current operation"
         panel.border = BorderFactory.createDashedBorder(accent)
     })
 }

@@ -41,6 +41,15 @@ internal class EvidenceReceiver(private val inbox: File = File(
     private val server: HttpsServer
     val port: Int get() = server.address.port
     private val executor = Executors.newFixedThreadPool(2)
+    private data class UsbKey(val value: String, val expires: Long)
+    private val usbTokens = java.util.concurrent.ConcurrentHashMap<String, UsbKey>()
+
+    fun usbKey(deviceId: String): String =
+        ByteArray(24).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+            .also { usbTokens[deviceId] = UsbKey(it, System.currentTimeMillis() + 120_000) }
+
+    fun revokeUsbKey(deviceId: String) { usbTokens.remove(deviceId) }
+    fun usbPaired(deviceId: String): Boolean = usbTokens[deviceId]?.expires == Long.MAX_VALUE
     @Volatile var latestError: String? = null
         private set
     @Volatile var received: List<ReceivedFlow> = emptyList()
@@ -82,7 +91,13 @@ internal class EvidenceReceiver(private val inbox: File = File(
     private fun handle(exchange: HttpExchange, upload: Boolean) {
         try {
             val supplied = exchange.requestHeaders.getFirst("Authorization").orEmpty()
-            if (!MessageDigest.isEqual(supplied.toByteArray(), "Bearer $token".toByteArray())) {
+            val usb = usbTokens.entries.firstOrNull {
+                it.value.expires > System.currentTimeMillis() &&
+                    MessageDigest.isEqual(supplied.toByteArray(), "Bearer ${it.value.value}".toByteArray())
+            }
+            if ((listOf(token) + listOfNotNull(usb?.value?.value)).none {
+                    MessageDigest.isEqual(supplied.toByteArray(), "Bearer $it".toByteArray())
+                }) {
                 reply(exchange, 401, "Pair with Tester Desktop first.")
                 return
             }
@@ -93,8 +108,12 @@ internal class EvidenceReceiver(private val inbox: File = File(
                 reply(exchange, 405, "Unsupported method."); return
             }
             if (!upload) {
+                usb?.let { usbTokens.replace(it.key, it.value, it.value.copy(expires = Long.MAX_VALUE)) }
                 reply(exchange, 200, "Tester Desktop active - evidence receiver ready.")
                 return
+            }
+            if (usb != null && usb.value.expires != Long.MAX_VALUE) {
+                reply(exchange, 403, "Confirm pairing on Android first."); return
             }
             val flow = exchange.requestHeaders.getFirst("X-Tester-Flow").orEmpty()
             if (!flow.matches(Regex("[0-9]{1,19}"))) {

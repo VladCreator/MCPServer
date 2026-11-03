@@ -128,6 +128,21 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     var downloadPath by rememberSaveable { mutableStateOf<String?>(null) }
     var downloadName by rememberSaveable { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    fun sendApprovedFlow(flow: Long) {
+        val ids = sendEntries.map { it.id }.toSet()
+        sendFlow = null
+        busy = true
+        scope.launch {
+            try {
+                notice = withContext(Dispatchers.IO) { desktop.sendFlow(repository, flow, ids) }
+                error = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error = "Evidence Send failed: ${failure.localizedMessage}. Check Desktop inbox before retrying."
+            } finally { busy = false }
+        }
+    }
     val downloadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val path = downloadPath
         val name = downloadName
@@ -332,15 +347,22 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                                 if (flowId != null) TextButton(enabled = actionsEnabled, onClick = {
-                                    try {
-                                        val pair = desktop.pairing()
-                                        if (pair == null) desktopDialog = true else {
-                                            sendDestination = pair.url
-                                            sendEntries = entries.filter { it.flowId == flowId }
+                                    sendEntries = entries.filter { it.flowId == flowId }
+                                    busy = true
+                                    scope.launch {
+                                        try {
+                                            val pair = withContext(Dispatchers.IO) {
+                                                desktop.pairing()?.also { desktop.status(it) }
+                                            }
                                             sendFlow = flowId
-                                        }
-                                    } catch (failure: Exception) {
-                                        error = "Cannot read Desktop pairing: ${failure.localizedMessage}"
+                                            if (pair == null) desktopDialog = true else sendDestination = pair.url
+                                        } catch (cancelled: CancellationException) {
+                                            throw cancelled
+                                        } catch (failure: Exception) {
+                                            error = "Desktop unavailable: ${failure.localizedMessage}. Pair again using USB or Wi-Fi."
+                                            sendFlow = flowId
+                                            desktopDialog = true
+                                        } finally { busy = false }
                                     }
                                 }) { Text("Send") }
                             }
@@ -376,11 +398,18 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
             }
         }
     }
-    if (desktopDialog) DesktopPairingDialog(desktop, { desktopDialog = false }) {
+    if (desktopDialog) DesktopPairingDialog(desktop, {
+        desktopDialog = false
+        sendFlow = null
+    }, {
         desktopStatus = it
         desktopDialog = false
-    }
-    sendFlow?.let { flow ->
+        sendFlow?.let(::sendApprovedFlow)
+    }, sendDescription = sendFlow?.let {
+        "Confirming sends Flow #$it (${sendEntries.size} files) to this Desktop, including reports and photos. " +
+            "Evidence may contain private project data. Originals stay here. Limit: 200 files / 100 MiB. No automatic retry."
+    })
+    if (!desktopDialog) sendFlow?.let { flow ->
         AlertDialog(onDismissRequest = { sendFlow = null }, title = { Text("Send Flow #$flow to Desktop?") },
             text = {
                 Text("Send all ${sendEntries.size} saved files for this flow, including reports and photos across dates, " +
@@ -389,19 +418,7 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
             },
             dismissButton = { TextButton(onClick = { sendFlow = null }) { Text("Cancel") } },
             confirmButton = { TextButton(onClick = {
-                val ids = sendEntries.map { it.id }.toSet()
-                sendFlow = null
-                busy = true
-                scope.launch {
-                    try {
-                        notice = withContext(Dispatchers.IO) { desktop.sendFlow(repository, flow, ids) }
-                        error = null
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Exception) {
-                        error = "Evidence Send failed: ${failure.localizedMessage}. Check Desktop inbox before retrying."
-                    } finally { busy = false }
-                }
+                sendApprovedFlow(flow)
             }) { Text("Send") } })
     }
     preview?.let { current ->

@@ -201,6 +201,18 @@ class DeviceManager(
             }) throw DesktopFailure("USB evidence route was not confirmed.")
     }
 
+    fun pairEvidenceUsb(device: Device, key: String, fingerprint: String, code: String) {
+        require(key.matches(Regex("[a-f0-9]{48}")) && fingerprint.matches(Regex("[a-f0-9]{64}")) &&
+            code.matches(Regex("[0-9]{2}"))) { "Invalid USB pairing offer." }
+        enableEvidenceUsb(device)
+        val result = runner.run(listOf(requireAdb(), "-s", device.id, "shell", "am", "broadcast",
+            "-n", "com.vlad.mcpserver/com.vlad.mcpserver.DesktopPairingReceiver",
+            "--es", "key", key, "--es", "fingerprint", fingerprint, "--es", "code", code), 15)
+        if (!result.contains("Broadcast completed: result=1")) {
+            throw DesktopFailure("Tester did not accept pairing. Install the updated Android APK and open QA Evidence > Send.")
+        }
+    }
+
     fun boot(device: Device) {
         if (device.platform != Platform.IOS_SIMULATOR || device.state != "Shutdown") {
             throw DesktopFailure("Only a shutdown iOS simulator can be booted.")

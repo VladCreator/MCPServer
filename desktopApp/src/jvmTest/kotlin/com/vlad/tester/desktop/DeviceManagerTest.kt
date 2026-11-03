@@ -305,6 +305,27 @@ class DeviceManagerTest {
     }
 
     @Test
+    fun usbPairingTargetsProtectedReceiverAndRequiresAcknowledgement() {
+        val device = Device("one", "Phone", Platform.ANDROID, "device")
+        val key = "a".repeat(48)
+        val pin = "b".repeat(64)
+        for (accepted in listOf(false, true)) {
+            val calls = mutableListOf<List<String>>()
+            val manager = DeviceManager(CommandRunner { command, _ ->
+                calls += command
+                if (command.contains("--list")) "UsbFfs tcp:8766 tcp:8766"
+                else if (accepted) "Broadcast completed: result=1" else "Broadcast completed: result=0"
+            }, adb = "/fake/adb")
+            if (accepted) manager.pairEvidenceUsb(device, key, pin, "54")
+            else assertFailsWith<DesktopFailure> { manager.pairEvidenceUsb(device, key, pin, "54") }
+            val broadcast = calls.single { it.contains("broadcast") }
+            assertEquals(listOf("/fake/adb", "-s", "one", "shell", "am", "broadcast"), broadcast.take(6))
+            assertTrue(broadcast.contains("com.vlad.mcpserver/com.vlad.mcpserver.DesktopPairingReceiver"))
+            assertEquals(listOf("--es", "code", "54"), broadcast.takeLast(3))
+        }
+    }
+
+    @Test
     fun evidenceUsbRouteIsPinnedAndNeverRebindsConflicts() {
         val device = Device("one", "Phone", Platform.ANDROID, "device")
         for (conflict in listOf(false, true)) {

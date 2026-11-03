@@ -1,9 +1,11 @@
 # QA Evidence - 0.4.0
 
 Android can send a linked flow's saved evidence to the explicitly paired
-**Tester Desktop** inbox over encrypted USB or Wi-Fi. Select **Desktop** to pair
-and check availability, then **Send** beside a flow and confirm its destination
-and file count. All dates in that flow are included; originals are preserved.
+**Tester Desktop** inbox over encrypted USB or Wi-Fi. For USB, press **Send**
+beside a flow on Android, then **Pair** beside your device in Desktop's inbox.
+Confirm the matching two-digit number on Android to pair and send that flow.
+No URL or secret copying is needed. Wi-Fi setup remains under **Desktop >
+Wi-Fi / advanced setup**. All dates in that flow are included; originals are preserved.
 See [pairing, limits, and receiver setup](TESTER_DESKTOP.md#send-qa-evidence-to-desktop).
 
 The Android dashboard includes **QA Evidence** next to **Activity** at widths of

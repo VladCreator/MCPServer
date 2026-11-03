@@ -121,6 +121,21 @@ class EvidenceReceiverTest {
                     assertEquals(200, status.responseCode)
                     assertTrue(status.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }.contains("active"))
                 } finally { status.disconnect() }
+                val usbKey = receiver.usbKey("device-one")
+                assertTrue(!receiver.usbPaired("device-one"))
+                val beforeConfirmation = connect("/evidence", usbKey)
+                try {
+                    beforeConfirmation.requestMethod = "POST"
+                    assertEquals(403, beforeConfirmation.responseCode)
+                } finally { beforeConfirmation.disconnect() }
+                val confirm = connect("/status", usbKey)
+                try {
+                    assertEquals(200, confirm.responseCode)
+                    assertTrue(receiver.usbPaired("device-one"))
+                } finally { confirm.disconnect() }
+                receiver.revokeUsbKey("device-one")
+                val revoked = connect("/status", usbKey)
+                try { assertEquals(401, revoked.responseCode) } finally { revoked.disconnect() }
                 val zip = archive(root, listOf("e1.txt"))
                 val upload = connect("/evidence", receiver.token)
                 try {

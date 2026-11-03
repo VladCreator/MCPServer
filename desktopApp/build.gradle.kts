@@ -51,6 +51,10 @@ compose.desktop {
     application {
         mainClass = "com.vlad.tester.desktop.MainKt"
         javaHome = providers.environmentVariable("JAVA_HOME").orElse(providers.systemProperty("java.home")).get()
+        buildTypes.release.proguard {
+            // Rewriting signed crypto libraries invalidates their embedded JAR signatures.
+            isEnabled.set(false)
+        }
         nativeDistributions {
             modules("jdk.httpserver", "java.desktop", "jdk.crypto.ec")
             targetFormats(TargetFormat.Dmg)
@@ -75,7 +79,8 @@ val normalizeMacVersion = tasks.register<Exec>("normalizeMacVersion") {
 tasks.matching { it.name in setOf("packageDmg", "runDistributable", "packageDistributionForCurrentOS") }
     .configureEach { dependsOn(normalizeMacVersion) }
 
-tasks.matching { it.name == "createDistributable" }.configureEach { dependsOn(generateDesktopIcon) }
+tasks.matching { it.name in setOf("createDistributable", "createReleaseDistributable") }
+    .configureEach { dependsOn(generateDesktopIcon) }
 tasks.named<Copy>("jvmProcessResources") {
     from(rootProject.file("androidApp/src/main/ic_launcher-playstore.png")) { rename { "tester-icon.png" } }
 }

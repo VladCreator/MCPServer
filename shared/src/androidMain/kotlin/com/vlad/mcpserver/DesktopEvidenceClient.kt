@@ -18,6 +18,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.add
 
 internal data class DesktopPairing(val url: String, val key: String, val fingerprint: String)
+internal data class UsbPairingOffer(val pairing: DesktopPairing, val code: String)
 internal const val DESKTOP_MAX_BYTES = 100L * 1024 * 1024
 
 internal fun validateDesktopPairing(pair: DesktopPairing): DesktopPairing {
@@ -33,7 +34,26 @@ internal fun validateDesktopPairing(pair: DesktopPairing): DesktopPairing {
 
 internal class DesktopEvidenceClient(context: Context) {
     private val prefs = context.getSharedPreferences("desktop-pairing", Context.MODE_PRIVATE)
+    private val usbPrefs = context.getSharedPreferences("desktop-usb-offer", Context.MODE_PRIVATE)
     private val cache = context.cacheDir
+
+    fun usbOffer(): UsbPairingOffer? {
+        val expires = usbPrefs.getLong("expires", 0)
+        if (expires == 0L) return null
+        val remaining = expires - android.os.SystemClock.elapsedRealtime()
+        if (remaining !in 1..120_000) {
+            clearUsbOffer()
+            return null
+        }
+        val key = decryptSecret(usbPrefs.getString("key", null).orEmpty())
+            ?: error("Cannot decrypt USB pairing offer. Press Pair on Desktop again.")
+        return UsbPairingOffer(validateDesktopPairing(DesktopPairing("https://localhost:8766", key,
+            usbPrefs.getString("fingerprint", null).orEmpty())), usbPrefs.getString("code", null).orEmpty())
+    }
+
+    fun clearUsbOffer() {
+        check(usbPrefs.edit().clear().commit()) { "Cannot clear USB pairing offer." }
+    }
 
     fun pairing(): DesktopPairing? {
         val url = prefs.getString("url", null) ?: return null

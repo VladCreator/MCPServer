@@ -45,6 +45,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/qa_evidence_paths" />
         </provider>
+        <receiver
+            android:name="com.vlad.mcpserver.DesktopPairingReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
         <service
             android:name="com.vlad.mcpserver.McpServerKeepAliveService"
             android:exported="false"

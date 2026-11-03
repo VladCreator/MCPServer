@@ -43,6 +43,25 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
     var receiverError by remember { mutableStateOf<String?>(null) }
     var pairing by remember { mutableStateOf(false) }
     var starting by remember { mutableStateOf(false) }
+    var usbDevice by remember { mutableStateOf<Device?>(null) }
+    var usbCode by remember { mutableStateOf<String?>(null) }
+    var usbExpired by remember { mutableStateOf(false) }
+    var usbPaired by remember { mutableStateOf(false) }
+    LaunchedEffect(usbCode) {
+        usbExpired = false
+        usbPaired = false
+        if (usbCode != null) {
+            val deadline = System.currentTimeMillis() + 120_000
+            while (System.currentTimeMillis() < deadline) {
+                if (receiver?.usbPaired(usbDevice?.id.orEmpty()) == true) {
+                    usbPaired = true
+                    break
+                }
+                delay(500)
+            }
+            usbExpired = !usbPaired
+        }
+    }
     DisposableEffect(Unit) { onDispose { receiver?.close() } }
     LaunchedEffect(receiver) {
         while (receiver != null) {
@@ -74,8 +93,8 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                     }
                 }) { Text("Enable receiving") }
                 else {
-                    TextButton(onClick = { pairing = true }) { Text("Pair device") }
-                    TextButton(onClick = {
+                    TextButton(enabled = !starting, onClick = { pairing = true }) { Text("Wi-Fi / advanced") }
+                    TextButton(enabled = !starting, onClick = {
                         receiver?.close(); receiver = null
                         report("Evidence receiver stopped. Devices must pair again after restart.")
                     }) { Text("Stop") }
@@ -86,6 +105,42 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                 style = MaterialTheme.typography.bodySmall)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             receiverError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            devices.filter { it.platform == Platform.ANDROID && it.canInstall }.forEach { device ->
+                Row {
+                    Text(device.name, Modifier.weight(1f))
+                    TextButton(enabled = !busy && !starting, onClick = {
+                        starting = true
+                        scope.launch {
+                            var created: EvidenceReceiver? = null
+                            try {
+                                val current = receiver ?: withContext(Dispatchers.IO) {
+                                    EvidenceReceiver().also { created = it }
+                                }.also { receiver = it }
+                                val code = String.format(java.util.Locale.ROOT, "%02d", java.security.SecureRandom().nextInt(100))
+                                val key = current.usbKey(device.id)
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        manager.pairEvidenceUsb(device, key, current.fingerprint, code)
+                                    }
+                                } catch (failure: Exception) {
+                                    current.revokeUsbKey(device.id)
+                                    throw failure
+                                }
+                                usbDevice = device
+                                usbCode = code
+                                error = null
+                                report("USB pairing offered to ${device.name}. Confirm the matching number on Android.")
+                            } catch (cancelled: CancellationException) {
+                                if (receiver == null) created?.close()
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                error = "USB pairing failed: ${failure.message}"
+                                report(error!!)
+                            } finally { starting = false }
+                        }
+                    }) { Text("Pair") }
+                }
+            }
             LazyColumn(Modifier.heightIn(max = 100.dp)) {
                 items(flows, key = { it.folder.path }) { flow ->
                     TextButton(onClick = {
@@ -96,6 +151,16 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
             }
         }
     }
+    if (usbCode != null) AlertDialog(onDismissRequest = { usbCode = null },
+        title = { Text("Pair ${usbDevice?.name}") },
+        text = {
+            Column {
+                Text(usbCode!!, style = MaterialTheme.typography.displayLarge)
+                Text(if (usbPaired) "Android confirmed pairing. The requested flow can now transfer."
+                    else if (usbExpired) "Pairing expired. Press Pair again."
+                    else "On Android, open QA Evidence > Send. Confirm only if the same number appears. Expires in two minutes.")
+            }
+        }, confirmButton = { TextButton(onClick = { usbCode = null }) { Text("Done") } })
     if (pairing && receiver != null) {
         val current = receiver!!
         var addresses by remember { mutableStateOf(emptyList<String>()) }
