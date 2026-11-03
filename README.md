@@ -17,6 +17,10 @@ privacy and supported evidence types.
   automatic device discovery, explicit target confirmation, and installed-build
   verification. Connected physical iOS devices are detection-only. Run
   `./gradlew :desktopApp:run`; see [Tester Desktop](docs/TESTER_DESKTOP.md).
+- **Desktop QA Evidence inbox**: explicitly paired HTTPS receiver for Android
+  flow evidence over USB or Wi-Fi. Android and iOS can check paired receiver
+  availability; iOS sending remains unavailable. Desktop follows system appearance,
+  uses a single build drop area, and refreshes devices every ten seconds.
 
 - **MCP over Streamable HTTP** at `POST/GET/DELETE /mcp` (current MCP transport, with
   `Mcp-Session-Id` sessions).

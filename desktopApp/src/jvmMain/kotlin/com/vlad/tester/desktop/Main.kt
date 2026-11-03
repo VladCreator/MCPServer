@@ -63,15 +63,26 @@ fun main() = application {
     ) {
         val dark = isSystemInDarkTheme()
         MaterialTheme(colorScheme = if (dark) darkColorScheme(
-            primary = Color(0xFF8B93FF), secondary = Color(0xFF3DD9EB), tertiary = Color(0xFF4ADE80),
-            background = Color(0xFF070A12), surface = Color(0xFF0C111C),
-            surfaceVariant = Color(0xFF161E2C), onBackground = Color(0xFFE8EDF7),
-            onSurface = Color(0xFFE8EDF7), onSurfaceVariant = Color(0xFF94A3B8),
+            primary = Color(0xFF6366F1), onPrimary = Color.White,
+            secondary = Color(0xFF3DD9EB), tertiary = Color(0xFF4ADE80),
+            background = Color(0xFF090A0F), surface = Color(0xFF11131C),
+            surfaceVariant = Color(0xFF191B26), onBackground = Color(0xFFF8FAFC),
+            surfaceContainerLowest = Color(0xFF090A0F), surfaceContainerLow = Color(0xFF11131C),
+            surfaceContainer = Color(0xFF11131C), surfaceContainerHigh = Color(0xFF191B26),
+            surfaceContainerHighest = Color(0xFF191B26), surfaceTint = Color.Transparent,
+            outline = Color(0xFF262938), outlineVariant = Color(0xFF262938),
+            onSurface = Color(0xFFF8FAFC), onSurfaceVariant = Color(0xFF94A3B8),
             error = Color(0xFFFCA5A5)
         ) else lightColorScheme(
-            primary = Color(0xFF4F46E5), secondary = Color(0xFF0891B2), tertiary = Color(0xFF059669),
-            background = Color(0xFFF6F7FB), surface = Color.White,
-            surfaceVariant = Color(0xFFEDF0F7), onSurfaceVariant = Color(0xFF5B6678)
+            primary = Color(0xFF4F46E5), onPrimary = Color.White,
+            secondary = Color(0xFF0891B2), tertiary = Color(0xFF059669),
+            background = Color(0xFFF8FAFC), surface = Color.White,
+            surfaceVariant = Color(0xFFF8FAFC), onBackground = Color(0xFF0F172A),
+            surfaceContainerLowest = Color.White, surfaceContainerLow = Color.White,
+            surfaceContainer = Color.White, surfaceContainerHigh = Color.White,
+            surfaceContainerHighest = Color.White, surfaceTint = Color.Transparent,
+            outline = Color(0xFFE2E8F0), outlineVariant = Color(0xFFE2E8F0),
+            onSurface = Color(0xFF0F172A), onSurfaceVariant = Color(0xFF5B6678)
         )) {
             Surface(Modifier.fillMaxSize()) { DesktopDashboard(busy, { busy = it }) }
             if (closeWarning) AlertDialog(
@@ -160,7 +171,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                     selected = discovery.devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
                 }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
                     java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
-                    java.awt.Color(MaterialTheme.colorScheme.tertiary.toArgb(), true),
+                    java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
                     Modifier.fillMaxWidth().height(60.dp))
                 BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
