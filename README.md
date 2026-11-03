@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.3.2** (Activity history is grouped by date with per-entry flow IDs; Android QA Evidence browser with collapsible flows, filename previews, sharing and downloads; P5 authenticated loopback run Viewer; recording deferred; iOS embedded QA service implemented for the simulator, physical/XCUITest pending).
+Current version: **0.4.0** (Android, iOS, and Tester Desktop; desktop installation and device/ADB bridge discovery; Android QA Evidence browser with collapsible flows, filename previews, sharing and downloads; P5 authenticated loopback run Viewer; recording deferred; physical iOS installation deferred).
 
 **QA Evidence** now appears beside Activity on wide screens (stacked on phones).
 Tap filenames to view saved reports and images in Tester, share/open evidence with
@@ -12,6 +12,11 @@ Android apps such as Drive, or download a copy to a chosen location. See [QA Evi
 privacy and supported evidence types.
 
 ## Features
+
+- **Tester Desktop (macOS)**: local APK and simulator `.app` installation with
+  automatic device discovery, explicit target confirmation, and installed-build
+  verification. Connected physical iOS devices are detection-only. Run
+  `./gradlew :desktopApp:run`; see [Tester Desktop](docs/TESTER_DESKTOP.md).
 
 - **MCP over Streamable HTTP** at `POST/GET/DELETE /mcp` (current MCP transport, with
   `Mcp-Session-Id` sessions).

@@ -1,4 +1,4 @@
-# QA Evidence - 0.3.2
+# QA Evidence - 0.4.0
 
 The Android dashboard includes **QA Evidence** next to **Activity** at widths of
 640 dp or more. Narrow screens stack the two cards to keep their contents usable.

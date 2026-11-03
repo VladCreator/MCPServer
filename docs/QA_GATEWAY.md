@@ -1,4 +1,4 @@
-# Unified QA Gateway — 0.3.2
+# Unified QA Gateway — 0.4.0
 
 Android 0.1.7 dynamically exposes `android__observe_screen`; its structured
 observation and optional image are forwarded unchanged. Element references remain
