@@ -10,6 +10,7 @@ import com.vlad.mcpserver.mcp.McpServerHost
 import com.vlad.mcpserver.mcp.ServerEvent
 import com.vlad.mcpserver.mcp.ServerStatus
 import com.vlad.mcpserver.mcp.ToolApprovalRequest
+import com.vlad.mcpserver.mcp.GatewayConnection
 import com.vlad.mcpserver.mcp.ToolCallOutcome
 import com.vlad.mcpserver.mcp.createMcpServerHost
 import com.vlad.mcpserver.mcp.newSecureToken
@@ -82,6 +83,8 @@ class AppViewModel(
 
     private val connectedState = MutableStateFlow<List<AiClient>>(emptyList())
     val connectedClients: StateFlow<List<AiClient>> = connectedState.asStateFlow()
+    private val gatewayConnectionsState = MutableStateFlow<List<GatewayConnection>>(emptyList())
+    val gatewayConnections = gatewayConnectionsState.asStateFlow()
 
     private val pendingState = MutableStateFlow<List<AiClient>>(emptyList())
     val pendingClients: StateFlow<List<AiClient>> = pendingState.asStateFlow()
@@ -211,6 +214,7 @@ class AppViewModel(
     }
 
     fun startServer() {
+        gatewayConnectionsState.value = emptyList()
         localIpAddress = runCatching { getLocalIpAddress() }.getOrDefault(localIpAddress)
         serverHost.start()
     }
@@ -309,6 +313,9 @@ class AppViewModel(
 
     private suspend fun handleEvent(event: ServerEvent) {
         when (event) {
+            is ServerEvent.GatewayVerified -> gatewayConnectionsState.update { list ->
+                (list.filterNot { it.clientId == event.connection.clientId } + event.connection).takeLast(20)
+            }
             is ServerEvent.Pending -> {
                 pendingState.update { list ->
                     if (list.any { it.id == event.client.id }) list
@@ -339,6 +346,9 @@ class AppViewModel(
             }
 
             is ServerEvent.Disconnected -> {
+                gatewayConnectionsState.update { list ->
+                    list.map { if (it.clientId == event.clientId) it.copy(disconnected = true) else it }
+                }
                 pendingState.update { list -> list.filterNot { it.id == event.clientId } }
                 connectedState.update { list -> list.filterNot { it.id == event.clientId } }
                 toolApprovalsState.update { list -> list.filterNot { it.clientId == event.clientId } }

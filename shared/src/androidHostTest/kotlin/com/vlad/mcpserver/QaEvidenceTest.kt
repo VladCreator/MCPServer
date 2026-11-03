@@ -20,6 +20,57 @@ import kotlin.test.assertTrue
 
 class QaEvidenceTest {
     @Test
+    fun prettyJsonIndentsNestedValuesWithoutChangingContent() {
+        val source = """{"name":"QA","steps":[{"passed":true}],"count":null}"""
+        val (formatted, warning) = prettyEvidenceJson(source)
+        assertEquals(null, warning)
+        assertTrue(formatted.contains("\n    \"name\": \"QA\""))
+        assertTrue(formatted.contains("\n            \"passed\": true"))
+        assertEquals(kotlinx.serialization.json.Json.parseToJsonElement(source),
+            kotlinx.serialization.json.Json.parseToJsonElement(formatted))
+    }
+
+    @Test
+    fun invalidJsonRemainsReadableWithAnExplicitWarning() {
+        val source = """{"steps":["""
+        val (formatted, warning) = prettyEvidenceJson(source)
+        assertEquals(source, formatted)
+        assertTrue(warning.orEmpty().contains("invalid or truncated"))
+    }
+
+    @Test
+    fun markdownRendersStructureAndTablesButEscapesEmbeddedHtml() {
+        val html = evidenceMarkdownHtml("""
+            # QA report
+
+            **Passed**
+
+            - Open project
+            - Check drawing
+
+            ```json
+            {"passed":true}
+            ```
+
+            | Step | Status |
+            | --- | --- |
+            | Open | Pass |
+
+            <script>alert('unsafe')</script>
+
+            [Unsafe](javascript:alert)
+        """.trimIndent())
+        assertTrue(html.contains("<h1>QA report</h1>"))
+        assertTrue(html.contains("<strong>Passed</strong>"))
+        assertTrue(html.contains("<li>Open project</li>"))
+        assertTrue(html.contains("<pre><code"))
+        assertTrue(html.contains("<table>"))
+        assertFalse(html.contains("<script>"))
+        assertTrue(html.contains("&lt;script&gt;"))
+        assertFalse(html.contains("href=\"javascript:"))
+    }
+
+    @Test
     fun groupsNewestFirstByLocalCalendarDayAcrossMidnightAndDaylightSaving() {
         fun entry(id: String, timestamp: String) = QaEvidence(
             id, "$id.md", "text/markdown", Instant.parse(timestamp).toEpochMilli(),

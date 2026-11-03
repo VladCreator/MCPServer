@@ -66,10 +66,21 @@ data class ToolApprovalRequest(
     val requestedAt: Long
 )
 
+data class GatewayConnection(
+    val clientId: String,
+    val verifiedAt: Long,
+    val agentInitialized: Boolean,
+    val adbVerified: Boolean,
+    val disconnected: Boolean = false
+) {
+    fun isRecent(now: Long): Boolean = !disconnected && now - verifiedAt in 0..45_000L
+}
+
 /**
  * Events emitted by the platform server host and consumed by the ViewModel.
  */
 sealed interface ServerEvent {
+    data class GatewayVerified(val connection: GatewayConnection) : ServerEvent
     data class Pending(val client: McpClient) : ServerEvent
     data class Authorized(val client: McpClient) : ServerEvent
     data class Disconnected(val clientId: String) : ServerEvent

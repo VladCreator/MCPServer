@@ -100,8 +100,13 @@ lists, and `s01-<8 hex>.jpg` for step screenshots). Original file paths and vali
 
 ## Viewing, sharing and downloading
 
-**Tapping a filename** opens text reports as selectable plain text (no HTML/script execution),
-or a sampled image preview inside Tester. Text previews show up to 256 KiB with
+**Tapping a filename** opens a full-screen preview with a Close action (system
+Back also closes it). JSON is pretty-printed with indentation; invalid or truncated
+JSON remains readable as original text with an explicit formatting warning.
+Markdown renders headings, emphasis, lists, tables, blockquotes and code blocks.
+Embedded HTML is escaped; scripts, external resources and link navigation are
+blocked. Other text stays selectable monospace text, and images use a sampled
+preview inside Tester. Text previews show up to 256 KiB with
 an explicit truncation notice; sharing preserves the full file. PDF and video
 files open in an installed Android viewer after confirmation. There is no separate View button.
 

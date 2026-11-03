@@ -60,12 +60,29 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.Writer
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
+
+internal fun gatewayHeartbeat(body: String, clientId: String, at: Long): GatewayConnection? {
+    val message = try {
+        Json.parseToJsonElement(body) as? JsonObject
+    } catch (_: kotlinx.serialization.SerializationException) {
+        null
+    } ?: return null
+    if ((message["method"] as? JsonPrimitive)?.content != "ping" || message["id"] == null) return null
+    val params = message["params"] as? JsonObject ?: return null
+    val meta = params["_meta"] as? JsonObject ?: return null
+    val heartbeat = meta["tester_gateway"] as? JsonObject ?: return null
+    val initialized = (heartbeat["agent_initialized"] as? JsonPrimitive)?.booleanOrNull ?: return null
+    val adb = (heartbeat["adb_verified"] as? JsonPrimitive)?.booleanOrNull ?: return null
+    return GatewayConnection(clientId, at, initialized, adb)
+}
 
 private const val SESSION_HEADER = "Mcp-Session-Id"
 private const val DEFAULT_HTTP_PORT = 8080
@@ -394,6 +411,11 @@ private class AndroidMcpServerHost(
 
         val body = readBody(call) ?: return
         val response = dispatcher.handle(session, body)
+        if (session.initialized && response is JsonObject && response["error"] == null) {
+            gatewayHeartbeat(body, session.id, nowMillis())?.let {
+                eventFlow.tryEmit(ServerEvent.GatewayVerified(it))
+            }
+        }
 
         call.response.headers.append(SESSION_HEADER, session.id)
         if (response == null) {

@@ -7,6 +7,8 @@ import sys
 import tempfile
 import threading
 import unittest
+import subprocess
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -235,13 +237,15 @@ class ReconnectTests(unittest.TestCase):
                          self.gateway.drain_notifications())
         self.assertIn("ios__get_device_state", [tool["name"] for tool in self.gateway.tools()])
 
-    def test_session_lost_reconnects_and_retries_once(self):
+    def test_session_lost_is_not_replayed_and_next_request_reconnects(self):
         self.backend.online = True
         self.gateway.call("ios__get_device_state", {})
         connects = self.backend.connects
         self.backend.expire = True
-        result = self.gateway.call("ios__get_device_state", {})
-        self.assertFalse(result["isError"])
+        with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+            self.gateway.call("ios__get_device_state", {})
+        self.assertEqual(connects, self.backend.connects)
+        self.assertFalse(self.gateway.call("ios__get_device_state", {})["isError"])
         self.assertEqual(connects + 1, self.backend.connects)
         self.assertEqual(2, len(self.backend.calls))
 
@@ -311,8 +315,35 @@ class HttpReconnectTests(unittest.TestCase):
     def test_backend_restart_is_transparent(self):
         first = self.gateway.call("android__ping_tool", {})["content"][0]["text"]
         FakeMcpServer.sessions.clear()
+        with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+            self.gateway.call("android__ping_tool", {})
         second = self.gateway.call("android__ping_tool", {})["content"][0]["text"]
         self.assertNotEqual(first, second)
+
+    def test_gateway_stdio_startup_connects_and_exits_cleanly(self):
+        config = Path(self.temp.name) / "gateway.json"
+        config.write_text(json.dumps({"backends": [{
+            "name": "android", "platform": "android", "adb": False,
+            "url": self.gateway.backends[0].url,
+        }]}))
+        requests = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ]
+        completed = subprocess.run(
+            [sys.executable, str(Path(gateway.__file__)), "--config", str(config)],
+            input="\n".join(json.dumps(request) for request in requests) + "\n",
+            text=True, capture_output=True, timeout=15,
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        replies = [json.loads(line) for line in completed.stdout.splitlines()]
+        self.assertEqual("Tester QA Gateway", next(
+            reply["result"]["serverInfo"]["name"] for reply in replies if reply.get("id") == 1
+        ))
+        self.assertIn("android__ping_tool", [
+            tool["name"] for reply in replies if reply.get("id") == 2 for tool in reply["result"]["tools"]
+        ])
 
 
 class UnreachableHintTests(unittest.TestCase):
@@ -342,7 +373,7 @@ for line in sys.stdin:
 
 
 class StdioRestartTests(unittest.TestCase):
-    def test_dead_bridge_is_restarted_and_call_retried(self):
+    def test_dead_bridge_is_restarted_only_on_next_request(self):
         backend = gateway.StdioBackend("ui", "ios", sys.executable, ["-c", FAKE_STDIO_BRIDGE], timeout=10)
         gw = gateway.Gateway([backend], tempfile.mkdtemp())
         self.addCleanup(backend.close)
@@ -351,10 +382,134 @@ class StdioRestartTests(unittest.TestCase):
         first = backend.process
         first.kill()
         first.wait()
+        with self.assertRaisesRegex(gateway.BackendError, "not retried"):
+            gw.call("ui__ping", {})
         result = gw.call("ui__ping", {})
         self.assertFalse(result.get("isError"))
         self.assertIsNot(first, backend.process)
         self.assertIsNone(backend.process.poll())
+
+
+class AdbForwardTests(unittest.TestCase):
+    def bridge(self, devices="one\tdevice\n", rules="", options=None):
+        bridge = gateway.AdbForward("http://127.0.0.1:18080/mcp", options or {})
+        calls = []
+
+        def run(*args):
+            calls.append(args)
+            if args == ("devices",):
+                return "List of devices attached\n" + devices
+            if args == ("forward", "--list"):
+                return rules
+            return ""
+
+        bridge.run = run
+        return bridge, calls
+
+    def test_creates_missing_forward_without_rebinding(self):
+        bridge, calls = self.bridge()
+        bridge.ensure()
+        self.assertEqual("one", bridge.serial)
+        self.assertEqual("forward_configured", bridge.state)
+        self.assertIn(("-s", "one", "forward", "--no-rebind", "tcp:18080", "tcp:8080"), calls)
+
+    def test_matching_rule_is_left_untouched(self):
+        bridge, calls = self.bridge(rules="one tcp:18080 tcp:8080\n")
+        bridge.ensure()
+        self.assertEqual([("devices",), ("forward", "--list")], calls)
+
+    def test_refuses_conflicting_device_or_remote_port(self):
+        for rule in ("two tcp:18080 tcp:8080", "one tcp:18080 tcp:9000"):
+            bridge, calls = self.bridge(rules=rule)
+            with self.assertRaisesRegex(gateway.BackendError, "mapped elsewhere"):
+                bridge.ensure()
+            self.assertEqual(2, len(calls))
+
+    def test_multiple_or_unavailable_devices_require_selection(self):
+        for devices in ("", "one\tdevice\ntwo\tdevice\n", "one\tunauthorized\n", "one\toffline\n"):
+            bridge, calls = self.bridge(devices=devices)
+            with self.assertRaises(gateway.BackendError):
+                bridge.ensure()
+            self.assertEqual([("devices",)], calls)
+
+    def test_selected_device_does_not_switch_after_unplug(self):
+        bridge, _ = self.bridge()
+        bridge.ensure()
+        bridge.run = lambda *args: "two\tdevice\n" if args == ("devices",) else ""
+        with self.assertRaisesRegex(gateway.BackendError, "disconnected"):
+            bridge.ensure()
+        self.assertEqual("one", bridge.serial)
+
+    def test_explicit_device_allows_multiple_devices(self):
+        bridge, calls = self.bridge(devices="one\tdevice\ntwo\tdevice\n", options={"serial": "two"})
+        bridge.ensure()
+        self.assertIn(("-s", "two", "forward", "--no-rebind", "tcp:18080", "tcp:8080"), calls)
+
+    def test_adb_failure_is_explicit(self):
+        bridge = gateway.AdbForward("http://127.0.0.1:8080/mcp", {"path": "/test/adb"})
+        with patch.object(gateway.subprocess, "run", side_effect=FileNotFoundError("missing")):
+            with self.assertRaisesRegex(gateway.BackendError, "ADB command failed"):
+                bridge.ensure()
+
+    def test_managed_adb_rejects_remote_or_tls_urls(self):
+        for url in ("http://10.0.0.1:8080/mcp", "https://127.0.0.1:8443/mcp"):
+            with self.assertRaises(ValueError):
+                gateway.AdbForward(url, {})
+
+
+class HeartbeatTests(unittest.TestCase):
+    def test_managed_forward_rejects_an_unexpected_server(self):
+        backend = gateway.HttpBackend("android", "android", "http://localhost:18080/mcp", adb={})
+        backend.adb.ensure = lambda: None
+        backend._post = lambda *args, **kwargs: ({"result": {"serverInfo": {"name": "Other"}}}, "session")
+        self.assertFalse(backend.connect())
+        self.assertIn("not a Tester", backend.error)
+
+    def test_failed_tool_discovery_does_not_claim_a_healthy_connection(self):
+        backend = gateway.HttpBackend("android", "android", "http://localhost:18080/mcp")
+        backend._post = lambda payload, **kwargs: (
+            {"error": {"message": "failed"}} if payload["method"] == "tools/list" else {"result": {}}, "session"
+        )
+        self.assertFalse(backend.connect())
+        self.assertIn("tool discovery failed", backend.error)
+
+    def test_tick_recovers_connection_without_calling_any_tool(self):
+        backend = gateway.HttpBackend("android", "android", "http://127.0.0.1:8080/mcp")
+        requests = []
+
+        def post(payload, timeout=None):
+            requests.append(payload)
+            result = {"tools": []} if payload["method"] == "tools/list" else {}
+            return {"result": result}, "session"
+
+        backend._post = post
+        gw = gateway.Gateway([backend], ".")
+        gateway.handle(gw, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        gateway.handle(gw, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        gw.tick()
+        self.assertTrue(backend.connected)
+        self.assertIsNotNone(backend.last_verified)
+        self.assertTrue(requests[-1]["params"]["_meta"]["tester_gateway"]["agent_initialized"])
+        self.assertNotIn("tools/call", [request["method"] for request in requests])
+        backend._post = lambda *args, **kwargs: (_ for _ in ()).throw(gateway.SessionLost("lost"))
+        gw.tick()
+        self.assertFalse(backend.connected)
+        self.assertEqual("lost", backend.error)
+
+    def test_initialized_notification_alone_does_not_claim_agent_session(self):
+        gw = gateway.Gateway([], ".")
+        gateway.handle(gw, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        self.assertFalse(gw.agent_initialized)
+
+    def test_android_loopback_defaults_to_managed_adb_and_can_opt_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "gateway.json"
+            for setting, managed in (({}, True), ({"adb": False}, False)):
+                config.write_text(json.dumps({"backends": [{
+                    "name": "android", "url": "http://localhost:18080/mcp", **setting,
+                }]}))
+                backend = gateway.load_config(config).backends[0]
+                self.assertEqual(managed, backend.adb is not None)
 
 
 if __name__ == "__main__":

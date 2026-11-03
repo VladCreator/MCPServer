@@ -10,6 +10,9 @@ import select
 import subprocess
 import sys
 import time
+import shutil
+import queue
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -57,6 +60,64 @@ def truncate(value, limit=500):
 
 
 CONNECT_TIMEOUT_S = 10
+HEARTBEAT_INTERVAL_S = 15
+
+
+class AdbForward:
+    """Owns no global ADB state; never replaces or removes a forwarding rule."""
+
+    def __init__(self, url, options):
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError("Managed ADB requires a loopback HTTP backend URL.")
+        self.local_port = parsed.port or 80
+        self.device_port = options.get("device_port", 8080)
+        if type(self.device_port) is not int or not 1 <= self.device_port <= 65535:
+            raise ValueError("adb.device_port must be an integer from 1 to 65535.")
+        self.serial = options.get("serial")
+        self.path = options.get("path")
+        self.state = "not_verified"
+
+    def run(self, *args):
+        if not self.path:
+            candidates = [
+                shutil.which("adb"),
+                *[str(Path(os.environ[key]) / "platform-tools/adb")
+                  for key in ("ANDROID_HOME", "ANDROID_SDK_ROOT") if os.environ.get(key)],
+                str(Path.home() / "Library/Android/sdk/platform-tools/adb"),
+            ]
+            self.path = next((path for path in candidates if path and os.path.isfile(path)), None)
+        if not self.path:
+            raise BackendError("ADB not found. Configure adb.path or ANDROID_HOME.")
+        try:
+            result = subprocess.run([self.path, *args], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as failure:
+            raise BackendError(f"ADB command failed: {failure}") from failure
+        if result.returncode:
+            raise BackendError(f"ADB command failed: {result.stderr.strip()[:300]}")
+        return result.stdout
+
+    def ensure(self):
+        self.state = "not_verified"
+        devices = {}
+        for line in self.run("devices").splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[1] in ("device", "offline", "unauthorized"):
+                devices[fields[0]] = fields[1]
+        if self.serial is None:
+            if len(devices) != 1:
+                raise BackendError("ADB requires exactly one device; configure adb.serial when several are attached.")
+            self.serial = next(iter(devices))
+        if devices.get(self.serial) != "device":
+            raise BackendError(f"Selected ADB device is {devices.get(self.serial, 'disconnected')}; connect and authorize it.")
+        local, remote = f"tcp:{self.local_port}", f"tcp:{self.device_port}"
+        mappings = [line.split() for line in self.run("forward", "--list").splitlines()]
+        matches = [parts for parts in mappings if len(parts) == 3 and parts[1] == local]
+        if matches and matches != [[self.serial, local, remote]]:
+            raise BackendError(f"ADB local port {self.local_port} is mapped elsewhere; choose a different backend port.")
+        if not matches:
+            self.run("-s", self.serial, "forward", "--no-rebind", local, remote)
+        self.state = "forward_configured"
 
 
 def unreachable_hint(url, reason):
@@ -80,7 +141,7 @@ def unreachable_hint(url, reason):
 
 
 class HttpBackend(ReconnectMixin):
-    def __init__(self, name, platform, url, token=None, token_env=None, headers=None, timeout=60):
+    def __init__(self, name, platform, url, token=None, token_env=None, headers=None, timeout=60, adb=None):
         self.name = name
         self.platform = platform
         self.url = url.rstrip("/")
@@ -91,6 +152,8 @@ class HttpBackend(ReconnectMixin):
         self.tools = []
         self.connected = False
         self.error = None
+        self.adb = AdbForward(self.url, adb) if adb is not None else None
+        self.last_verified = None
 
     def _headers(self):
         headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
@@ -138,6 +201,8 @@ class HttpBackend(ReconnectMixin):
         self.session_id = None
         self.tools = []
         try:
+            if self.adb:
+                self.adb.ensure()
             reply, session = self._post({
                 "jsonrpc": "2.0", "id": 1, "method": "initialize",
                 "params": {
@@ -149,14 +214,39 @@ class HttpBackend(ReconnectMixin):
             if not reply or "error" in reply:
                 raise BackendError(f"{self.name}: initialize failed: {reply}")
             self.session_id = session or reply.get("result", {}).get("sessionId")
+            if self.adb and reply.get("result", {}).get("serverInfo", {}).get("name") != "Tester":
+                raise BackendError(f"{self.name}: the forwarded endpoint is not a Tester MCP server.")
             if not self.session_id:
                 raise BackendError(f"{self.name}: backend did not return Mcp-Session-Id")
             self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
             listing, _ = self._post({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-            self.tools = (listing or {}).get("result", {}).get("tools", [])
+            if not isinstance(listing, dict) or "error" in listing:
+                raise BackendError(f"{self.name}: tool discovery failed")
+            self.tools = listing.get("result", {}).get("tools")
+            if not isinstance(self.tools, list):
+                raise BackendError(f"{self.name}: invalid tool discovery response")
             self.connected = True
             self.error = None
         except Exception as failure:
+            self.connected = False
+            self.error = str(failure)
+        return self.connected
+
+    def heartbeat(self, agent_initialized):
+        try:
+            if self.adb:
+                self.adb.ensure()
+            reply, _ = self._post({
+                "jsonrpc": "2.0", "id": 3, "method": "ping",
+                "params": {"_meta": {"tester_gateway": {
+                    "agent_initialized": agent_initialized, "adb_verified": self.adb is not None,
+                }}},
+            }, timeout=min(self.timeout, CONNECT_TIMEOUT_S))
+            if not isinstance(reply, dict) or "result" not in reply or "error" in reply:
+                raise BackendError(f"{self.name}: heartbeat failed")
+            self.last_verified = iso_now()
+            self.error = None
+        except (BackendError, OSError, ValueError) as failure:
             self.connected = False
             self.error = str(failure)
         return self.connected
@@ -186,6 +276,7 @@ class HttpBackend(ReconnectMixin):
                 urllib.request.urlopen(request, timeout=5).close()
             except Exception:
                 pass
+        self.connected = False
 
 
 class StdioBackend(ReconnectMixin):
@@ -347,6 +438,20 @@ class Gateway:
         self.session = None
         self.notifications = []
         self._signature = None
+        self.agent_initialized = False
+        self.agent_initialize_seen = False
+
+    def tick(self):
+        """Runs between requests, never concurrently with a tool execution."""
+        for backend in self.backends:
+            if isinstance(backend, HttpBackend) and backend.platform == "android":
+                previous = (backend.connected, backend.error)
+                if backend.ensure_connected():
+                    backend.heartbeat(self.agent_initialized)
+                if previous != (backend.connected, backend.error):
+                    print(f"{backend.name}: {'connection verified' if backend.connected else backend.error}",
+                          file=sys.stderr, flush=True)
+        self._note_changes()
 
     def _tool_signature(self):
         return tuple(
@@ -386,6 +491,8 @@ class Gateway:
                     "connected": backend.connected,
                     "tool_count": len(backend.tools),
                     "error": backend.error,
+                    "last_verified": getattr(backend, "last_verified", None),
+                    "bridge": backend.adb.state if isinstance(backend, HttpBackend) and backend.adb else "unmanaged",
                 }
                 for backend in self.backends
             ],
@@ -496,14 +603,11 @@ class Gateway:
             try:
                 result = backend.call(tool, arguments)
             except SessionLost:
-                if tool in {"run_route", "route_policy", "collect_failure_bundle", "device_state", "open_link", "clipboard", "qa_session"}:
-                    raise BackendError(
-                        f"{prefix}: session lost during {tool}; execution outcome is unknown. "
-                        "Tool was not retried because actions or capture may already have executed."
-                    ) from None
-                if not backend.connect():
-                    raise BackendError(backend.error or f"{prefix}: reconnect failed")
-                result = backend.call(tool, arguments)
+                backend.connected = False
+                raise BackendError(
+                    f"{prefix}: session lost during {tool}; execution outcome is unknown. "
+                    "Tool was not retried. The connection will be restored for subsequent requests."
+                ) from None
             if self.session:
                 data = result.get("structuredContent", {})
                 run_reference = None
@@ -588,10 +692,20 @@ def load_config(path):
                 entry.get("args", []), entry.get("env"),
             ))
         else:
+            adb = entry.get("adb")
+            if entry.get("platform", "android") == "android" and adb is None:
+                parsed = urllib.parse.urlparse(entry["url"])
+                if parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+                    adb = {}
+            if adb is False:
+                adb = None
+            if adb is not None and not isinstance(adb, dict):
+                raise ValueError("adb must be an object or false.")
             backends.append(HttpBackend(
                 entry["name"], entry.get("platform", "android"), entry["url"],
                 entry.get("token"), entry.get("token_env"), entry.get("headers"),
                 entry.get("timeout", 60),
+                adb=adb,
             ))
     return Gateway(backends, config.get("report_dir", "qa-reports"))
 
@@ -604,11 +718,15 @@ def handle(gateway, request):
     if not isinstance(request, dict) or request.get("jsonrpc") != "2.0":
         return error(None, -32600, "Invalid JSON-RPC request")
     if "id" not in request:
+        if request.get("method") == "notifications/initialized" and gateway.agent_initialize_seen:
+            gateway.agent_initialized = True
         return None
     method = request.get("method")
     request_id = request["id"]
     params = request.get("params", {})
     if method == "initialize":
+        gateway.agent_initialize_seen = True
+        gateway.agent_initialized = False
         version = params.get("protocolVersion")
         result = {
             "protocolVersion": version if version in PROTOCOLS else PROTOCOLS[-1],
@@ -639,8 +757,29 @@ def main():
     parser.add_argument("--config", required=True, help="JSON gateway configuration")
     args = parser.parse_args()
     gateway = load_config(args.config)
+    incoming = queue.Queue()
+
+    def read_input():
+        try:
+            for line in sys.stdin:
+                incoming.put(line)
+        finally:
+            incoming.put(None)
+
+    threading.Thread(target=read_input, daemon=True).start()
+    next_heartbeat = 0.0
     try:
-        for line in sys.stdin:
+        while True:
+            try:
+                line = incoming.get(timeout=max(0, next_heartbeat - time.monotonic()))
+            except queue.Empty:
+                gateway.tick()
+                next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL_S
+                for notification in gateway.drain_notifications():
+                    print(json.dumps(notification), flush=True)
+                continue
+            if line is None:
+                break
             if not line.strip():
                 continue
             try:
@@ -653,6 +792,9 @@ def main():
                 print(json.dumps(response), flush=True)
             for notification in gateway.drain_notifications():
                 print(json.dumps(notification), flush=True)
+            if time.monotonic() >= next_heartbeat:
+                gateway.tick()
+                next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL_S
     finally:
         gateway.close()
 

@@ -5,6 +5,7 @@
       "platform": "android",
       "transport": "http",
       "url": "http://127.0.0.1:18080/mcp",
+      "adb": {"device_port": 8080},
       "token_env": "ANDROID_MCP_TOKEN"
     },
     {

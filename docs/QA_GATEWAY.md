@@ -51,7 +51,7 @@ AI client (DSH)
 
 | Name | Transport | Start first |
 |---|---|---|
-| `android` | Streamable HTTP | Android app + `adb forward tcp:18080 tcp:8080` |
+| `android` | Streamable HTTP | Android app with server started + authorized USB device (ADB forwarding is automatic) |
 | `ios` | Streamable HTTP | iOS app + simulator, or `tools/ios_tunnel.py` (`iproxy`) for physical |
 | `ios-ui` | stdio | Appium server + simulator + app installed |
 
@@ -98,12 +98,60 @@ Copy [`tools/qa_gateway.example.json`](../tools/qa_gateway.example.json) and edi
 - `headers` adds extra HTTP headers.
 - `report_dir` is relative to the gateway process working directory.
 
-For Android, start the app and run:
+For Android, connect USB, authorize debugging, and tap **Start server**.
+When the agent launches the gateway, it configures ADB forwarding automatically
+for Android loopback HTTP backends. You no longer need to run `adb forward`.
+Provide the bearer token through the configured environment variable:
 
 ```bash
-adb forward tcp:18080 tcp:8080
 export ANDROID_MCP_TOKEN='...'
 ```
+
+### Automatic Android bridge and connection feedback
+
+The Android entry in the example config uses Mac port **18080** and device port
+**8080**, leaving Mac port 8080 available for iOS. The gateway locates `adb` on
+PATH, under `ANDROID_HOME` / `ANDROID_SDK_ROOT`, or under
+`~/Library/Android/sdk/platform-tools`. Optional backend configuration:
+
+```json
+"adb": {
+  "path": "/absolute/path/to/adb",
+  "serial": "YOUR-DEVICE-SERIAL",
+  "device_port": 8080
+}
+```
+
+With one attached device, selection is automatic and pinned for the lifetime
+of the gateway process. Multiple attached devices require an explicit `serial`;
+offline, unauthorized or missing devices produce actionable errors. Existing
+matching rules are reused. Conflicting rules and occupied ports are errors:
+`--no-rebind` prevents replacing another mapping, including during a race.
+The gateway never removes forwarding rules or starts the Android app/server.
+The authenticated MCP initialization checks that the endpoint identifies as
+Tester; this is a protocol check, not independent hardware attestation.
+
+Set `"adb": false` to retain manual tunnel management. LAN and HTTPS backends
+are unmanaged by default. Managed ADB requires a loopback HTTP URL.
+Use `qa_capabilities` or the agent's gateway stderr logs for bridge errors;
+Tester cannot display a Mac-side error until a connection reaches the device.
+
+Every 15 seconds, between tool calls, the gateway checks Android connectivity
+and sends an authenticated MCP ping with gateway metadata. Disconnected
+backends are reinitialized for future requests. **No failed tool call is
+automatically replayed**, including after a lost session. Check an uncertain
+action's outcome before submitting it again.
+
+Tester displays gateway reachability, gateway-reported ADB verification,
+upstream agent initialization, and time since the last verification. After
+45 seconds without a heartbeat (or a known session close), verification is
+shown as lost/stale. An uninitialized agent is shown as waiting, not connected.
+Agent initialization proves an MCP session was established, not that the
+agent is currently working. Heartbeats pause during long tool calls and
+approvals, so stale verification does not by itself prove a USB failure.
+No gateway heartbeat means **bridge not verified**, not **bridge missing**.
+Gateway signals are authenticated client reports, not a bypass of approval.
+Direct MCP clients continue to work without gateway metadata.
 
 For the iOS UI backend, start Appium first:
 
@@ -191,8 +239,9 @@ Android live backend and physical iOS were not tested in this pass.
 - The gateway is a local stdio process; it does not expose a network port.
 - Backends may start in any order. An offline backend is retried on the next
   call to one of its tools, on `qa_capabilities`, and on `tools/list` (at most
-  every 2 s). When a backend restarts and loses the session (HTTP 404 or
-  "not initialized"), the gateway reconnects and retries the call once. Changes
+  every 2 s). Android HTTP backends also reconnect on the heartbeat schedule.
+  When a backend restarts and loses the session (HTTP 404 or "not initialized"),
+  the call fails without replay; a subsequent request uses a new session. Changes
   in the backend tool list are announced with `notifications/tools/list_changed`.
 - Backend approvals remain on the device/app; the gateway does not bypass them.
 - The gateway report does not replace device screenshots/logs; it references

@@ -19,6 +19,11 @@ privacy and supported evidence types.
 - **WebSocket** at `/mcp` (and the `/ws` alias) for legacy/custom clients.
 - **USB / ADB connection**: run `adb forward tcp:8080 tcp:8080` and use
   `http://localhost:8080/mcp` from the computer; no Wi-Fi needed.
+- **Automatic Android gateway bridge**: the [QA gateway](docs/QA_GATEWAY.md)
+  configures forwarding for Android loopback HTTP backends, checks connectivity
+  every 15 seconds between calls, and reconnects without replaying failed tools.
+  Tester shows gateway/agent initialization and last verification; stale
+  heartbeats are distinguished from a confirmed missing bridge.
 - **iOS QA service**: embedded MCP service on `127.0.0.1:8080` with 13 iOS tools
   (state, QA session, English TTS). See [`docs/IOS_QA_SERVICE.md`](docs/IOS_QA_SERVICE.md).
 - **iOS UI bridge (0.1.3)**: Appium/XCUITest host bridge with 14 UI tools for the

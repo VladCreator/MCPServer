@@ -96,6 +96,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vlad.mcpserver.mcp.McpTools
 import com.vlad.mcpserver.mcp.ServerStatus
+import com.vlad.mcpserver.mcp.GatewayConnection
 import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.ToolDefinition
 import kotlinx.coroutines.delay
@@ -116,6 +117,7 @@ import kotlinx.datetime.toLocalDateTime
 fun App(viewModel: AppViewModel = viewModel()) {
     val status by viewModel.serverStatus.collectAsState()
     val connectedClients by viewModel.connectedClients.collectAsState()
+    val gatewayConnections by viewModel.gatewayConnections.collectAsState()
     val pendingClients by viewModel.pendingClients.collectAsState()
     val executionLogs by viewModel.executionLogs.collectAsState()
     val qaEvidenceRevision by viewModel.qaEvidenceRevision.collectAsState()
@@ -207,6 +209,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                 ServerCard(
                                     status = status,
                                     agentCount = connectedClients.size,
+                                    gatewayConnections = gatewayConnections,
                                     onStart = viewModel::startServer,
                                     onStop = viewModel::stopServer,
                                     onConnect = { showConnection = true },
@@ -389,9 +392,40 @@ private fun StatusPill(status: ServerStatus) {
 }
 
 @Composable
+private fun GatewayConnectionStatus(connections: List<GatewayConnection>) {
+    var now by remember { mutableStateOf(nowMillis()) }
+    LaunchedEffect(connections) {
+        while (true) {
+            now = nowMillis()
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+    val latest = connections.filter { it.isRecent(now) }.maxByOrNull { it.verifiedAt }
+        ?: connections.maxByOrNull { it.verifiedAt }
+    val recent = latest?.isRecent(now) == true
+    val message = when {
+        latest == null -> "Bridge not verified. Start the Mac gateway; it can configure ADB automatically."
+        !recent -> "Gateway connection lost or not recently verified. Check USB and the Mac gateway."
+        !latest.agentInitialized -> "Gateway reachable. Waiting for the agent to initialize."
+        latest.adbVerified -> "ADB bridge verified. Agent session established through gateway."
+        else -> "Gateway reachable. Agent session established."
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(message, style = MaterialTheme.typography.bodySmall,
+            color = if (recent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
+        latest?.let {
+            Text("Last gateway verification: ${((now - it.verifiedAt).coerceAtLeast(0) / 1000)}s ago. " +
+                "Idle agent sessions do not prove the agent is actively working.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun ServerCard(
     status: ServerStatus,
     agentCount: Int,
+    gatewayConnections: List<GatewayConnection>,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onConnect: () -> Unit,
@@ -487,6 +521,7 @@ private fun ServerCard(
                             stopButton()
                         }
                     }
+                    if (!getPlatform().isIos) GatewayConnectionStatus(gatewayConnections)
                 }
 
                 is ServerStatus.Starting -> {

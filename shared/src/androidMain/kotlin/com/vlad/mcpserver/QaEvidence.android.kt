@@ -4,6 +4,10 @@ import android.content.ClipData
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.app.Activity
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -14,6 +18,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,9 +45,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,6 +71,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -77,8 +89,20 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Date
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import org.commonmark.parser.Parser
+import org.commonmark.renderer.html.HtmlRenderer
+import org.commonmark.ext.gfm.tables.TablesExtension
 
-private data class EvidencePreview(val title: String, val text: String? = null, val image: ImageBitmap? = null)
+private data class EvidencePreview(
+    val title: String,
+    val text: String? = null,
+    val image: ImageBitmap? = null,
+    val markdown: Boolean = false,
+    val warning: String? = null
+)
 private data class EvidenceTransfer(val item: QaEvidence, val share: Boolean)
 
 @Composable
@@ -186,7 +210,10 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                     val file = repository.stage(item)
                     try {
                         if (isEvidenceText(item.mime)) {
-                            EvidencePreview(item.name, text = readEvidenceText(file))
+                            val text = readEvidenceText(file)
+                            val formatted = if (item.mime == "application/json") prettyEvidenceJson(text) else text to null
+                            EvidencePreview(item.name, text = formatted.first,
+                                markdown = item.mime == "text/markdown", warning = formatted.second)
                         } else {
                             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                             BitmapFactory.decodeFile(file.path, bounds)
@@ -297,11 +324,15 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                                         style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }
                                 IconButton(onClick = { transfer = EvidenceTransfer(item, share = true) },
-                                    enabled = actionsEnabled) {
-                                    Icon(Icons.Rounded.Share, contentDescription = "Share ${item.name}")
+                                    enabled = actionsEnabled,
+                                    colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)) {
+                                    Icon(Icons.Rounded.Share, contentDescription = "Share ${item.name}",
+                                        modifier = Modifier.size(14.4.dp))
                                 }
-                                IconButton(onClick = { download(item) }, enabled = actionsEnabled) {
-                                    Icon(Icons.Rounded.Download, contentDescription = "Download ${item.name}")
+                                IconButton(onClick = { download(item) }, enabled = actionsEnabled,
+                                    colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)) {
+                                    Icon(Icons.Rounded.Download, contentDescription = "Download ${item.name}",
+                                        modifier = Modifier.size(14.4.dp))
                                 }
                             }
                         }
@@ -311,19 +342,33 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
         }
     }
     preview?.let { current ->
-        AlertDialog(
-            onDismissRequest = { preview = null },
-            title = { Text(current.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-            text = {
-                Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                    current.image?.let { Image(it, contentDescription = current.title, modifier = Modifier.fillMaxWidth()) }
-                    current.text?.let {
-                        SelectionContainer { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+        Dialog(onDismissRequest = { preview = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(current.title, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { preview = null }) { Text("Close") }
+                    }
+                    current.warning?.let {
+                        Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
+                    }
+                    if (current.markdown) {
+                        MarkdownEvidencePreview(current.text.orEmpty(), Modifier.weight(1f).fillMaxWidth())
+                    } else {
+                        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                            current.image?.let { Image(it, contentDescription = current.title, modifier = Modifier.fillMaxWidth()) }
+                            current.text?.let {
+                                SelectionContainer {
+                                    Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { preview = null }) { Text("Close") } }
-        )
+            }
+        }
     }
     transfer?.let { request ->
         AlertDialog(
@@ -361,6 +406,66 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
             }
         )
     }
+}
+
+@Composable
+private fun MarkdownEvidencePreview(text: String, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val background = colors.surface.toArgb()
+    val foreground = colors.onSurface.toArgb()
+    val html = remember(text, background, foreground) {
+        val body = evidenceMarkdownHtml(text)
+        val bg = "#%06x".format(background and 0xffffff)
+        val fg = "#%06x".format(foreground and 0xffffff)
+        """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+            <style>
+            body { background:$bg; color:$fg; font:16px/1.6 sans-serif; padding:16px; margin:0; overflow-wrap:anywhere; }
+            h1,h2,h3,h4 { line-height:1.3; } pre { overflow:auto; padding:12px; background:rgba(127,127,127,.15); }
+            code { font-family:monospace; } blockquote { border-left:3px solid; margin-left:0; padding-left:16px; }
+            table { border-collapse:collapse; display:block; overflow:auto; } th,td { border:1px solid; padding:8px; }
+            a { color:inherit; text-decoration:underline; }
+            </style></head><body>$body</body></html>"""
+    }
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                setBackgroundColor(background)
+                settings.javaScriptEnabled = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.blockNetworkLoads = true
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?) = true
+                    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?) =
+                        WebResourceResponse("text/plain", "UTF-8", byteArrayOf().inputStream())
+                }
+            }
+        },
+        update = { view ->
+            if (view.tag != html) {
+                view.tag = html
+                view.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            }
+        },
+        onRelease = { it.destroy() }
+    )
+}
+
+internal fun evidenceMarkdownHtml(text: String): String {
+    val extensions = listOf(TablesExtension.create())
+    val document = Parser.builder().extensions(extensions).build().parse(text)
+    return HtmlRenderer.builder().extensions(extensions).escapeHtml(true).sanitizeUrls(true).build().render(document)
+}
+
+internal fun prettyEvidenceJson(text: String): Pair<String, String?> = try {
+    val json = Json { prettyPrint = true }
+    json.encodeToString(JsonElement.serializer(), json.parseToJsonElement(text)) to null
+} catch (error: SerializationException) {
+    text to "JSON could not be formatted (invalid or truncated content). Showing the original text."
+} catch (error: IllegalArgumentException) {
+    text to "JSON could not be formatted (invalid or truncated content). Showing the original text."
 }
 
 @Composable

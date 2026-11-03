@@ -8,6 +8,7 @@ import com.vlad.mcpserver.mcp.ToolApprovalRequest
 import com.vlad.mcpserver.mcp.ToolCallRecord
 import com.vlad.mcpserver.mcp.ToolCallOutcome
 import com.vlad.mcpserver.mcp.Transport
+import com.vlad.mcpserver.mcp.GatewayConnection
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,6 +26,22 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModelTest {
+    @Test
+    fun gatewayVerificationUpdatesDisconnectsAndResetsOnServerStart() = runTest {
+        val host = FakeMcpServerHost()
+        val model = viewModel(host)
+        val waiting = GatewayConnection("gateway", 100, false, true)
+        host.emit(ServerEvent.GatewayVerified(waiting))
+        assertEquals(listOf(waiting), model.gatewayConnections.value)
+        val initialized = waiting.copy(verifiedAt = 200, agentInitialized = true)
+        host.emit(ServerEvent.GatewayVerified(initialized))
+        assertEquals(listOf(initialized), model.gatewayConnections.value)
+        host.emit(ServerEvent.Disconnected("gateway"))
+        assertTrue(model.gatewayConnections.value.single().disconnected)
+        model.startServer()
+        assertTrue(model.gatewayConnections.value.isEmpty())
+    }
+
     @Test
     fun retainsExactly800RecentActivitiesAndRefreshesSavedScreenshots() = runTest {
         val host = FakeMcpServerHost()
