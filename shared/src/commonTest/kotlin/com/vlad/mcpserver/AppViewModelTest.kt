@@ -27,6 +27,16 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModelTest {
     @Test
+    fun desktopStartupIsIdempotent() = runTest {
+        val host = FakeMcpServerHost()
+        val model = viewModel(host)
+        model.startServerFromDesktop()
+        assertEquals(1, host.startCount)
+        model.startServerFromDesktop()
+        assertEquals(1, host.startCount)
+    }
+
+    @Test
     fun gatewayVerificationUpdatesDisconnectsAndResetsOnServerStart() = runTest {
         val host = FakeMcpServerHost()
         val model = viewModel(host)

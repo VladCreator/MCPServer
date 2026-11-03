@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -44,8 +45,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.time.LocalTime
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
 
 private data class InstallTask(val device: Device, val file: File, val identity: BuildIdentity)
 
@@ -55,6 +54,7 @@ fun main() = application {
     Window(
         onCloseRequest = { if (busy) closeWarning = true else exitApplication() },
         title = "Tester Desktop",
+        icon = painterResource("tester-icon.png"),
         state = rememberWindowState(width = 1100.dp, height = 800.dp)
     ) {
         MaterialTheme(colorScheme = darkColorScheme(
@@ -143,10 +143,18 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Installation files", style = MaterialTheme.typography.titleLarge)
-                BuildPicker("Android APK", apk, !busy && pending.isEmpty(),
-                    { apk = chooseBuild(false) ?: apk }, { apk = null })
-                BuildPicker("iOS simulator .app", app, !busy && pending.isEmpty(),
-                    { app = chooseBuild(true) ?: app }, { app = null })
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        BuildDropZone(false, !busy && pending.isEmpty(), { apk = it }, ::fail,
+                            Modifier.fillMaxWidth().height(60.dp))
+                        BuildSelection(apk, !busy && pending.isEmpty()) { apk = null }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        BuildDropZone(true, !busy && pending.isEmpty(), { app = it }, ::fail,
+                            Modifier.fillMaxWidth().height(60.dp))
+                        BuildSelection(app, !busy && pending.isEmpty()) { app = null }
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
                     Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty(),
@@ -154,7 +162,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                             val targets = discovery.devices.filter { it.key in selected }
                             val files = targets.map { it to if (it.platform == Platform.ANDROID) apk else app }
                             if (files.any { it.second == null }) {
-                                fail("Choose the matching APK / simulator .app for every selected device.")
+                                fail("Drop the matching APK / simulator .app for every selected device.")
                             } else scope.launch {
                                 setBusy(true)
                                 error = null
@@ -193,6 +201,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                         items(discovery.devices, key = { it.key }) { device ->
                             Column {
                                 Row {
+                                    Column(Modifier.padding(top = 12.dp)) { PlatformIcon(device.platform) }
                                     Checkbox(checked = device.key in selected,
                                         enabled = device.canInstall && !busy && pending.isEmpty(),
                                         onCheckedChange = {
@@ -203,16 +212,34 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                                         Text("${device.platform.label} - ${device.state}",
                                             color = if (device.canInstall) MaterialTheme.colorScheme.tertiary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
                                         SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
                                         if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
                                             color = MaterialTheme.colorScheme.error)
                                         if (device.platform == Platform.ANDROID) {
+                                            OutlinedButton(enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
+                                                onClick = {
+                                                    setBusy(true)
+                                                    scope.launch {
+                                                        try {
+                                                            withContext(Dispatchers.IO) { manager.runTester(device) }
+                                                            record("Confirmed Tester server foreground service on ${device.name}. Activate the bridge next.")
+                                                        } catch (failure: DesktopFailure) {
+                                                            fail(failure.message ?: "Cannot run Tester.")
+                                                        } catch (failure: IOException) {
+                                                            fail("Cannot run Tester: ${failure.message}")
+                                                        } finally {
+                                                            setBusy(false)
+                                                            refresh()
+                                                        }
+                                                    }
+                                                }) { Text("Run Tester") }
                                             val bridge = discovery.bridges[device.key] ?: BridgeState.UNVERIFIED
                                             Text("ADB bridge: ${bridge.label}", style = MaterialTheme.typography.bodySmall,
                                                 color = if (bridge == BridgeState.ACTIVE) MaterialTheme.colorScheme.tertiary
                                                     else MaterialTheme.colorScheme.onSurfaceVariant)
                                             if (bridge == BridgeState.ACTIVE) Text(
-                                                "Forwarding exists; start Tester server to connect the agent.",
+                                                "Forwarding exists; run Tester to connect the agent.",
                                                 style = MaterialTheme.typography.bodySmall)
                                             if (bridge == BridgeState.MISSING) {
                                                 OutlinedButton(enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
@@ -231,7 +258,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                                                                 refresh()
                                                             }
                                                         }
-                                                    }) { Text("Enable ADB bridge") }
+                                                    }) { Text("Activate bridge") }
                                             }
                                         }
                                     }
@@ -324,22 +351,11 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
 }
 
 @Composable
-private fun BuildPicker(label: String, file: File?, enabled: Boolean, choose: () -> Unit, clear: () -> Unit) {
+private fun BuildSelection(file: File?, enabled: Boolean, clear: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.titleSmall)
             SelectionContainer { Text(file?.path ?: "No file selected", style = MaterialTheme.typography.bodySmall) }
         }
-        OutlinedButton(onClick = choose, enabled = enabled) { Text("Choose") }
         if (file != null) TextButton(onClick = clear, enabled = enabled) { Text("Clear") }
     }
-}
-
-private fun chooseBuild(simulator: Boolean): File? {
-    val chooser = JFileChooser().apply {
-        dialogTitle = if (simulator) "Select a simulator .app directory" else "Select an Android APK"
-        fileSelectionMode = if (simulator) JFileChooser.DIRECTORIES_ONLY else JFileChooser.FILES_ONLY
-        if (!simulator) fileFilter = FileNameExtensionFilter("Android APK", "apk")
-    }
-    return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
 }

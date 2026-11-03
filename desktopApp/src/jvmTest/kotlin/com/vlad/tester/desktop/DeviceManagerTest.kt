@@ -40,13 +40,15 @@ class DeviceManagerTest {
         assertEquals(2, devices.size)
         assertTrue(devices[0].canInstall)
         assertFalse(devices[1].canInstall)
+        assertEquals("27.0", devices[0].osVersion)
     }
 
     @Test
     fun physicalIosListsOnlyConnectedDevicesAndNeverEnablesInstallation() {
         val devices = DeviceManager.parsePhysical("""{"result":{"devices":[
             {"identifier":"one","properties":{"hardware":{"platform":"iOS"},
-                "connection":{"state":"connected"},"state":{"name":"iPhone"}}},
+                "connection":{"state":"connected"},"state":{"name":"iPhone"},
+                "software":{"osVersionNumber":{"stringValue":"26.5","components":[26,5]}}}},
             {"identifier":"two","properties":{"hardware":{"platform":"iOS"},
                 "connection":{"state":"disconnected"},"state":{"name":"Old phone"}}},
             {"identifier":"three","hardwareProperties":{"platform":"iOS"},
@@ -55,6 +57,7 @@ class DeviceManagerTest {
         ]}}""")
         assertEquals(listOf("one", "three"), devices.map { it.id })
         assertTrue(devices.none { it.canInstall })
+        assertEquals("26.5", devices[0].osVersion)
     }
 
     @Test
@@ -250,6 +253,50 @@ class DeviceManagerTest {
             else assertFailsWith<DesktopFailure> { manager.enableBridge(device) }
             if (scenario != "unconfirmed") assertTrue(calls.none { it.contains("--no-rebind") })
             assertTrue(calls.none { it.contains("--remove") || it.contains("--remove-all") })
+        }
+    }
+
+    @Test
+    fun runTesterUsesShellProtectedStartupAndSurfacesLaunchErrors() {
+        val commands = mutableListOf<List<String>>()
+        val device = Device("one", "Phone", Platform.ANDROID, "device")
+        val manager = DeviceManager(CommandRunner { command, _ ->
+            commands += command
+            if (command.contains("dumpsys")) "com.vlad.mcpserver.McpServerKeepAliveService isForeground=true"
+            else "Status: ok\nActivity: com.vlad.mcpserver/.DesktopLaunchActivity"
+        }, adb = "/fake/adb")
+        manager.runTester(device)
+        assertEquals(listOf("/fake/adb", "-s", "one", "shell", "am", "start", "-W",
+            "-n", "com.vlad.mcpserver/.DesktopLaunchActivity"), commands.first())
+        for (response in listOf("", "Error: Activity class does not exist.", "Status: ok\nSecurityException")) {
+            assertFailsWith<DesktopFailure> {
+                DeviceManager(CommandRunner { _, _ -> response }, adb = "/fake/adb").runTester(device)
+            }
+        }
+        assertFailsWith<DesktopFailure> { manager.runTester(device.copy(state = "unauthorized")) }
+        assertFailsWith<DesktopFailure> {
+            DeviceManager(CommandRunner { command, _ -> if (command.contains("start")) "Status: ok" else "" },
+                adb = "/fake/adb", pause = {}).runTester(device)
+        }
+    }
+
+    @Test
+    fun dropValidationAcceptsOnlyOneMatchingLocalBuild() {
+        val apk = File.createTempFile("tester-drop-", ".apk")
+        val directory = kotlin.io.path.createTempDirectory("tester-drop-").toFile()
+        val app = File(directory, "Example.app").apply { mkdir() }
+        try {
+            assertEquals(apk, droppedBuild(listOf(apk), false))
+            assertEquals(app, droppedBuild(listOf(app), true))
+            assertFailsWith<DesktopFailure> { droppedBuild(emptyList(), false) }
+            assertFailsWith<DesktopFailure> { droppedBuild(listOf(apk, apk), false) }
+            assertFailsWith<DesktopFailure> { droppedBuild(listOf(apk), true) }
+            assertFailsWith<DesktopFailure> { droppedBuild(listOf(app), false) }
+            assertFailsWith<DesktopFailure> { droppedBuild(listOf(File(directory, "missing.apk")), false) }
+        } finally {
+            apk.delete()
+            app.delete()
+            directory.delete()
         }
     }
 }

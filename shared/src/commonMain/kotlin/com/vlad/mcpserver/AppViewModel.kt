@@ -131,6 +131,8 @@ class AppViewModel(
         get() = (serverStatus.value as? ServerStatus.Running)?.port
             ?: if (sslEnabled) HTTPS_PORT else HTTP_PORT
 
+    private var storageLoadJob: Job? = null
+
     init {
         localIpAddress = runCatching { getLocalIpAddress() }.getOrDefault("127.0.0.1")
         scope.launch {
@@ -146,7 +148,17 @@ class AppViewModel(
                 }
             }
         }
-        scope.launch { loadStorage() }
+        storageLoadJob = scope.launch { loadStorage() }
+    }
+
+    fun startServerFromDesktop() {
+        scope.launch {
+            storageLoadJob?.join()
+            if (storageError != null) return@launch
+            if (serverStatus.value !is ServerStatus.Running && serverStatus.value !is ServerStatus.Starting) {
+                startServer()
+            }
+        }
     }
 
     fun toggleSettings() {

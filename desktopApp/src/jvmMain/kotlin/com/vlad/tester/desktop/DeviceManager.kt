@@ -12,7 +12,8 @@ enum class Platform(val label: String) {
     ANDROID("Android"), IOS_SIMULATOR("iOS simulator"), IOS_DEVICE("iOS device")
 }
 
-data class Device(val id: String, val name: String, val platform: Platform, val state: String) {
+data class Device(val id: String, val name: String, val platform: Platform, val state: String,
+    val osVersion: String? = null) {
     val key: String get() = "${platform.name}:$id"
     val canInstall: Boolean get() = when (platform) {
         Platform.ANDROID -> state == "device"
@@ -79,7 +80,8 @@ class DeviceManager(
     private val runner: CommandRunner = LocalCommands(),
     private val adb: String? = findAdb(),
     private val aapt: String? = findAapt(),
-    private val xcrun: String = "/usr/bin/xcrun"
+    private val xcrun: String = "/usr/bin/xcrun",
+    private val pause: (Long) -> Unit = Thread::sleep
 ) {
     val adbPath: String? get() = adb
 
@@ -95,7 +97,20 @@ class DeviceManager(
                 warnings += "$label: Cannot read device-tool output: ${error.message}"
             }
         }
-        source("Android") { parseAdb(runner.run(listOf(requireAdb(), "devices", "-l"), 15)) }
+        source("Android") {
+            parseAdb(runner.run(listOf(requireAdb(), "devices", "-l"), 15)).map { device ->
+                if (!device.canInstall) device else {
+                    val version = try {
+                        runner.run(listOf(requireAdb(), "-s", device.id, "shell", "getprop", "ro.build.version.release"), 10)
+                            .trim().takeIf { it.isNotEmpty() }
+                    } catch (error: DesktopFailure) {
+                        warnings += "Android OS (${device.name}): ${error.message}"
+                        null
+                    }
+                    device.copy(osVersion = version)
+                }
+            }
+        }
         var mappings: List<ForwardMapping>? = null
         if (adb != null) {
             try {
@@ -145,6 +160,27 @@ class DeviceManager(
         if (bridgeState(device.id, parseForwards(runner.run(listOf(tool, "forward", "--list"), 15))) != BridgeState.ACTIVE) {
             throw DesktopFailure("ADB did not confirm the requested port forwarding.")
         }
+    }
+
+    fun runTester(device: Device) {
+        if (device.platform != Platform.ANDROID || !device.canInstall) {
+            throw DesktopFailure("Run Tester requires an authorized Android device.")
+        }
+        val result = runner.run(listOf(requireAdb(), "-s", device.id, "shell", "am", "start", "-W",
+            "-n", "com.vlad.mcpserver/.DesktopLaunchActivity"), 30)
+        if (!Regex("(?m)^Status: ok\\s*$").containsMatchIn(result) ||
+            result.contains("Error:", ignoreCase = true) || result.contains("Exception")) {
+            throw DesktopFailure("Cannot run Tester. Install the updated Tester APK first. ${result.takeLast(1500)}")
+        }
+        repeat(10) {
+            val services = runner.run(listOf(requireAdb(), "-s", device.id, "shell", "dumpsys",
+                "activity", "services", "com.vlad.mcpserver"), 10)
+            if ((services.contains("com.vlad.mcpserver.McpServerKeepAliveService") ||
+                    services.contains("com.vlad.mcpserver/.McpServerKeepAliveService")) &&
+                services.contains("isForeground=true")) return
+            pause(500)
+        }
+        throw DesktopFailure("Tester opened, but server startup was not confirmed. Check the device dashboard for errors or permission prompts.")
     }
 
     fun boot(device: Device) {
@@ -277,12 +313,20 @@ class DeviceManager(
         private fun JsonObject.text(key: String): String = optionalText(key)?.takeIf { it.isNotBlank() }
             ?: throw DesktopFailure("Device-tool JSON is missing $key.")
 
+        private fun JsonObject.osVersion(): String? = when (val value = this["osVersionNumber"]) {
+            null -> null
+            is JsonObject -> value.optionalText("stringValue")
+            is JsonPrimitive -> if (value.isString) value.content else throw DesktopFailure("Invalid iOS version value.")
+            else -> throw DesktopFailure("Invalid iOS version value.")
+        }
+
         fun parseSimulators(text: String): List<Device> {
             val groups = json(text)["devices"] as? JsonObject ?: throw DesktopFailure("Missing simulator devices.")
-            return groups.entries.filter { it.key.contains(".iOS-") }.flatMap { (_, value) ->
+            return groups.entries.filter { it.key.contains(".iOS-") }.flatMap { (runtime, value) ->
                 (value as? JsonArray ?: throw DesktopFailure("Invalid simulator list.")).map { item ->
                     val obj = item as? JsonObject ?: throw DesktopFailure("Invalid simulator record.")
-                    Device(obj.text("udid"), obj.text("name"), Platform.IOS_SIMULATOR, obj.text("state"))
+                    Device(obj.text("udid"), obj.text("name"), Platform.IOS_SIMULATOR, obj.text("state"),
+                        runtime.substringAfter(".iOS-").replace('-', '.'))
                 }
             }
         }
@@ -299,8 +343,10 @@ class DeviceManager(
                 if (state != "connected") return@mapNotNull null
                 if (hardware?.optionalText("platform") != "iOS") return@mapNotNull null
                 val names = (props?.get("state") ?: obj["deviceProperties"]) as? JsonObject
+                val software = props?.get("software") as? JsonObject
                 Device(obj.text("identifier"), names?.optionalText("name") ?: "iOS device",
-                    Platform.IOS_DEVICE, "Connected - installation deferred")
+                    Platform.IOS_DEVICE, "Connected - installation deferred",
+                    software?.osVersion() ?: names?.osVersion())
             }
         }
 
