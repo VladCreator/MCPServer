@@ -32,7 +32,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,7 +42,6 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -108,7 +106,6 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
     var pending by remember { mutableStateOf<List<InstallTask>>(emptyList()) }
     var activity by remember { mutableStateOf(emptyList<String>()) }
     var error by remember { mutableStateOf<String?>(null) }
-    val currentBusy by rememberUpdatedState(busy)
 
     fun record(message: String) {
         activity = listOf("${LocalTime.now().withNano(0)}  $message") + activity.take(99)
@@ -153,10 +150,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
         }
     }
     LaunchedEffect(Unit) {
-        while (true) {
-            if (!currentBusy && !scanning && pending.isEmpty()) refresh()
-            delay(10000)
-        }
+        refresh()
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp),
@@ -164,12 +158,12 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column {
                 Text("Tester Desktop", style = MaterialTheme.typography.headlineMedium)
-                Text("Local app installation workspace  |  0.4.0", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Local app installation workspace  |  0.4.1", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             OutlinedButton(onClick = { scope.launch { refresh() } },
                 enabled = !busy && !scanning && pending.isEmpty()) { Text(if (scanning) "Scanning..." else "Refresh devices") }
         }
-        Text("Scan every 10 seconds. Last scan: $scannedAt. Physical iOS installation is deferred.",
+        Text("Manual refresh. Last scan: $scannedAt. Physical iOS installation is deferred.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SelectionContainer {
             Text("ADB: ${manager.adbPath ?: "Not found - install platform-tools or set ANDROID_HOME"}",
@@ -183,31 +177,35 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                 TextButton(onClick = { error = null }) { Text("Dismiss") }
             }
         }
-        EvidenceInbox(manager, discovery.devices, busy, ::record)
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Installation files", style = MaterialTheme.typography.titleLarge)
-                BuildDropZone(!busy && pending.isEmpty() && selected.isEmpty(), { file ->
-                    val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
-                    apk = if (platform == Platform.ANDROID) file else null
-                    app = if (platform == Platform.IOS_SIMULATOR) file else null
-                    selected = discovery.devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
-                }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
-                    java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
-                    java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
-                    Modifier.fillMaxWidth().height(60.dp))
-                BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
-                if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
-                    style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
-                    Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty() &&
-                        discovery.devices.filter { it.key in selected }.all {
-                            if (it.platform == Platform.ANDROID) apk != null else app != null
-                        },
-                        onClick = {
-                            review(discovery.devices.filter { it.key in selected })
-                        }) { Text("Review installation") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f)) {
+                EvidenceInbox(manager, discovery.devices, busy, ::record)
+            }
+            Card(Modifier.weight(1f)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Installation files", style = MaterialTheme.typography.titleLarge)
+                    BuildDropZone(!busy && pending.isEmpty() && selected.isEmpty(), { file ->
+                        val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
+                        apk = if (platform == Platform.ANDROID) file else null
+                        app = if (platform == Platform.IOS_SIMULATOR) file else null
+                        selected = discovery.devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
+                    }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
+                        java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
+                        java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
+                        Modifier.fillMaxWidth().height(60.dp))
+                    BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
+                    if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
+                        Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty() &&
+                            discovery.devices.filter { it.key in selected }.all {
+                                if (it.platform == Platform.ANDROID) apk != null else app != null
+                            },
+                            onClick = {
+                                review(discovery.devices.filter { it.key in selected })
+                            }) { Text("Review installation") }
+                    }
                 }
             }
         }

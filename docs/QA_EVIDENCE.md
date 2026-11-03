@@ -1,4 +1,4 @@
-# QA Evidence - 0.4.0
+# QA Evidence - 0.4.1
 
 Android can send a linked flow's saved evidence to the explicitly paired
 **Tester Desktop** inbox over encrypted USB or Wi-Fi. For USB, press **Send**

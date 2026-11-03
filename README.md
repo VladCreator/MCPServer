@@ -4,7 +4,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io) server that ru
 Android device. It exposes device tools to AI agents over the local network and shows
 what is connected and what is being executed on a Compose dashboard.
 
-Current version: **0.4.0** (Android, iOS, and Tester Desktop; desktop installation and device/ADB bridge discovery; Android QA Evidence browser with collapsible flows, filename previews, sharing and downloads; P5 authenticated loopback run Viewer; recording deferred; physical iOS installation deferred).
+Current version: **0.4.1** (Android, iOS, and Tester Desktop; desktop installation and manually refreshed device/ADB bridge discovery; Android QA Evidence browser with collapsible flows, filename previews, sharing and downloads; P5 authenticated loopback run Viewer; recording deferred; physical iOS installation deferred).
 
 **QA Evidence** now appears beside Activity on wide screens (stacked on phones).
 Tap filenames to view saved reports and images in Tester, share/open evidence with
