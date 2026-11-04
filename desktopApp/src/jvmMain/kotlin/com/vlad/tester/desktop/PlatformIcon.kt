@@ -15,7 +15,7 @@ import androidx.compose.material3.MaterialTheme
 @Composable
 internal fun PlatformIcon(platform: Platform) {
     val appleColor = MaterialTheme.colorScheme.onSurface
-    Canvas(Modifier.size(28.dp).semantics {
+    Canvas(Modifier.size(42.dp).semantics {
         contentDescription = if (platform == Platform.ANDROID) "Android" else "Apple iOS"
     }) {
         scale(size.width / 24f, size.height / 24f, pivot = androidx.compose.ui.geometry.Offset.Zero) {

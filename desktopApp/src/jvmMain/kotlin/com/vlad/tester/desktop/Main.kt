@@ -1,6 +1,8 @@
 package com.vlad.tester.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,9 +26,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,29 +44,107 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.time.LocalTime
+import java.awt.GraphicsEnvironment
+import java.awt.Toolkit
+import java.awt.Rectangle
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 
 private data class InstallTask(val device: Device, val file: File, val identity: BuildIdentity)
 
 fun main() = application {
+    val store = remember { DesktopSettingsStore() }
+    var settingsError by remember { mutableStateOf<String?>(null) }
+    val initialSettings = remember {
+        try { store.load() }
+        catch (failure: Exception) {
+            settingsError = "Cannot load Desktop settings: ${failure.message}"
+            DesktopSettings()
+        }
+    }
+    var settings by remember { mutableStateOf(initialSettings) }
+    val restoredBounds = remember {
+        val screens = GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map {
+            val config = it.defaultConfiguration
+            val insets = Toolkit.getDefaultToolkit().getScreenInsets(config)
+            Rectangle(config.bounds).apply {
+                x += insets.left; y += insets.top
+                width -= insets.left + insets.right; height -= insets.top + insets.bottom
+            }
+        }
+        visibleWindowBounds(initialSettings.bounds, screens)
+    }
+    val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
+    var closing by remember { mutableStateOf(false) }
+    var closeWithoutSaving by remember { mutableStateOf(false) }
     var closeWarning by remember { mutableStateOf(false) }
+    LaunchedEffect(settings) {
+        delay(500)
+        try {
+            withContext(Dispatchers.IO) { store.save(settings) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            settingsError = "Cannot save Desktop settings: ${failure.message}"
+        }
+    }
     Window(
-        onCloseRequest = { if (busy) closeWarning = true else exitApplication() },
+        onCloseRequest = {
+            if (busy) closeWarning = true else if (!closing) {
+                closing = true
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { store.save(settings) }
+                        exitApplication()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        settingsError = "Cannot save Desktop settings before closing: ${failure.message}"
+                        closeWithoutSaving = true
+                    } finally { closing = false }
+                }
+            }
+        },
         title = "Tester Desktop",
         icon = painterResource("tester-icon.png"),
-        state = rememberWindowState(width = 1100.dp, height = 800.dp)
+        state = rememberWindowState(
+            width = (restoredBounds?.width ?: 1100).dp,
+            height = (restoredBounds?.height ?: 800).dp,
+            position = restoredBounds?.let { WindowPosition(it.x.dp, it.y.dp) } ?: WindowPosition.PlatformDefault
+        )
     ) {
+        DisposableEffect(window) {
+            val listener = object : ComponentAdapter() {
+                private fun capture() {
+                    if (window.extendedState == java.awt.Frame.NORMAL) {
+                        settings = settings.copy(bounds = Rectangle(window.bounds))
+                    }
+                }
+                override fun componentMoved(event: ComponentEvent) = capture()
+                override fun componentResized(event: ComponentEvent) = capture()
+            }
+            window.addComponentListener(listener)
+            onDispose { window.removeComponentListener(listener) }
+        }
         val dark = isSystemInDarkTheme()
         MaterialTheme(colorScheme = if (dark) darkColorScheme(
             primary = Color(0xFF6366F1), onPrimary = Color.White,
@@ -82,19 +168,33 @@ fun main() = application {
             outline = Color(0xFFE2E8F0), outlineVariant = Color(0xFFE2E8F0),
             onSurface = Color(0xFF0F172A), onSurfaceVariant = Color(0xFF5B6678)
         )) {
-            Surface(Modifier.fillMaxSize()) { DesktopDashboard(busy, { busy = it }) }
+            Surface(Modifier.fillMaxSize()) {
+                DesktopDashboard(busy || closing, { busy = it }, settings.showAllDevices,
+                    { settings = settings.copy(showAllDevices = it) }, settingsError,
+                    { settingsError = null })
+            }
             if (closeWarning) AlertDialog(
                 onDismissRequest = { closeWarning = false },
                 title = { Text("Operation in progress") },
                 text = { Text("Wait for the current device operation to finish before closing Tester Desktop.") },
                 confirmButton = { TextButton(onClick = { closeWarning = false }) { Text("OK") } }
             )
+            if (closeWithoutSaving) AlertDialog(
+                onDismissRequest = { closeWithoutSaving = false },
+                title = { Text("Display settings could not be saved") },
+                text = { Text("Close without saving window and filter preferences? Your QA evidence is not affected.") },
+                dismissButton = { TextButton(onClick = { closeWithoutSaving = false }) { Text("Keep open") } },
+                confirmButton = { TextButton(onClick = { exitApplication() }) { Text("Close without saving") } }
+            )
         }
     }
 }
 
 @Composable
-private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
+private fun DesktopDashboard(
+    busy: Boolean, setBusy: (Boolean) -> Unit, showAllDevices: Boolean,
+    setShowAllDevices: (Boolean) -> Unit, settingsError: String?, dismissSettingsError: () -> Unit
+) {
     val manager = remember { DeviceManager() }
     val scope = rememberCoroutineScope()
     var discovery by remember { mutableStateOf(Discovery(emptyList(), emptyList())) }
@@ -141,7 +241,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
         scanning = true
         try {
             discovery = withContext(Dispatchers.IO) { manager.discover() }
-            selected = selected.intersect(discovery.devices.filter { it.canInstall }.map { it.key }.toSet())
+            selected = visibleSelection(selected, discovery.devices, showAllDevices)
             scannedAt = LocalTime.now().withNano(0).toString()
         } catch (failure: IOException) {
             fail("Discovery failed: ${failure.message}")
@@ -152,6 +252,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
     LaunchedEffect(Unit) {
         refresh()
     }
+    val devices = visibleDevices(discovery.devices, showAllDevices)
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -171,6 +272,12 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                 color = if (manager.adbPath != null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        settingsError?.let { message ->
+            Row {
+                Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = dismissSettingsError) { Text("Dismiss") }
+            }
+        }
         if (error != null) Card(Modifier.fillMaxWidth()) {
             Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SelectionContainer(Modifier.weight(1f)) { Text(error!!, color = MaterialTheme.colorScheme.error) }
@@ -188,7 +295,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                         val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
                         apk = if (platform == Platform.ANDROID) file else null
                         app = if (platform == Platform.IOS_SIMULATOR) file else null
-                        selected = discovery.devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
+                        selected = devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
                     }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
                         java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
                         java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
@@ -196,33 +303,34 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                     BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
                     if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
                         style = MaterialTheme.typography.bodySmall)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
-                        Button(enabled = selected.isNotEmpty() && !busy && !scanning && pending.isEmpty() &&
-                            discovery.devices.filter { it.key in selected }.all {
-                                if (it.platform == Platform.ANDROID) apk != null else app != null
-                            },
-                            onClick = {
-                                review(discovery.devices.filter { it.key in selected })
-                            }) { Text("Review installation") }
-                    }
+                    Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
                 }
             }
         }
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(Modifier.weight(1.2f).fillMaxSize()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Devices", style = MaterialTheme.typography.titleLarge)
+                    Row {
+                        Text("Devices", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                        Checkbox(checked = showAllDevices, enabled = !busy && pending.isEmpty(),
+                            modifier = Modifier.semantics { contentDescription = "Show all devices" },
+                            onCheckedChange = {
+                                selected = visibleSelection(selected, discovery.devices, it)
+                                setShowAllDevices(it)
+                            })
+                        Text("Show all devices", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)
+                    }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(discovery.warnings) { warning ->
                             SelectionContainer { Text(warning, color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall) }
                         }
-                        if (discovery.devices.isEmpty()) item {
-                            Text("No devices found. Connect and authorize Android USB debugging, or install Xcode for iOS simulators.",
+                        if (devices.isEmpty()) item {
+                            Text(if (showAllDevices) "No devices found. Connect Android or install Xcode for iOS simulators."
+                                else "No connected devices. Connect a device, then Refresh devices, or enable Show all devices to boot a simulator.",
                                 modifier = Modifier.padding(vertical = 16.dp))
                         }
-                        items(discovery.devices, key = { it.key }) { device ->
+                        items(devices, key = { it.key }) { device ->
                             Column {
                                 Row {
                                     Checkbox(checked = device.key in selected,
@@ -239,13 +347,15 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                                         SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
                                         val matchingFile = if (device.platform == Platform.ANDROID) apk else app
                                         if (device.key in selected && matchingFile != null) {
-                                            Button(enabled = !busy && !scanning && pending.isEmpty(),
-                                                onClick = { review(listOf(device)) }) { Text("Install") }
+                                            DeviceActionIcon(Icons.Rounded.Download, "Install on ${device.name}",
+                                                enabled = !busy && !scanning && pending.isEmpty(),
+                                                onClick = { review(listOf(device)) })
                                         }
                                         if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
                                             color = MaterialTheme.colorScheme.error)
                                         if (device.platform == Platform.ANDROID) {
-                                            OutlinedButton(enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
+                                            DeviceActionIcon(Icons.Rounded.PlayArrow, "Run Tester on ${device.name}",
+                                                enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
                                                 onClick = {
                                                     setBusy(true)
                                                     scope.launch {
@@ -261,7 +371,7 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                                                             refresh()
                                                         }
                                                     }
-                                                }) { Text("Run Tester") }
+                                                })
                                             val bridge = discovery.bridges[device.key] ?: BridgeState.UNVERIFIED
                                             Text("ADB bridge: ${bridge.label}", style = MaterialTheme.typography.bodySmall,
                                                 color = if (bridge == BridgeState.ACTIVE) MaterialTheme.colorScheme.tertiary
@@ -325,7 +435,9 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                     Spacer(Modifier.height(12.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (activity.isEmpty()) item { Text("No installations yet.") }
-                        items(activity) { entry -> SelectionContainer { Text(entry) } }
+                        items(activity) { entry -> SelectionContainer {
+                            Text(entry, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp))
+                        } }
                     }
                 }
             }
@@ -376,6 +488,16 @@ private fun DesktopDashboard(busy: Boolean, setBusy: (Boolean) -> Unit) {
                 }
             }) { Text("Install") } }
         )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DeviceActionIcon(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    TooltipArea(tooltip = {
+        Surface(shadowElevation = 4.dp) { Text(label, Modifier.padding(8.dp)) }
+    }) {
+        IconButton(enabled = enabled, onClick = onClick) { Icon(icon, contentDescription = label) }
     }
 }
 

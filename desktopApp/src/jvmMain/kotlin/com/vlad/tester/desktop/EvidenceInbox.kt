@@ -47,6 +47,7 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
     var usbCode by remember { mutableStateOf<String?>(null) }
     var usbExpired by remember { mutableStateOf(false) }
     var usbPaired by remember { mutableStateOf(false) }
+    var activeDevices by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(usbCode) {
         usbExpired = false
         usbPaired = false
@@ -63,17 +64,19 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
         }
     }
     DisposableEffect(Unit) { onDispose { receiver?.close() } }
-    LaunchedEffect(receiver) {
+    LaunchedEffect(receiver, devices) {
+        activeDevices = emptySet()
         while (receiver != null) {
             flows = receiver?.received.orEmpty()
             receiverError = receiver?.latestError
+            activeDevices = devices.filter { receiver?.usbActive(it.id) == true }.map { it.id }.toSet()
             delay(1000)
         }
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row {
-                Text("QA Evidence inbox", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Text("QA Evidence", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 if (receiver == null) TextButton(enabled = !starting, onClick = {
                     starting = true
                     scope.launch {
@@ -100,15 +103,19 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                     }) { Text("Stop") }
                 }
             }
-            Text(if (receiver != null) "Active - encrypted USB / Wi-Fi transfers. Pairing is required."
-                else "Disabled. Enable to receive flow evidence from Android.",
+            if (receiver != null) {
+                ActiveStatusBadge("Active - ready to receive")
+                Text("Encrypted USB / Wi-Fi transfers. Device pairing is separate.",
+                    style = MaterialTheme.typography.bodySmall)
+            } else Text("Disabled. Enable to receive flow evidence from Android.",
                 style = MaterialTheme.typography.bodySmall)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             receiverError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             devices.filter { it.platform == Platform.ANDROID && it.canInstall }.forEach { device ->
                 Row {
                     Text(device.name, Modifier.weight(1f))
-                    TextButton(enabled = !busy && !starting, onClick = {
+                    if (device.id in activeDevices) ActiveStatusBadge("Connected")
+                    else TextButton(enabled = !busy && !starting, onClick = {
                         starting = true
                         scope.launch {
                             var created: EvidenceReceiver? = null

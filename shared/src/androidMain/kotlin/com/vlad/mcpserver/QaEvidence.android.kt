@@ -11,6 +11,7 @@ import android.webkit.WebResourceResponse
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -113,6 +115,7 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     val desktop = remember(context) { DesktopEvidenceClient(context) }
     var desktopDialog by remember { mutableStateOf(false) }
     var desktopStatus by remember { mutableStateOf("Desktop not paired") }
+    var desktopActive by remember { mutableStateOf(false) }
     var sendFlow by remember { mutableStateOf<Long?>(null) }
     var sendEntries by remember { mutableStateOf<List<QaEvidence>>(emptyList()) }
     var sendDestination by remember { mutableStateOf("") }
@@ -135,10 +138,14 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
         scope.launch {
             try {
                 notice = withContext(Dispatchers.IO) { desktop.sendFlow(repository, flow, ids) }
+                desktopActive = true
+                desktopStatus = "Tester Desktop active - evidence received."
                 error = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
+                desktopActive = false
+                desktopStatus = "Desktop status unknown after Send failed."
                 error = "Evidence Send failed: ${failure.localizedMessage}. Check Desktop inbox before retrying."
             } finally { busy = false }
         }
@@ -204,16 +211,20 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
     }
     val actionsEnabled = !busy && downloadPath == null
 
-    LaunchedEffect(desktop) {
+    LaunchedEffect(desktop, desktopDialog) {
         while (true) {
-            desktopStatus = try {
-                withContext(Dispatchers.IO) {
-                    if (desktop.pairing() == null) "Desktop not paired" else desktop.status()
+            try {
+                val status = withContext(Dispatchers.IO) {
+                    if (desktop.pairing() == null) false to "Desktop not paired"
+                    else true to desktop.status()
                 }
+                desktopActive = status.first
+                desktopStatus = status.second
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                "Desktop unavailable: ${failure.localizedMessage}"
+                desktopActive = false
+                desktopStatus = "Desktop unavailable: ${failure.localizedMessage}"
             }
             kotlinx.coroutines.delay(10_000)
         }
@@ -285,7 +296,17 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                 TextButton(onClick = { desktopDialog = true }, enabled = actionsEnabled) { Text("Desktop") }
                 TextButton(onClick = { refreshRevision++ }, enabled = !loading && !busy) { Text("Refresh") }
             }
-            Text(desktopStatus, style = MaterialTheme.typography.bodySmall)
+            if (desktopActive) {
+                val dark = isSystemInDarkTheme()
+                Surface(
+                    color = if (dark) Color(0xFF143525) else Color(0xFFDCFCE7),
+                    contentColor = if (dark) Color(0xFF86EFAC) else Color(0xFF166534),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(desktopStatus, Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            } else Text(desktopStatus, style = MaterialTheme.typography.bodySmall)
             Text("Reports, retained run artifacts and saved media. Sharing sends a copy to an app you choose.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (loading || busy) CircularProgressIndicator(Modifier.size(24.dp))
@@ -351,14 +372,19 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                                     busy = true
                                     scope.launch {
                                         try {
-                                            val pair = withContext(Dispatchers.IO) {
-                                                desktop.pairing()?.also { desktop.status(it) }
+                                            val (pair, status) = withContext(Dispatchers.IO) {
+                                                val pairing = desktop.pairing()
+                                                pairing to if (pairing == null) "Desktop not paired" else desktop.status(pairing)
                                             }
                                             sendFlow = flowId
+                                            desktopActive = pair != null
+                                            desktopStatus = status
                                             if (pair == null) desktopDialog = true else sendDestination = pair.url
                                         } catch (cancelled: CancellationException) {
                                             throw cancelled
                                         } catch (failure: Exception) {
+                                            desktopActive = false
+                                            desktopStatus = "Desktop unavailable: ${failure.localizedMessage}"
                                             error = "Desktop unavailable: ${failure.localizedMessage}. Pair again using USB or Wi-Fi."
                                             sendFlow = flowId
                                             desktopDialog = true
@@ -403,11 +429,15 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
         sendFlow = null
     }, {
         desktopStatus = it
+        desktopActive = true
         desktopDialog = false
         sendFlow?.let(::sendApprovedFlow)
     }, sendDescription = sendFlow?.let {
         "Confirming sends Flow #$it (${sendEntries.size} files) to this Desktop, including reports and photos. " +
             "Evidence may contain private project data. Originals stay here. Limit: 200 files / 100 MiB. No automatic retry."
+    }, onForgot = {
+        desktopActive = false
+        desktopStatus = "Desktop not paired"
     })
     if (!desktopDialog) sendFlow?.let { flow ->
         AlertDialog(onDismissRequest = { sendFlow = null }, title = { Text("Send Flow #$flow to Desktop?") },

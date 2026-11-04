@@ -35,21 +35,31 @@ internal data class ReceivedFlow(val folder: File, val count: Int, val receivedA
 
 internal class EvidenceReceiver(private val inbox: File = File(
     System.getProperty("user.home"), "Library/Application Support/Tester Desktop/QA Evidence"
-), port: Int = EVIDENCE_PORT) : AutoCloseable {
+), port: Int = EVIDENCE_PORT, private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000 }) : AutoCloseable {
     val token: String = ByteArray(24).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
     val fingerprint: String
     private val server: HttpsServer
     val port: Int get() = server.address.port
     private val executor = Executors.newFixedThreadPool(2)
-    private data class UsbKey(val value: String, val expires: Long)
+    private data class UsbKey(val value: String, val expires: Long, val lastSeen: Long? = null)
     private val usbTokens = java.util.concurrent.ConcurrentHashMap<String, UsbKey>()
 
     fun usbKey(deviceId: String): String =
         ByteArray(24).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-            .also { usbTokens[deviceId] = UsbKey(it, System.currentTimeMillis() + 120_000) }
+            .also { usbTokens[deviceId] = UsbKey(it, clockMillis() + 120_000) }
 
     fun revokeUsbKey(deviceId: String) { usbTokens.remove(deviceId) }
     fun usbPaired(deviceId: String): Boolean = usbTokens[deviceId]?.expires == Long.MAX_VALUE
+    fun usbActive(deviceId: String): Boolean = usbTokens[deviceId]?.let {
+        it.expires == Long.MAX_VALUE && it.lastSeen?.let { seen -> clockMillis() - seen in 0 until 30_000 } == true
+    } == true
+
+    private fun recordActivity(deviceId: String, key: UsbKey) {
+        usbTokens.computeIfPresent(deviceId) { _, current ->
+            if (current.value == key.value) current.copy(expires = Long.MAX_VALUE, lastSeen = clockMillis())
+            else current
+        }
+    }
     @Volatile var latestError: String? = null
         private set
     @Volatile var received: List<ReceivedFlow> = emptyList()
@@ -92,7 +102,7 @@ internal class EvidenceReceiver(private val inbox: File = File(
         try {
             val supplied = exchange.requestHeaders.getFirst("Authorization").orEmpty()
             val usb = usbTokens.entries.firstOrNull {
-                it.value.expires > System.currentTimeMillis() &&
+                it.value.expires > clockMillis() &&
                     MessageDigest.isEqual(supplied.toByteArray(), "Bearer ${it.value.value}".toByteArray())
             }
             if ((listOf(token) + listOfNotNull(usb?.value?.value)).none {
@@ -108,7 +118,7 @@ internal class EvidenceReceiver(private val inbox: File = File(
                 reply(exchange, 405, "Unsupported method."); return
             }
             if (!upload) {
-                usb?.let { usbTokens.replace(it.key, it.value, it.value.copy(expires = Long.MAX_VALUE)) }
+                usb?.let { recordActivity(it.key, it.value) }
                 reply(exchange, 200, "Tester Desktop active - evidence receiver ready.")
                 return
             }
@@ -146,6 +156,7 @@ internal class EvidenceReceiver(private val inbox: File = File(
                     require(total == length) { "Incomplete evidence upload." }
                 }
                 val result = importFlow(archive, inbox, flow)
+                usb?.let { recordActivity(it.key, it.value) }
                 synchronized(this) { received = listOf(result) + received.take(99) }
                 latestError = null
                 reply(exchange, 201, "Received Flow #$flow: ${result.count} files.")
@@ -176,6 +187,7 @@ internal class EvidenceReceiver(private val inbox: File = File(
     override fun close() {
         server.stop(0)
         executor.shutdownNow()
+        usbTokens.clear()
     }
 }
 

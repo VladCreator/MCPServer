@@ -37,6 +37,7 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.compose.material3)
+            implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.serialization.json)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
             implementation("org.bouncycastle:bcpkix-jdk18on:1.80.2")

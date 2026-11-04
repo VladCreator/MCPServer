@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 internal fun DesktopPairingDialog(client: DesktopEvidenceClient, onDismiss: () -> Unit, onPaired: (String) -> Unit,
-    sendDescription: String? = null) {
+    sendDescription: String? = null, onForgot: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var url by remember { mutableStateOf("https://localhost:8766") }
     var key by remember { mutableStateOf("") }
@@ -78,6 +78,7 @@ internal fun DesktopPairingDialog(client: DesktopEvidenceClient, onDismiss: () -
                     scope.launch {
                         try {
                             withContext(Dispatchers.IO) { client.forget(); client.clearUsbOffer() }
+                            onForgot()
                             onDismiss()
                         } catch (cancelled: kotlinx.coroutines.CancellationException) {
                             throw cancelled

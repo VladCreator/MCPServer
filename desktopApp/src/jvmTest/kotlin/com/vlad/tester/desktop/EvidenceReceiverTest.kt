@@ -95,7 +95,8 @@ class EvidenceReceiverTest {
     fun realHttpsReceiverAuthenticatesStatusAndPersistsAnUploadedFlow() {
         val root = kotlin.io.path.createTempDirectory("tester-https-").toFile()
         try {
-            EvidenceReceiver(root, 0).use { receiver ->
+            var now = 0L
+            EvidenceReceiver(root, 0, clockMillis = { now }).use { receiver ->
                 val ssl = SSLContext.getInstance("TLS").apply {
                     init(null, arrayOf(object : X509TrustManager {
                         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
@@ -123,21 +124,52 @@ class EvidenceReceiverTest {
                 } finally { status.disconnect() }
                 val usbKey = receiver.usbKey("device-one")
                 assertTrue(!receiver.usbPaired("device-one"))
+                assertTrue(!receiver.usbActive("device-one"))
                 val beforeConfirmation = connect("/evidence", usbKey)
                 try {
                     beforeConfirmation.requestMethod = "POST"
                     assertEquals(403, beforeConfirmation.responseCode)
                 } finally { beforeConfirmation.disconnect() }
+                assertTrue(!receiver.usbActive("device-one"))
                 val confirm = connect("/status", usbKey)
                 try {
                     assertEquals(200, confirm.responseCode)
                     assertTrue(receiver.usbPaired("device-one"))
+                    assertTrue(receiver.usbActive("device-one"))
                 } finally { confirm.disconnect() }
+                now = 29_999
+                assertTrue(receiver.usbActive("device-one"))
+                val wrongMethod = connect("/status", usbKey)
+                try {
+                    wrongMethod.requestMethod = "POST"
+                    assertEquals(405, wrongMethod.responseCode)
+                } finally { wrongMethod.disconnect() }
+                val wrongPath = connect("/status/other", usbKey)
+                try { assertEquals(404, wrongPath.responseCode) } finally { wrongPath.disconnect() }
+                now = 30_000
+                assertTrue(!receiver.usbActive("device-one"))
+                assertTrue(receiver.usbPaired("device-one"))
+                val reconnect = connect("/status", usbKey)
+                try {
+                    assertEquals(200, reconnect.responseCode)
+                    assertTrue(receiver.usbActive("device-one"))
+                } finally { reconnect.disconnect() }
+                val secondKey = receiver.usbKey("device-two")
+                now += 120_000
+                val expired = connect("/status", secondKey)
+                try { assertEquals(401, expired.responseCode) } finally { expired.disconnect() }
+                assertTrue(!receiver.usbPaired("device-two"))
                 receiver.revokeUsbKey("device-one")
+                assertTrue(!receiver.usbActive("device-one"))
                 val revoked = connect("/status", usbKey)
                 try { assertEquals(401, revoked.responseCode) } finally { revoked.disconnect() }
                 val zip = archive(root, listOf("e1.txt"))
-                val upload = connect("/evidence", receiver.token)
+                val confirmed = receiver.usbKey("device-one")
+                val approve = connect("/status", confirmed)
+                try { assertEquals(200, approve.responseCode) } finally { approve.disconnect() }
+                now += 30_000
+                assertTrue(!receiver.usbActive("device-one"))
+                val upload = connect("/evidence", confirmed)
                 try {
                     upload.requestMethod = "POST"; upload.doOutput = true
                     upload.setFixedLengthStreamingMode(zip.length())
@@ -147,6 +179,7 @@ class EvidenceReceiverTest {
                     assertEquals(201, upload.responseCode)
                     assertEquals(1, receiver.received.single().count)
                     assertTrue(File(receiver.received.single().folder, "e1.txt").isFile)
+                    assertTrue(receiver.usbActive("device-one"))
                 } finally { upload.disconnect(); zip.delete() }
                 receiver.received.forEach { flow ->
                     flow.folder.listFiles()!!.forEach { it.delete() }; flow.folder.delete()
