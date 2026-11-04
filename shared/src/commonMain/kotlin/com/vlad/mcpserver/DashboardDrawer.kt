@@ -80,14 +80,16 @@ internal fun DashboardDrawer(
     // Keep evidence state and in-flight work when moving between modal and inline slots.
     val panel = remember {
         movableContentOf {
-            Column(Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth()) {
-                    Text(selected.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = {
-                        scope.launch { transitions.withLock { state.close() } }
-                    }) { Text("Close") }
-                }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)) {
+                Text(selected.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = {
+                    scope.launch { transitions.withLock { state.close() } }
+                }) { Text("Close") }
+            }
+            Column(
+                Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 RetainedPanelContent(selected, evidence = { currentEvidence() }, activity = { currentActivity() })
             }
         }

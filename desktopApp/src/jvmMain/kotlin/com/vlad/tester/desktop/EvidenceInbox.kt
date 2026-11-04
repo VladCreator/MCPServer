@@ -1,5 +1,6 @@
 package com.vlad.tester.desktop
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -148,7 +149,8 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                     }) { Text("Pair") }
                 }
             }
-            LazyColumn(Modifier.heightIn(max = 100.dp)) {
+            val receivedListMaxHeight = if (flows.isEmpty()) 100.dp else 260.dp
+            LazyColumn(Modifier.animateContentSize().heightIn(max = receivedListMaxHeight)) {
                 items(flows, key = { it.folder.path }) { flow ->
                     TextButton(onClick = {
                         try { Desktop.getDesktop().open(flow.folder) }
