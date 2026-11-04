@@ -214,6 +214,95 @@ class DeviceManagerTest {
     }
 
     @Test
+    fun deviceLabelsDoNotChangeReadinessOrRawStates() {
+        val phone = Device("usb-one", "Phone", Platform.ANDROID, "device")
+        val emulator = phone.copy(id = "emulator-5554")
+        assertEquals("Device", phone.kindLabel)
+        assertEquals("Connected", phone.stateLabel)
+        assertEquals("device", phone.state)
+        assertEquals("Simulator", emulator.kindLabel)
+        assertTrue(emulator.canInstall)
+        assertEquals("Unauthorized", phone.copy(state = "unauthorized").stateLabel)
+        assertEquals("Offline", phone.copy(state = "offline").stateLabel)
+        val simulator = Device("uuid", "iPhone", Platform.IOS_SIMULATOR, "Booted")
+        assertEquals("Simulator", simulator.kindLabel)
+        assertEquals("Connected", simulator.stateLabel)
+        assertEquals("Shutdown", simulator.copy(state = "Shutdown").stateLabel)
+        val physical = Device("uuid", "iPhone", Platform.IOS_DEVICE, "Connected - installation deferred")
+        assertEquals("Device", physical.kindLabel)
+        assertEquals("Connected", physical.stateLabel)
+        assertFalse(physical.canInstall)
+    }
+
+    @Test
+    fun disablingBridgeRemovesOnlySelectedSerialPortAndVerifiesRemoval() {
+        val calls = mutableListOf<List<String>>()
+        var forwarded = true
+        val manager = DeviceManager(CommandRunner { command, _ ->
+            calls += command
+            when {
+                command.contains("devices") -> "one device\ntwo device"
+                command.contains("--list") -> (if (forwarded) "one tcp:8080 tcp:8080\n" else "") +
+                    "two tcp:18080 tcp:8080\none tcp:8766 tcp:8766"
+                command.contains("--remove") -> { forwarded = false; "" }
+                else -> throw DesktopFailure("Unexpected command")
+            }
+        }, adb = "/fake/adb")
+        manager.disableBridge(Device("one", "Phone", Platform.ANDROID, "device"))
+        assertEquals(listOf("/fake/adb", "-s", "one", "forward", "--remove", "tcp:8080"),
+            calls.single { it.contains("--remove") })
+        assertEquals(2, calls.count { it.contains("--list") })
+        assertTrue(calls.none { it.contains("--remove-all") || it.contains("reverse") })
+    }
+
+    @Test
+    fun disconnectRefusesConflictsAndUnreadyDevicesAndHandlesAbsentBridge() {
+        for (scenario in listOf("absent", "other_serial", "other_port", "unauthorized", "disconnected", "ios", "malformed")) {
+            val calls = mutableListOf<List<String>>()
+            val manager = DeviceManager(CommandRunner { command, _ ->
+                calls += command
+                when {
+                    command.contains("devices") -> when (scenario) {
+                        "unauthorized" -> "one unauthorized"
+                        "disconnected" -> ""
+                        else -> "one device"
+                    }
+                    command.contains("--list") -> when (scenario) {
+                        "other_serial" -> "two tcp:8080 tcp:8080"
+                        "other_port" -> "one tcp:8080 tcp:9000"
+                        "malformed" -> "one tcp:8080"
+                        else -> ""
+                    }
+                    else -> throw DesktopFailure("Unexpected command")
+                }
+            }, adb = "/fake/adb")
+            val device = Device("one", "Phone",
+                if (scenario == "ios") Platform.IOS_DEVICE else Platform.ANDROID, "device")
+            if (scenario == "absent") manager.disableBridge(device)
+            else assertFailsWith<DesktopFailure>(scenario) { manager.disableBridge(device) }
+            assertTrue(calls.none { it.contains("--remove") || it.contains("--remove-all") })
+        }
+    }
+
+    @Test
+    fun disconnectSurfacesCommandFailureAndUnconfirmedRemoval() {
+        for (commandFails in listOf(true, false)) {
+            val manager = DeviceManager(CommandRunner { command, _ ->
+                when {
+                    command.contains("devices") -> "one device"
+                    command.contains("--list") -> "one tcp:8080 tcp:8080"
+                    command.contains("--remove") -> if (commandFails) throw DesktopFailure("ADB removal failed") else ""
+                    else -> throw DesktopFailure("Unexpected command")
+                }
+            }, adb = "/fake/adb")
+            val failure = assertFailsWith<DesktopFailure> {
+                manager.disableBridge(Device("one", "Phone", Platform.ANDROID, "device"))
+            }
+            assertTrue(failure.message.orEmpty().contains(if (commandFails) "removal failed" else "did not confirm"))
+        }
+    }
+
+    @Test
     fun enablingBridgePinsSerialUsesNoRebindAndVerifiesResult() {
         val calls = mutableListOf<List<String>>()
         var forwarded = false

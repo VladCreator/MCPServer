@@ -1,8 +1,8 @@
 # QA Evidence - 0.4.1
 
 Android can send a linked flow's saved evidence to the explicitly paired
-**Tester Desktop** inbox over encrypted USB or Wi-Fi. For USB, press **Send**
-beside a flow on Android, then **Pair** beside your device in Desktop's **QA Evidence** card.
+**Tester Desktop** over encrypted USB or Wi-Fi. For USB, press the **Send icon**
+beside a flow on Android, then open Desktop's **QA Evidence icon** and press **Pair** beside your device.
 Confirm the matching two-digit number on Android to pair and send that flow.
 No URL or secret copying is needed. Wi-Fi setup remains under **Desktop >
 Wi-Fi / advanced setup**. All dates in that flow are included; originals are preserved.
@@ -11,16 +11,19 @@ An authenticated **Tester Desktop active** status uses a green badge on Android;
 unpaired or unavailable states do not. Desktop uses a green receiver-ready badge
 and hides Pair only while that device has recent authenticated activity.
 
-Use the **QA Evidence icon** in the Android/iOS dashboard header to open the
-right-side evidence drawer. Landscape tablets (both viewport dimensions at least
+Use the **QA Evidence icon** or **Activity/history icon** in the Android/iOS
+dashboard header to open the corresponding right-side panel. Only one panel is
+visible: selecting the other icon switches panels; selecting the current icon
+again closes it. Landscape tablets (both viewport dimensions at least
 600 dp, width greater than height) use an inline dismissible panel; portrait
 devices and phones, including landscape phones, use a modal panel with a scrim.
 Use **Close** or the header toggle to dismiss it; modal panels also close on
 outside tap or platform Back. The drawer starts closed at a new app launch.
-Activity stays in the dashboard.
+Activity no longer occupies the dashboard.
 
 Evidence state and approved transfer work remain owned by the same composition
-when the drawer closes or changes presentation. Android handles orientation and
+when the drawer closes, switches panels or changes presentation. Activity expansion
+and list state are retained too. Android handles orientation and
 window-size changes without recreating the Activity, preserving those operations.
 Desktop status checks continue while the drawer is closed. Existing evidence
 approval, privacy and size limits are unchanged. The iOS drawer contains its
@@ -41,8 +44,11 @@ Evidence files remain grouped by calendar day in the device's time zone, newest 
 All days start collapsed: tap a date to expand or collapse its complete file list.
 Each date shows its file count; all dates are available in the scrollable list.
 Within each date, **Flow #N** and **Unlinked** headers also collapse or expand
-their file lists independently; flows start collapsed. Tap a filename to view
-its content. Share and Download icon buttons sit beside each filename with
+their file lists independently; flows start collapsed. Flow headings use the main
+text color, distinct from primary-colored dates in both themes.
+The Send icon beside each linked flow retains the same
+pairing and explicit confirmation steps; confirmation dialogs still say **Send**.
+Tap a filename to view its content. Share and Download icon buttons sit beside each filename with
 accessible labels; the source and local time appear underneath the name.
 Compact rows include file-type icons for images, videos,
 PDFs, structured data and text reports.

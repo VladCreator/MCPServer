@@ -1,6 +1,7 @@
 package com.vlad.mcpserver
 
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.History
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -150,7 +151,10 @@ fun App(viewModel: AppViewModel = viewModel()) {
     McpTheme(darkTheme = viewModel.isDarkMode) {
         SystemBarAppearance(useDarkIcons = !viewModel.isDarkMode)
 
-        EvidenceDrawer(evidence = { QaEvidenceCard(Modifier.fillMaxWidth(), qaEvidenceRevision) }) { toggleEvidence ->
+        DashboardDrawer(
+            evidence = { QaEvidenceCard(Modifier.fillMaxWidth(), qaEvidenceRevision) },
+            activity = { ActivityCard(logs = executionLogs) }
+        ) { togglePanel ->
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background
             ) { innerPadding ->
@@ -173,7 +177,8 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             AppHeader(
                                 status = status,
                                 onTools = { showTools = true },
-                                onEvidence = toggleEvidence,
+                                onEvidence = { togglePanel(DashboardPanel.EVIDENCE) },
+                                onActivity = { togglePanel(DashboardPanel.ACTIVITY) },
                                 onSettings = { showSettings = true }
                             )
                         }
@@ -263,9 +268,6 @@ fun App(viewModel: AppViewModel = viewModel()) {
                             }
                         }
 
-                        item(key = "activity-evidence") {
-                            ActivityCard(logs = executionLogs)
-                        }
                     }
                 }
             }
@@ -296,20 +298,24 @@ fun App(viewModel: AppViewModel = viewModel()) {
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun AppHeader(
     status: ServerStatus,
     onTools: () -> Unit,
     onEvidence: () -> Unit,
+    onActivity: () -> Unit,
     onSettings: () -> Unit
 ) {
-    Row(
+    FlowRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        maxItemsInEachRow = 2
     ) {
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).widthIn(min = 180.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Row(
@@ -329,26 +335,32 @@ private fun AppHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(onClick = onEvidence) {
-            Icon(
-                imageVector = Icons.Rounded.Description,
-                contentDescription = "Open QA Evidence",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        IconButton(onClick = onTools) {
-            Icon(
-                imageVector = Icons.Rounded.Apps,
-                contentDescription = "Tools",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        IconButton(onClick = onSettings) {
-            Icon(
-                imageVector = Icons.Rounded.Settings,
-                contentDescription = "Settings",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Row {
+            IconButton(onClick = onActivity) {
+                Icon(Icons.Rounded.History, contentDescription = "Toggle Activity",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onEvidence) {
+                Icon(
+                    imageVector = Icons.Rounded.Description,
+                    contentDescription = "Toggle QA Evidence",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onTools) {
+                Icon(
+                    imageVector = Icons.Rounded.Apps,
+                    contentDescription = "Tools",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onSettings) {
+                Icon(
+                    imageVector = Icons.Rounded.Settings,
+                    contentDescription = "Settings",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

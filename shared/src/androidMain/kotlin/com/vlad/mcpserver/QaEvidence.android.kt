@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -366,8 +367,9 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                                     contentDescription = null, modifier = Modifier.size(20.dp))
                                 Text("${flowLabel(flowId)} (${flowEvidence.size})",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                                if (flowId != null) TextButton(enabled = actionsEnabled, onClick = {
+                                    color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                                if (flowId != null) IconButton(
+                                    modifier = Modifier.size(48.dp), enabled = actionsEnabled, onClick = {
                                     sendEntries = entries.filter { it.flowId == flowId }
                                     busy = true
                                     scope.launch {
@@ -390,7 +392,7 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                                             desktopDialog = true
                                         } finally { busy = false }
                                     }
-                                }) { Text("Send") }
+                                }) { Icon(Icons.Rounded.Send, contentDescription = "Send Flow #$flowId to Desktop") }
                             }
                         }
                         if (flowExpanded) items(flowEvidence, key = { it.id }) { item ->

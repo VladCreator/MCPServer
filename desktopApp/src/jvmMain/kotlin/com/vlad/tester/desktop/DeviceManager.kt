@@ -15,6 +15,13 @@ enum class Platform(val label: String) {
 data class Device(val id: String, val name: String, val platform: Platform, val state: String,
     val osVersion: String? = null) {
     val key: String get() = "${platform.name}:$id"
+    val kindLabel: String get() = if (platform == Platform.IOS_SIMULATOR ||
+        platform == Platform.ANDROID && id.startsWith("emulator-")) "Simulator" else "Device"
+    val stateLabel: String get() = if (platform == Platform.IOS_DEVICE && state.startsWith("Connected")) "Connected"
+        else when (state) {
+        "device", "Booted", "connected" -> "Connected"
+        else -> state.replaceFirstChar { it.uppercase() }
+    }
     val canInstall: Boolean get() = when (platform) {
         Platform.ANDROID -> state == "device"
         Platform.IOS_SIMULATOR -> state == "Booted"
@@ -159,6 +166,23 @@ class DeviceManager(
         }
         if (bridgeState(device.id, parseForwards(runner.run(listOf(tool, "forward", "--list"), 15))) != BridgeState.ACTIVE) {
             throw DesktopFailure("ADB did not confirm the requested port forwarding.")
+        }
+    }
+
+    fun disableBridge(device: Device) {
+        if (device.platform != Platform.ANDROID) throw DesktopFailure("ADB forwarding requires an Android device.")
+        val tool = requireAdb()
+        val ready = parseAdb(runner.run(listOf(tool, "devices", "-l"), 15))
+            .singleOrNull { it.id == device.id }
+        if (ready?.canInstall != true) throw DesktopFailure("Selected Android device is disconnected or unauthorized.")
+        when (bridgeState(device.id, parseForwards(runner.run(listOf(tool, "forward", "--list"), 15)))) {
+            BridgeState.ACTIVE -> runner.run(listOf(tool, "-s", device.id, "forward", "--remove", "tcp:8080"), 15)
+            BridgeState.MISSING -> Unit
+            BridgeState.CONFLICT -> throw DesktopFailure("Port 8080 is mapped elsewhere. Existing forwarding was not changed.")
+            BridgeState.UNVERIFIED -> throw DesktopFailure("ADB forwarding could not be verified.")
+        }
+        if (bridgeState(device.id, parseForwards(runner.run(listOf(tool, "forward", "--list"), 15))) != BridgeState.MISSING) {
+            throw DesktopFailure("ADB did not confirm removal of the requested port forwarding.")
         }
     }
 

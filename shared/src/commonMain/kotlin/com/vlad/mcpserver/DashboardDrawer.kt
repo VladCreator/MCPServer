@@ -28,25 +28,47 @@ import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
-internal fun useInlineEvidenceDrawer(widthDp: Float, heightDp: Float): Boolean =
+internal fun useInlineDashboardDrawer(widthDp: Float, heightDp: Float): Boolean =
     minOf(widthDp, heightDp) >= 600 && widthDp > heightDp
 
+internal enum class DashboardPanel(val title: String) {
+    EVIDENCE("QA Evidence"), ACTIVITY("Activity")
+}
+
 @Composable
-internal fun EvidenceDrawer(
+private fun RetainedPanelContent(
+    selected: DashboardPanel, evidence: @Composable () -> Unit, activity: @Composable () -> Unit
+) {
+    // Measure both owners, but only place the selected panel: hidden work stays alive without focus targets.
+    Layout(content = { Box { evidence() }; Box { activity() } }) { measurables, constraints ->
+        val panels = measurables.map { it.measure(constraints) }
+        val visible = panels[if (selected == DashboardPanel.EVIDENCE) 0 else 1]
+        layout(visible.width, visible.height) { visible.placeRelative(0, 0) }
+    }
+}
+
+@Composable
+internal fun DashboardDrawer(
     evidence: @Composable () -> Unit,
-    content: @Composable (toggle: () -> Unit) -> Unit
+    activity: @Composable () -> Unit,
+    content: @Composable (toggle: (DashboardPanel) -> Unit) -> Unit
 ) {
     val state = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val currentEvidence by rememberUpdatedState(evidence)
+    val currentActivity by rememberUpdatedState(activity)
     val currentContent by rememberUpdatedState(content)
+    var selected by remember { mutableStateOf(DashboardPanel.EVIDENCE) }
     val direction = LocalLayoutDirection.current
     // Keep evidence state and in-flight work when moving between modal and inline slots.
     val panel = remember {
@@ -54,22 +76,24 @@ internal fun EvidenceDrawer(
             Column(Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth()) {
-                    Text("QA Evidence", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Text(selected.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     TextButton(onClick = { scope.launch { state.close() } }) { Text("Close") }
                 }
-                currentEvidence()
+                RetainedPanelContent(selected, evidence = { currentEvidence() }, activity = { currentActivity() })
             }
         }
     }
     val workspace = remember {
         movableContentOf {
-            currentContent {
-                scope.launch { if (state.isOpen) state.close() else state.open() }
+            currentContent { requested ->
+                val close = selected == requested && state.targetValue == DrawerValue.Open
+                selected = requested
+                scope.launch { if (close) state.close() else state.open() }
             }
         }
     }
     BoxWithConstraints {
-        val inline = useInlineEvidenceDrawer(maxWidth.value, maxHeight.value)
+        val inline = useInlineDashboardDrawer(maxWidth.value, maxHeight.value)
         val width = if (inline) (maxWidth * 0.4f).coerceIn(300.dp, 400.dp)
             else minOf(400.dp, maxWidth * 0.9f)
         val revealedWidth = with(LocalDensity.current) {
