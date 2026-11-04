@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -457,17 +458,23 @@ private fun DesktopDashboard(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun DeviceActionIcon(
-    icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, selected: Boolean? = null
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    selected: Boolean? = null,
+    buttonSize: androidx.compose.ui.unit.Dp = 40.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp
 ) {
     TooltipArea(tooltip = {
         Surface(shadowElevation = 4.dp) { Text(label, Modifier.padding(8.dp)) }
     }) {
         IconButton(enabled = enabled, onClick = onClick,
-            modifier = Modifier.semantics { selected?.let { this.selected = it } },
+            modifier = Modifier.size(buttonSize).semantics { selected?.let { this.selected = it } },
             colors = if (selected == null) IconButtonDefaults.iconButtonColors() else IconButtonDefaults.iconButtonColors(
                 containerColor = if (selected == true) MaterialTheme.colorScheme.primary else Color.Transparent,
                 contentColor = if (selected == true) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-            )) { Icon(icon, contentDescription = label) }
+            )) { Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize)) }
     }
 }
 
