@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
@@ -35,37 +36,9 @@ internal fun DeviceRow(
     onRun: () -> Unit, onBridge: () -> Unit, onInstall: () -> Unit, onBoot: () -> Unit
 ) {
     val compactButtonSize = 32.dp
-    val controlSlotSize = 34.dp
+    val controlSlotSize = 32.dp
     val compactIconSize = 18.dp
-    Row {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(controlSlotSize), contentAlignment = Alignment.Center) {
-                Checkbox(checked = selected, enabled = device.canInstall && selectionEnabled,
-                    modifier = Modifier.size(18.dp).semantics { contentDescription = "Select ${device.name}" },
-                    onCheckedChange = onSelect)
-            }
-            if (device.platform == Platform.ANDROID) {
-                DeviceActionIcon(Icons.Rounded.PlayArrow, "Run Tester on ${device.name}",
-                    enabled = device.canInstall && actionsEnabled, onClick = onRun,
-                    buttonSize = compactButtonSize, iconSize = compactIconSize)
-                val active = bridge == BridgeState.ACTIVE
-                val label = when (bridge) {
-                    BridgeState.ACTIVE -> "Disconnect MCP bridge on ${device.name} (interrupts MCP; keeps Tester and evidence pairing)"
-                    BridgeState.MISSING -> "Connect MCP bridge on ${device.name}"
-                    else -> "MCP bridge on ${device.name}: ${bridge.label}"
-                }
-                DeviceActionIcon(if (active) Icons.Rounded.LinkOff else Icons.Rounded.Link, label,
-                    enabled = device.canInstall && actionsEnabled &&
-                        bridge in setOf(BridgeState.MISSING, BridgeState.ACTIVE), onClick = onBridge,
-                    buttonSize = compactButtonSize, iconSize = compactIconSize)
-            }
-            if (device.platform == Platform.IOS_SIMULATOR && device.state == "Shutdown") {
-                DeviceActionIcon(Icons.Rounded.PowerSettingsNew, "Boot ${device.name}",
-                    enabled = actionsEnabled, onClick = onBoot,
-                    buttonSize = compactButtonSize, iconSize = compactIconSize)
-            }
-        }
-        Column(Modifier.weight(1f).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.align(Alignment.CenterVertically),
@@ -73,6 +46,44 @@ internal fun DeviceRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlatformIcon(device.platform)
                     Text(device.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium)
+                }
+                Row(
+                    Modifier.align(Alignment.CenterVertically)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Box(Modifier.size(controlSlotSize), contentAlignment = Alignment.Center) {
+                        Checkbox(checked = selected, enabled = device.canInstall && selectionEnabled,
+                            modifier = Modifier.size(18.dp).semantics { contentDescription = "Select ${device.name}" },
+                            onCheckedChange = onSelect)
+                    }
+                    if (device.platform == Platform.ANDROID) {
+                        DeviceActionIcon(Icons.Rounded.PlayArrow, "Run Tester on ${device.name}",
+                            enabled = device.canInstall && actionsEnabled, onClick = onRun,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                        val active = bridge == BridgeState.ACTIVE
+                        val label = when (bridge) {
+                            BridgeState.ACTIVE -> "Disconnect MCP bridge on ${device.name} (interrupts MCP; keeps Tester and evidence pairing)"
+                            BridgeState.MISSING -> "Connect MCP bridge on ${device.name}"
+                            else -> "MCP bridge on ${device.name}: ${bridge.label}"
+                        }
+                        DeviceActionIcon(if (active) Icons.Rounded.LinkOff else Icons.Rounded.Link, label,
+                            enabled = device.canInstall && actionsEnabled &&
+                                bridge in setOf(BridgeState.MISSING, BridgeState.ACTIVE), onClick = onBridge,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                    }
+                    if (device.platform == Platform.IOS_SIMULATOR && device.state == "Shutdown") {
+                        DeviceActionIcon(Icons.Rounded.PowerSettingsNew, "Boot ${device.name}",
+                            enabled = actionsEnabled, onClick = onBoot,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                    }
+                    if (selected && hasBuild) {
+                        DeviceActionIcon(Icons.Rounded.Download, "Install on ${device.name}",
+                            enabled = actionsEnabled, onClick = onInstall,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                    }
                 }
                 DeviceBadge(
                     device.kindLabel,
@@ -105,11 +116,6 @@ internal fun DeviceRow(
             }
             Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
             SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
-            if (selected && hasBuild) {
-                DeviceActionIcon(Icons.Rounded.Download, "Install on ${device.name}",
-                    enabled = actionsEnabled, onClick = onInstall,
-                    buttonSize = compactButtonSize, iconSize = compactIconSize)
-            }
             if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
                 color = MaterialTheme.colorScheme.error)
             if (device.platform == Platform.ANDROID) {
@@ -117,7 +123,6 @@ internal fun DeviceRow(
                     color = if (bridge == BridgeState.ACTIVE) MaterialTheme.colorScheme.tertiary
                         else MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
     }
 }
 
