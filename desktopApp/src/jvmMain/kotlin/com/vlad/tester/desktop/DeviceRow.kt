@@ -1,6 +1,7 @@
 package com.vlad.tester.desktop
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -34,12 +35,15 @@ internal fun DeviceRow(
     onRun: () -> Unit, onBridge: () -> Unit, onInstall: () -> Unit, onBoot: () -> Unit
 ) {
     val compactButtonSize = 32.dp
+    val controlSlotSize = 34.dp
     val compactIconSize = 18.dp
     Row {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Checkbox(checked = selected, enabled = device.canInstall && selectionEnabled,
-                modifier = Modifier.size(18.dp).semantics { contentDescription = "Select ${device.name}" },
-                onCheckedChange = onSelect)
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(controlSlotSize), contentAlignment = Alignment.Center) {
+                Checkbox(checked = selected, enabled = device.canInstall && selectionEnabled,
+                    modifier = Modifier.size(18.dp).semantics { contentDescription = "Select ${device.name}" },
+                    onCheckedChange = onSelect)
+            }
             if (device.platform == Platform.ANDROID) {
                 DeviceActionIcon(Icons.Rounded.PlayArrow, "Run Tester on ${device.name}",
                     enabled = device.canInstall && actionsEnabled, onClick = onRun,
