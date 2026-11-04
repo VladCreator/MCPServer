@@ -11,8 +11,22 @@ An authenticated **Tester Desktop active** status uses a green badge on Android;
 unpaired or unavailable states do not. Desktop uses a green receiver-ready badge
 and hides Pair only while that device has recent authenticated activity.
 
-The Android dashboard includes **QA Evidence** next to **Activity** at widths of
-640 dp or more. Narrow screens stack the two cards to keep their contents usable.
+Use the **QA Evidence icon** in the Android/iOS dashboard header to open the
+right-side evidence drawer. Landscape tablets (both viewport dimensions at least
+600 dp, width greater than height) use an inline dismissible panel; portrait
+devices and phones, including landscape phones, use a modal panel with a scrim.
+Use **Close** or the header toggle to dismiss it; modal panels also close on
+outside tap or platform Back. The drawer starts closed at a new app launch.
+Activity stays in the dashboard.
+
+Evidence state and approved transfer work remain owned by the same composition
+when the drawer closes or changes presentation. Android handles orientation and
+window-size changes without recreating the Activity, preserving those operations.
+Desktop status checks continue while the drawer is closed. Existing evidence
+approval, privacy and size limits are unchanged. The iOS drawer contains its
+existing Android-only availability notice; this does not add iOS evidence
+browsing or sending. The native iOS Desktop pairing/status bar is unchanged.
+
 Activity entries are grouped by calendar day in the device's time zone, newest
 first, with up to **1000** recent entries retained for display and after restart.
 Date headers show entry counts and can collapse or expand a day's activities;

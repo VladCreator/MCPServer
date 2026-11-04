@@ -1,5 +1,7 @@
 package com.vlad.mcpserver
 
+import androidx.compose.material.icons.rounded.Description
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -148,135 +150,121 @@ fun App(viewModel: AppViewModel = viewModel()) {
     McpTheme(darkTheme = viewModel.isDarkMode) {
         SystemBarAppearance(useDarkIcons = !viewModel.isDarkMode)
 
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.TopCenter
-            ) {
-                LazyColumn(
+        EvidenceDrawer(evidence = { QaEvidenceCard(Modifier.fillMaxWidth(), qaEvidenceRevision) }) { toggleEvidence ->
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background
+            ) { innerPadding ->
+                Box(
                     modifier = Modifier
-                        .fillMaxHeight()
-                        .widthIn(max = 900.dp)
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp),
-                    contentPadding = PaddingValues(top = 10.dp, bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    item(key = "header") {
-                        AppHeader(
-                            status = status,
-                            onTools = { showTools = true },
-                            onSettings = { showSettings = true }
-                        )
-                    }
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .widthIn(max = 900.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        item(key = "header") {
+                            AppHeader(
+                                status = status,
+                                onTools = { showTools = true },
+                                onEvidence = toggleEvidence,
+                                onSettings = { showSettings = true }
+                            )
+                        }
 
-                    val missingAccess = buildList {
-                        if (!touchServiceEnabled) add(
-                            Triple("Touch injection", "Touch, screen reading and navigation tools", viewModel::openTouchAccessibilitySettings)
-                        )
-                        if (!overlayGranted) add(
-                            Triple("Display over other apps", "Launching apps from the background", viewModel::openOverlaySettings)
-                        )
-                        if (!writeSettingsGranted) add(
-                            Triple("Modify system settings", "Rotation and font scale in device_state", viewModel::openWriteSettings)
-                        )
-                    }
-                    item(key = "overview") {
-                        // Width is resolved here because BoxWithConstraints cannot live inside
-                        // FlowRow children that use fillMaxRowHeight (intrinsic measurement).
-                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                            val hasAgents = connectedClients.isNotEmpty()
-                            val hasMissing = !isIosPlatform && missingAccess.isNotEmpty()
-                            val sideBySide = (hasAgents || hasMissing) &&
-                                maxWidth >= OVERVIEW_CARD_MIN_WIDTH * 2 + OVERVIEW_GAP
-                            val serverCardWidth = if (sideBySide) (maxWidth - OVERVIEW_GAP) / 2 else maxWidth
-                            val compactServer = serverCardWidth < COMPACT_SERVER_CARD_WIDTH
-                            // Flex layout: cards share a row when there is room and wrap otherwise.
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(OVERVIEW_GAP),
-                                verticalArrangement = Arrangement.spacedBy(OVERVIEW_GAP),
-                                maxItemsInEachRow = 2
-                            ) {
-                                val cardModifier = Modifier
-                                    .weight(1f)
-                                    .widthIn(min = OVERVIEW_CARD_MIN_WIDTH)
-                                    .fillMaxRowHeight()
-                                ServerCard(
-                                    status = status,
-                                    agentCount = connectedClients.size,
-                                    gatewayConnections = gatewayConnections,
-                                    onStart = viewModel::startServer,
-                                    onStop = viewModel::stopServer,
-                                    onConnect = { showConnection = true },
-                                    compact = compactServer,
-                                    modifier = cardModifier
-                                )
-                                if (hasMissing) {
-                                    MissingAccessCard(missingAccess, modifier = cardModifier)
-                                }
-                                if (hasAgents) {
-                                    ConnectedAgentsCard(
-                                        clients = connectedClients,
-                                        flows = qaFlows,
+                        val missingAccess = buildList {
+                            if (!touchServiceEnabled) add(
+                                Triple("Touch injection", "Touch, screen reading and navigation tools", viewModel::openTouchAccessibilitySettings)
+                            )
+                            if (!overlayGranted) add(
+                                Triple("Display over other apps", "Launching apps from the background", viewModel::openOverlaySettings)
+                            )
+                            if (!writeSettingsGranted) add(
+                                Triple("Modify system settings", "Rotation and font scale in device_state", viewModel::openWriteSettings)
+                            )
+                        }
+                        item(key = "overview") {
+                            // Width is resolved here because BoxWithConstraints cannot live inside
+                            // FlowRow children that use fillMaxRowHeight (intrinsic measurement).
+                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                val hasAgents = connectedClients.isNotEmpty()
+                                val hasMissing = !isIosPlatform && missingAccess.isNotEmpty()
+                                val sideBySide = (hasAgents || hasMissing) &&
+                                    maxWidth >= OVERVIEW_CARD_MIN_WIDTH * 2 + OVERVIEW_GAP
+                                val serverCardWidth = if (sideBySide) (maxWidth - OVERVIEW_GAP) / 2 else maxWidth
+                                val compactServer = serverCardWidth < COMPACT_SERVER_CARD_WIDTH
+                                // Flex layout: cards share a row when there is room and wrap otherwise.
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(OVERVIEW_GAP),
+                                    verticalArrangement = Arrangement.spacedBy(OVERVIEW_GAP),
+                                    maxItemsInEachRow = 2
+                                ) {
+                                    val cardModifier = Modifier
+                                        .weight(1f)
+                                        .widthIn(min = OVERVIEW_CARD_MIN_WIDTH)
+                                        .fillMaxRowHeight()
+                                    ServerCard(
+                                        status = status,
+                                        agentCount = connectedClients.size,
+                                        gatewayConnections = gatewayConnections,
+                                        onStart = viewModel::startServer,
+                                        onStop = viewModel::stopServer,
+                                        onConnect = { showConnection = true },
+                                        compact = compactServer,
                                         modifier = cardModifier
                                     )
+                                    if (hasMissing) {
+                                        MissingAccessCard(missingAccess, modifier = cardModifier)
+                                    }
+                                    if (hasAgents) {
+                                        ConnectedAgentsCard(
+                                            clients = connectedClients,
+                                            flows = qaFlows,
+                                            modifier = cardModifier
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    if (toolApprovalRequests.isNotEmpty()) {
-                        item(key = "tool-approvals") {
-                            ToolApprovalCard(
-                                requests = toolApprovalRequests,
-                                onResolve = viewModel::resolveToolApproval
-                            )
-                        }
-                    }
-
-                    if (pendingClients.isNotEmpty()) {
-                        item(key = "pending") {
-                            PendingClientsCard(
-                                clients = pendingClients,
-                                onApprove = viewModel::approveClient,
-                                onReject = viewModel::rejectClient
-                            )
-                        }
-                    }
-
-                    viewModel.storageError?.let { message ->
-                        item(key = "storage-error") {
-                            Text(
-                                text = message,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-
-                    item(key = "activity-evidence") {
-                        BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            if (maxWidth >= 640.dp) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    ActivityCard(
-                                        logs = executionLogs,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    QaEvidenceCard(Modifier.weight(1f), qaEvidenceRevision)
-                                }
-                            } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    ActivityCard(
-                                        logs = executionLogs
-                                    )
-                                    QaEvidenceCard(Modifier.fillMaxWidth(), qaEvidenceRevision)
-                                }
+                        if (toolApprovalRequests.isNotEmpty()) {
+                            item(key = "tool-approvals") {
+                                ToolApprovalCard(
+                                    requests = toolApprovalRequests,
+                                    onResolve = viewModel::resolveToolApproval
+                                )
                             }
+                        }
+
+                        if (pendingClients.isNotEmpty()) {
+                            item(key = "pending") {
+                                PendingClientsCard(
+                                    clients = pendingClients,
+                                    onApprove = viewModel::approveClient,
+                                    onReject = viewModel::rejectClient
+                                )
+                            }
+                        }
+
+                        viewModel.storageError?.let { message ->
+                            item(key = "storage-error") {
+                                Text(
+                                    text = message,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+
+                        item(key = "activity-evidence") {
+                            ActivityCard(logs = executionLogs)
                         }
                     }
                 }
@@ -311,6 +299,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
 private fun AppHeader(
     status: ServerStatus,
     onTools: () -> Unit,
+    onEvidence: () -> Unit,
     onSettings: () -> Unit
 ) {
     Row(
@@ -338,6 +327,13 @@ private fun AppHeader(
                 text = "Tester for AI agents",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(onClick = onEvidence) {
+            Icon(
+                imageVector = Icons.Rounded.Description,
+                contentDescription = "Open QA Evidence",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         IconButton(onClick = onTools) {

@@ -5,12 +5,13 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
@@ -31,6 +34,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -48,7 +53,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -206,6 +210,7 @@ private fun DesktopDashboard(
     var pending by remember { mutableStateOf<List<InstallTask>>(emptyList()) }
     var activity by remember { mutableStateOf(emptyList<String>()) }
     var error by remember { mutableStateOf<String?>(null) }
+    val activityDrawer = rememberDrawerState(DrawerValue.Closed)
 
     fun record(message: String) {
         activity = listOf("${LocalTime.now().withNano(0)}  $message") + activity.take(99)
@@ -254,194 +259,191 @@ private fun DesktopDashboard(
     }
     val devices = visibleDevices(discovery.devices, showAllDevices)
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text("Tester Desktop", style = MaterialTheme.typography.headlineMedium)
-                Text("Local app installation workspace  |  0.4.1", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            OutlinedButton(onClick = { scope.launch { refresh() } },
-                enabled = !busy && !scanning && pending.isEmpty()) { Text(if (scanning) "Scanning..." else "Refresh devices") }
-        }
-        Text("Manual refresh. Last scan: $scannedAt. Physical iOS installation is deferred.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SelectionContainer {
-            Text("ADB: ${manager.adbPath ?: "Not found - install platform-tools or set ANDROID_HOME"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (manager.adbPath != null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
-        }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        settingsError?.let { message ->
-            Row {
-                Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = dismissSettingsError) { Text("Dismiss") }
-            }
-        }
-        if (error != null) Card(Modifier.fillMaxWidth()) {
-            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SelectionContainer(Modifier.weight(1f)) { Text(error!!, color = MaterialTheme.colorScheme.error) }
-                TextButton(onClick = { error = null }) { Text("Dismiss") }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Column(Modifier.weight(1f)) {
-                EvidenceInbox(manager, discovery.devices, busy, ::record)
-            }
-            Card(Modifier.weight(1f)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Installation files", style = MaterialTheme.typography.titleLarge)
-                    BuildDropZone(!busy && pending.isEmpty() && selected.isEmpty(), { file ->
-                        val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
-                        apk = if (platform == Platform.ANDROID) file else null
-                        app = if (platform == Platform.IOS_SIMULATOR) file else null
-                        selected = devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
-                    }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
-                        java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
-                        java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
-                        Modifier.fillMaxWidth().height(60.dp))
-                    BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
-                    if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
-                        style = MaterialTheme.typography.bodySmall)
-                    Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        ActivityDrawer(activityDrawer, activity, onClose = { scope.launch { activityDrawer.close() } },
+            modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    DeviceActionIcon(Icons.Rounded.History,
+                        if (activityDrawer.isOpen) "Close Activity" else "Open Activity",
+                        enabled = true, onClick = {
+                            scope.launch {
+                                if (activityDrawer.isOpen) activityDrawer.close() else activityDrawer.open()
+                            }
+                        })
                 }
-            }
-        }
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Card(Modifier.weight(1.2f).fillMaxSize()) {
-                Column(Modifier.padding(16.dp)) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                settingsError?.let { message ->
                     Row {
-                        Text("Devices", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                        Checkbox(checked = showAllDevices, enabled = !busy && pending.isEmpty(),
-                            modifier = Modifier.semantics { contentDescription = "Show all devices" },
-                            onCheckedChange = {
-                                selected = visibleSelection(selected, discovery.devices, it)
-                                setShowAllDevices(it)
-                            })
-                        Text("Show all devices", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)
+                        Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = dismissSettingsError) { Text("Dismiss") }
                     }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(discovery.warnings) { warning ->
-                            SelectionContainer { Text(warning, color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall) }
+                }
+                if (error != null) Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SelectionContainer(Modifier.weight(1f)) { Text(error!!, color = MaterialTheme.colorScheme.error) }
+                        TextButton(onClick = { error = null }) { Text("Dismiss") }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        EvidenceInbox(manager, discovery.devices, busy, ::record)
+                    }
+                    Card(Modifier.weight(1f)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Installation files", style = MaterialTheme.typography.titleLarge)
+                            BuildDropZone(!busy && pending.isEmpty() && selected.isEmpty(), { file ->
+                                val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
+                                apk = if (platform == Platform.ANDROID) file else null
+                                app = if (platform == Platform.IOS_SIMULATOR) file else null
+                                selected = devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
+                            }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
+                                java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
+                                java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
+                                Modifier.fillMaxWidth().height(60.dp))
+                            BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
+                            if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
+                                style = MaterialTheme.typography.bodySmall)
+                            Text("${selected.size} selected device(s)", color = MaterialTheme.colorScheme.tertiary)
                         }
-                        if (devices.isEmpty()) item {
-                            Text(if (showAllDevices) "No devices found. Connect Android or install Xcode for iOS simulators."
-                                else "No connected devices. Connect a device, then Refresh devices, or enable Show all devices to boot a simulator.",
-                                modifier = Modifier.padding(vertical = 16.dp))
-                        }
-                        items(devices, key = { it.key }) { device ->
-                            Column {
-                                Row {
-                                    Checkbox(checked = device.key in selected,
-                                        enabled = device.canInstall && !busy && pending.isEmpty(),
-                                        onCheckedChange = {
-                                            selected = if (it) selected + device.key else selected - device.key
-                                        })
-                                    Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                                        Text(device.name, style = MaterialTheme.typography.titleMedium)
-                                        Text("${device.platform.label} - ${device.state}",
-                                            color = if (device.canInstall) MaterialTheme.colorScheme.tertiary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
-                                        SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
-                                        val matchingFile = if (device.platform == Platform.ANDROID) apk else app
-                                        if (device.key in selected && matchingFile != null) {
-                                            DeviceActionIcon(Icons.Rounded.Download, "Install on ${device.name}",
-                                                enabled = !busy && !scanning && pending.isEmpty(),
-                                                onClick = { review(listOf(device)) })
-                                        }
-                                        if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
-                                            color = MaterialTheme.colorScheme.error)
-                                        if (device.platform == Platform.ANDROID) {
-                                            DeviceActionIcon(Icons.Rounded.PlayArrow, "Run Tester on ${device.name}",
-                                                enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
-                                                onClick = {
-                                                    setBusy(true)
+                    }
+                }
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    Card(Modifier.fillMaxWidth().heightIn(max = maxHeight)
+                        .semantics { contentDescription = "Devices container" }) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row {
+                                Text("Devices", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                                DeviceActionIcon(Icons.Rounded.Refresh,
+                                    "Refresh devices. Last scan: $scannedAt",
+                                    enabled = !busy && !scanning && pending.isEmpty(),
+                                    onClick = { scope.launch { refresh() } })
+                                Checkbox(checked = showAllDevices, enabled = !busy && pending.isEmpty(),
+                                    modifier = Modifier.semantics { contentDescription = "Show all devices" },
+                                    onCheckedChange = {
+                                        selected = visibleSelection(selected, discovery.devices, it)
+                                        setShowAllDevices(it)
+                                    })
+                                Text("Show all devices", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (scanning) LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Physical iOS devices are read-only.", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            LazyColumn(Modifier.weight(1f, fill = false)
+                                .semantics { contentDescription = "Device list" },
+                                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(discovery.warnings) { warning ->
+                                    SelectionContainer { Text(warning, color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall) }
+                                }
+                                if (devices.isEmpty()) item {
+                                    Text(if (showAllDevices) "No devices found. Connect Android or install Xcode for iOS simulators."
+                                        else "No connected devices. Connect a device, then Refresh devices, or enable Show all devices to boot a simulator.",
+                                        modifier = Modifier.padding(vertical = 16.dp))
+                                }
+                                items(devices, key = { it.key }) { device ->
+                                    Column {
+                                        Row {
+                                            Checkbox(checked = device.key in selected,
+                                                enabled = device.canInstall && !busy && pending.isEmpty(),
+                                                onCheckedChange = {
+                                                    selected = if (it) selected + device.key else selected - device.key
+                                                })
+                                            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                                                Text(device.name, style = MaterialTheme.typography.titleMedium)
+                                                Text("${device.platform.label} - ${device.state}",
+                                                    color = if (device.canInstall) MaterialTheme.colorScheme.tertiary
+                                                        else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
+                                                SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
+                                                val matchingFile = if (device.platform == Platform.ANDROID) apk else app
+                                                if (device.key in selected && matchingFile != null) {
+                                                    DeviceActionIcon(Icons.Rounded.Download, "Install on ${device.name}",
+                                                        enabled = !busy && !scanning && pending.isEmpty(),
+                                                        onClick = { review(listOf(device)) })
+                                                }
+                                                if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
+                                                    color = MaterialTheme.colorScheme.error)
+                                                if (device.platform == Platform.ANDROID) {
+                                                    DeviceActionIcon(Icons.Rounded.PlayArrow, "Run Tester on ${device.name}",
+                                                        enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
+                                                        onClick = {
+                                                            setBusy(true)
+                                                            scope.launch {
+                                                                try {
+                                                                    withContext(Dispatchers.IO) { manager.runTester(device) }
+                                                                    record("Confirmed Tester server foreground service on ${device.name}. Activate the bridge next.")
+                                                                } catch (failure: DesktopFailure) {
+                                                                    fail(failure.message ?: "Cannot run Tester.")
+                                                                } catch (failure: IOException) {
+                                                                    fail("Cannot run Tester: ${failure.message}")
+                                                                } finally {
+                                                                    setBusy(false)
+                                                                    refresh()
+                                                                }
+                                                            }
+                                                        })
+                                                    val bridge = discovery.bridges[device.key] ?: BridgeState.UNVERIFIED
+                                                    Text("ADB bridge: ${bridge.label}", style = MaterialTheme.typography.bodySmall,
+                                                        color = if (bridge == BridgeState.ACTIVE) MaterialTheme.colorScheme.tertiary
+                                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    if (bridge == BridgeState.ACTIVE) Text(
+                                                        "Forwarding exists; run Tester to connect the agent.",
+                                                        style = MaterialTheme.typography.bodySmall)
+                                                    if (bridge == BridgeState.MISSING) {
+                                                        OutlinedButton(enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
+                                                            onClick = {
+                                                                setBusy(true)
+                                                                scope.launch {
+                                                                    try {
+                                                                        withContext(Dispatchers.IO) { manager.enableBridge(device) }
+                                                                        record("Verified ADB bridge tcp:8080 -> tcp:8080 on ${device.name} (${device.id})")
+                                                                    } catch (failure: DesktopFailure) {
+                                                                        fail(failure.message ?: "ADB bridge failed.")
+                                                                    } catch (failure: IOException) {
+                                                                        fail("ADB bridge failed: ${failure.message}")
+                                                                    } finally {
+                                                                        setBusy(false)
+                                                                        refresh()
+                                                                    }
+                                                                }
+                                                            }) { Text("Activate bridge") }
+                                                    }
+                                                }
+                                            }
+                                            if (device.platform == Platform.IOS_SIMULATOR && device.state == "Shutdown") {
+                                                TextButton(enabled = !busy && !scanning && pending.isEmpty(), onClick = {
                                                     scope.launch {
+                                                        setBusy(true)
+                                                        record("Booting ${device.name}")
                                                         try {
-                                                            withContext(Dispatchers.IO) { manager.runTester(device) }
-                                                            record("Confirmed Tester server foreground service on ${device.name}. Activate the bridge next.")
+                                                            withContext(Dispatchers.IO) { manager.boot(device) }
+                                                            record("Booted ${device.name}")
                                                         } catch (failure: DesktopFailure) {
-                                                            fail(failure.message ?: "Cannot run Tester.")
+                                                            fail(failure.message ?: "Simulator boot failed.")
                                                         } catch (failure: IOException) {
-                                                            fail("Cannot run Tester: ${failure.message}")
+                                                            fail("Simulator boot failed: ${failure.message}")
                                                         } finally {
                                                             setBusy(false)
                                                             refresh()
                                                         }
                                                     }
-                                                })
-                                            val bridge = discovery.bridges[device.key] ?: BridgeState.UNVERIFIED
-                                            Text("ADB bridge: ${bridge.label}", style = MaterialTheme.typography.bodySmall,
-                                                color = if (bridge == BridgeState.ACTIVE) MaterialTheme.colorScheme.tertiary
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant)
-                                            if (bridge == BridgeState.ACTIVE) Text(
-                                                "Forwarding exists; run Tester to connect the agent.",
-                                                style = MaterialTheme.typography.bodySmall)
-                                            if (bridge == BridgeState.MISSING) {
-                                                OutlinedButton(enabled = device.canInstall && !busy && !scanning && pending.isEmpty(),
-                                                    onClick = {
-                                                        setBusy(true)
-                                                        scope.launch {
-                                                            try {
-                                                                withContext(Dispatchers.IO) { manager.enableBridge(device) }
-                                                                record("Verified ADB bridge tcp:8080 -> tcp:8080 on ${device.name} (${device.id})")
-                                                            } catch (failure: DesktopFailure) {
-                                                                fail(failure.message ?: "ADB bridge failed.")
-                                                            } catch (failure: IOException) {
-                                                                fail("ADB bridge failed: ${failure.message}")
-                                                            } finally {
-                                                                setBusy(false)
-                                                                refresh()
-                                                            }
-                                                        }
-                                                    }) { Text("Activate bridge") }
+                                                }) { Text("Boot") }
                                             }
+                                            Column(Modifier.padding(top = 12.dp)) { PlatformIcon(device.platform) }
                                         }
+                                        HorizontalDivider()
                                     }
-                                    if (device.platform == Platform.IOS_SIMULATOR && device.state == "Shutdown") {
-                                        TextButton(enabled = !busy && !scanning && pending.isEmpty(), onClick = {
-                                            scope.launch {
-                                                setBusy(true)
-                                                record("Booting ${device.name}")
-                                                try {
-                                                    withContext(Dispatchers.IO) { manager.boot(device) }
-                                                    record("Booted ${device.name}")
-                                                } catch (failure: DesktopFailure) {
-                                                    fail(failure.message ?: "Simulator boot failed.")
-                                                } catch (failure: IOException) {
-                                                    fail("Simulator boot failed: ${failure.message}")
-                                                } finally {
-                                                    setBusy(false)
-                                                    refresh()
-                                                }
-                                            }
-                                        }) { Text("Boot") }
-                                    }
-                                    Column(Modifier.padding(top = 12.dp)) { PlatformIcon(device.platform) }
                                 }
-                                HorizontalDivider()
                             }
                         }
                     }
                 }
             }
-            Card(Modifier.weight(1f).fillMaxSize()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Activity", style = MaterialTheme.typography.titleLarge)
-                    Text("This session only. Installations are never automatically retried.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(12.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (activity.isEmpty()) item { Text("No installations yet.") }
-                        items(activity) { entry -> SelectionContainer {
-                            Text(entry, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp))
-                        } }
-                    }
-                }
-            }
         }
+        HorizontalDivider()
+        DesktopStatusBar(manager.adbPath)
     }
     if (pending.isNotEmpty()) {
         val tasks = pending
