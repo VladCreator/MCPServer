@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -19,6 +20,7 @@ import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,15 +38,20 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 @Composable
-private fun ActivityPanel(activity: List<String>) {
+private fun ActivityPanel(activity: List<DesktopActivity>) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("This session only. Installations are never automatically retried.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (activity.isEmpty()) item { Text("No activity yet.") }
             items(activity) { entry ->
-                SelectionContainer {
-                    Text(entry, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(entry.kind.icon, contentDescription = entry.kind.label, modifier = Modifier.size(18.dp),
+                        tint = if (entry.kind == ActivityKind.ERROR) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                    SelectionContainer(Modifier.weight(1f)) {
+                        Text(entry.displayText, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp))
+                    }
                 }
             }
         }
@@ -53,9 +60,12 @@ private fun ActivityPanel(activity: List<String>) {
 
 @Composable
 internal fun DesktopPanels(
-    activity: List<String>, evidence: @Composable () -> Unit,
+    activity: List<DesktopActivity>, evidence: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable (toggleActivity: () -> Unit, toggleEvidence: () -> Unit) -> Unit
+    content: @Composable (
+        activityActive: Boolean, evidenceActive: Boolean,
+        toggleActivity: () -> Unit, toggleEvidence: () -> Unit
+    ) -> Unit
 ) {
     val left = rememberDrawerState(DrawerValue.Closed)
     val right = rememberDrawerState(DrawerValue.Closed)
@@ -79,7 +89,9 @@ internal fun DesktopPanels(
         panel = { ActivityPanel(activity) }) {
         DesktopDrawer(right, "QA Evidence", fromRight = true,
             onClose = { close(right) }, modifier = Modifier.fillMaxSize(), panel = evidence) {
-            content({ toggle(left, right) }, { toggle(right, left) })
+            content(left.currentValue == DrawerValue.Open || left.targetValue == DrawerValue.Open,
+                right.currentValue == DrawerValue.Open || right.targetValue == DrawerValue.Open,
+                { toggle(left, right) }, { toggle(right, left) })
         }
     }
 }

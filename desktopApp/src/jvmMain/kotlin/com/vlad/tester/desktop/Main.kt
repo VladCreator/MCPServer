@@ -29,6 +29,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.History
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
@@ -207,15 +209,15 @@ private fun DesktopDashboard(
     var apk by remember { mutableStateOf<File?>(null) }
     var app by remember { mutableStateOf<File?>(null) }
     var pending by remember { mutableStateOf<List<InstallTask>>(emptyList()) }
-    var activity by remember { mutableStateOf(emptyList<String>()) }
+    var activity by remember { mutableStateOf(emptyList<DesktopActivity>()) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun record(message: String) {
-        activity = listOf("${LocalTime.now().withNano(0)}  $message") + activity.take(99)
+    fun record(kind: ActivityKind, message: String) {
+        activity = activity.record(DesktopActivity(kind, message))
     }
     fun fail(message: String) {
         error = message
-        record("FAILED: $message")
+        record(ActivityKind.ERROR, "FAILED: $message")
     }
     fun review(targets: List<Device>) {
         val files = targets.map { it to if (it.platform == Platform.ANDROID) apk else app }
@@ -262,15 +264,15 @@ private fun DesktopDashboard(
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                 EvidenceInbox(manager, discovery.devices, busy, ::record)
             }
-        }, modifier = Modifier.weight(1f).fillMaxWidth()) { toggleActivity, toggleEvidence ->
+        }, modifier = Modifier.weight(1f).fillMaxWidth()) { activityActive, evidenceActive, toggleActivity, toggleEvidence ->
             Column(Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(Modifier.fillMaxWidth()) {
                     DeviceActionIcon(Icons.Rounded.History, "Toggle Activity",
-                        enabled = true, onClick = toggleActivity)
+                        enabled = true, onClick = toggleActivity, selected = activityActive)
                     Spacer(Modifier.weight(1f))
                     DeviceActionIcon(Icons.Rounded.Description, "Toggle QA Evidence",
-                        enabled = true, onClick = toggleEvidence)
+                        enabled = true, onClick = toggleEvidence, selected = evidenceActive)
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 settingsError?.let { message ->
@@ -351,7 +353,7 @@ private fun DesktopDashboard(
                                                 scope.launch {
                                                     try {
                                                         withContext(Dispatchers.IO) { manager.runTester(device) }
-                                                        record("Confirmed Tester server foreground service on ${device.name}. Connect the MCP bridge next.")
+                                                        record(ActivityKind.RUN, "Confirmed Tester server foreground service on ${device.name}. Connect the MCP bridge next.")
                                                     } catch (failure: DesktopFailure) {
                                                         fail(failure.message ?: "Cannot run Tester.")
                                                     } catch (failure: IOException) {
@@ -367,7 +369,8 @@ private fun DesktopDashboard(
                                                             if (bridge == BridgeState.ACTIVE) manager.disableBridge(device)
                                                             else manager.enableBridge(device)
                                                         }
-                                                        record(if (bridge == BridgeState.ACTIVE)
+                                                        record(if (bridge == BridgeState.ACTIVE) ActivityKind.BRIDGE_DISCONNECT else ActivityKind.BRIDGE_CONNECT,
+                                                        if (bridge == BridgeState.ACTIVE)
                                                             "Verified MCP bridge disconnected on ${device.name}. Tester and evidence pairing were not changed."
                                                         else "Verified MCP bridge tcp:8080 -> tcp:8080 on ${device.name} (${device.id})")
                                                     } catch (failure: DesktopFailure) {
@@ -380,10 +383,10 @@ private fun DesktopDashboard(
                                             onBoot = {
                                                 setBusy(true)
                                                 scope.launch {
-                                                    record("Booting ${device.name}")
+                                                    record(ActivityKind.BOOT, "Booting ${device.name}")
                                                     try {
                                                         withContext(Dispatchers.IO) { manager.boot(device) }
-                                                        record("Booted ${device.name}")
+                                                        record(ActivityKind.BOOT, "Booted ${device.name}")
                                                     } catch (failure: DesktopFailure) {
                                                         fail(failure.message ?: "Simulator boot failed.")
                                                     } catch (failure: IOException) {
@@ -429,12 +432,12 @@ private fun DesktopDashboard(
                 scope.launch {
                     try {
                         for (task in tasks) {
-                            record("Installing ${task.file.name} on ${task.device.name} (${task.device.id})")
+                            record(ActivityKind.INSTALL, "Installing ${task.file.name} on ${task.device.name} (${task.device.id})")
                             try {
                                 val result = withContext(Dispatchers.IO) {
                                     manager.install(task.device, task.file, task.identity)
                                 }
-                                record(result)
+                                record(ActivityKind.INSTALL, result)
                             } catch (failure: DesktopFailure) {
                                 fail("${task.device.name}: ${failure.message}")
                             } catch (failure: IOException) {
@@ -453,11 +456,18 @@ private fun DesktopDashboard(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun DeviceActionIcon(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun DeviceActionIcon(
+    icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, selected: Boolean? = null
+) {
     TooltipArea(tooltip = {
         Surface(shadowElevation = 4.dp) { Text(label, Modifier.padding(8.dp)) }
     }) {
-        IconButton(enabled = enabled, onClick = onClick) { Icon(icon, contentDescription = label) }
+        IconButton(enabled = enabled, onClick = onClick,
+            modifier = Modifier.semantics { selected?.let { this.selected = it } },
+            colors = if (selected == null) IconButtonDefaults.iconButtonColors() else IconButtonDefaults.iconButtonColors(
+                containerColor = if (selected == true) MaterialTheme.colorScheme.primary else Color.Transparent,
+                contentColor = if (selected == true) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+            )) { Icon(icon, contentDescription = label) }
     }
 }
 

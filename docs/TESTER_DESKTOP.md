@@ -86,7 +86,7 @@ versions are shown explicitly. Platform icons identify Android and Apple devices
 ## Install
 
 1. Connect an Android device and accept USB debugging authorization, or start
-   an Android emulator. For iOS, select an available simulator and use **Boot**
+   an Android emulator. For iOS, select an available simulator and use the **Power icon (Boot)**
    if necessary. Devices are scanned once at startup; select the **Refresh icon**
    in the Devices header (tooltip: Refresh devices, with last scan time)
    to update the list afterward. There is no periodic automatic device refresh.
@@ -139,15 +139,25 @@ The **QA Evidence icon** opens a dismissible right-side drawer with receiving,
 pairing and received-flow controls. Only one drawer opens at a time; opening one
 closes the other. The receiver and pairing state stay alive while either drawer
 is hidden. Both drawers have an explicit **Close** action and start closed.
+The open panel's toolbar button uses a filled accent background and selected
+accessibility state. Closing it clears that feedback, including keyboard dismissal.
 
 The Devices card wraps short lists and empty states, grows to available height,
 and then scrolls for longer lists. Closing a drawer restores workspace width.
 Installation files stays in the main workspace above Devices.
 
 Activity is bounded to the most recent 100 entries in the current desktop session
-and uses compact 12 sp log text. It is not persisted or synced to mobile QA Evidence. Closing is blocked while a
+and uses compact 12 sp log text. Category icons distinguish installation (Download),
+Tester launch (Play), bridge connection/disconnection (Link/Unlink), simulator
+startup (Power), evidence receiver (Document), pairing (Key), errors (Warning),
+and general information (Info). Timestamped messages remain selectable; error
+icons also use the theme's error color. It is not persisted or synced to mobile QA Evidence. Closing is blocked while a
 device operation is in progress. Desktop follows the macOS light/dark appearance,
-including the drop area. The 42 dp Android/Apple icons sit beside device names.
+including the drop area. The 42 dp Android/Apple icons, device names, kind and
+state badges share one identity line where space permits, wrapping at narrower
+widths. Android's Play icon stays under its checkbox, followed by its bridge icon.
+Shutdown iOS simulators have a Power icon under the checkbox with a device-specific
+Boot tooltip; physical iOS devices have no Boot action.
 Kind/state badges replace redundant platform text: **Device** or **Simulator**
 (including Android emulators), followed by **Connected**, **Shutdown**,
 **Unauthorized**, **Offline**, or the discovered diagnostic state. Raw readiness,

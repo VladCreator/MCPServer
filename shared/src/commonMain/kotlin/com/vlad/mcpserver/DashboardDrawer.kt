@@ -37,13 +37,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal fun useInlineDashboardDrawer(widthDp: Float, heightDp: Float): Boolean =
     minOf(widthDp, heightDp) >= 600 && widthDp > heightDp
 
-internal enum class DashboardPanel(val title: String) {
-    EVIDENCE("QA Evidence"), ACTIVITY("Activity")
+internal enum class DashboardPanel(val title: String, val opensRight: Boolean) {
+    EVIDENCE("QA Evidence", true), ACTIVITY("Activity", false)
 }
+
+internal fun activeDashboardPanel(
+    selected: DashboardPanel, current: DrawerValue, target: DrawerValue
+): DashboardPanel? = selected.takeIf { current == DrawerValue.Open || target == DrawerValue.Open }
 
 @Composable
 private fun RetainedPanelContent(
@@ -61,10 +67,11 @@ private fun RetainedPanelContent(
 internal fun DashboardDrawer(
     evidence: @Composable () -> Unit,
     activity: @Composable () -> Unit,
-    content: @Composable (toggle: (DashboardPanel) -> Unit) -> Unit
+    content: @Composable (active: DashboardPanel?, toggle: (DashboardPanel) -> Unit) -> Unit
 ) {
     val state = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val transitions = remember { Mutex() }
     val currentEvidence by rememberUpdatedState(evidence)
     val currentActivity by rememberUpdatedState(activity)
     val currentContent by rememberUpdatedState(content)
@@ -77,7 +84,9 @@ internal fun DashboardDrawer(
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth()) {
                     Text(selected.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { scope.launch { state.close() } }) { Text("Close") }
+                    TextButton(onClick = {
+                        scope.launch { transitions.withLock { state.close() } }
+                    }) { Text("Close") }
                 }
                 RetainedPanelContent(selected, evidence = { currentEvidence() }, activity = { currentActivity() })
             }
@@ -85,10 +94,16 @@ internal fun DashboardDrawer(
     }
     val workspace = remember {
         movableContentOf {
-            currentContent { requested ->
-                val close = selected == requested && state.targetValue == DrawerValue.Open
-                selected = requested
-                scope.launch { if (close) state.close() else state.open() }
+            currentContent(activeDashboardPanel(selected, state.currentValue, state.targetValue)) { requested ->
+                scope.launch {
+                    transitions.withLock {
+                        if (selected == requested && state.isOpen) state.close() else {
+                            state.close()
+                            selected = requested
+                            state.open()
+                        }
+                    }
+                }
             }
         }
     }
@@ -101,7 +116,8 @@ internal fun DashboardDrawer(
             if (offset.isNaN()) 0.dp else (width.toPx() + offset)
                 .coerceIn(0f, width.toPx()).toDp()
         }
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        CompositionLocalProvider(LocalLayoutDirection provides
+            if (selected.opensRight) LayoutDirection.Rtl else LayoutDirection.Ltr) {
             if (inline) {
                 DismissibleNavigationDrawer(
                     drawerState = state,

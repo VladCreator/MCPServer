@@ -60,6 +60,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -87,6 +88,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -154,7 +156,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
         DashboardDrawer(
             evidence = { QaEvidenceCard(Modifier.fillMaxWidth(), qaEvidenceRevision) },
             activity = { ActivityCard(logs = executionLogs) }
-        ) { togglePanel ->
+        ) { activePanel, togglePanel ->
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background
             ) { innerPadding ->
@@ -179,6 +181,7 @@ fun App(viewModel: AppViewModel = viewModel()) {
                                 onTools = { showTools = true },
                                 onEvidence = { togglePanel(DashboardPanel.EVIDENCE) },
                                 onActivity = { togglePanel(DashboardPanel.ACTIVITY) },
+                                activePanel = activePanel,
                                 onSettings = { showSettings = true }
                             )
                         }
@@ -304,6 +307,7 @@ private fun AppHeader(
     onTools: () -> Unit,
     onEvidence: () -> Unit,
     onActivity: () -> Unit,
+    activePanel: DashboardPanel?,
     onSettings: () -> Unit
 ) {
     FlowRow(
@@ -336,15 +340,23 @@ private fun AppHeader(
             )
         }
         Row {
-            IconButton(onClick = onActivity) {
-                Icon(Icons.Rounded.History, contentDescription = "Toggle Activity",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onClick = onActivity,
+                modifier = Modifier.semantics { selected = activePanel == DashboardPanel.ACTIVITY },
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = if (activePanel == DashboardPanel.ACTIVITY) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    contentColor = if (activePanel == DashboardPanel.ACTIVITY) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                )) {
+                Icon(Icons.Rounded.History, contentDescription = "Toggle Activity")
             }
-            IconButton(onClick = onEvidence) {
+            IconButton(onClick = onEvidence,
+                modifier = Modifier.semantics { selected = activePanel == DashboardPanel.EVIDENCE },
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = if (activePanel == DashboardPanel.EVIDENCE) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    contentColor = if (activePanel == DashboardPanel.EVIDENCE) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                )) {
                 Icon(
                     imageVector = Icons.Rounded.Description,
-                    contentDescription = "Toggle QA Evidence",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    contentDescription = "Toggle QA Evidence"
                 )
             }
             IconButton(onClick = onTools) {

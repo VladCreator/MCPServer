@@ -35,7 +35,7 @@ import java.net.Inet4Address
 import java.net.SocketException
 
 @Composable
-internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: Boolean, report: (String) -> Unit) {
+internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: Boolean, report: (ActivityKind, String) -> Unit) {
     val scope = rememberCoroutineScope()
     var receiver by remember { mutableStateOf<EvidenceReceiver?>(null) }
     var flows by remember { mutableStateOf(emptyList<ReceivedFlow>()) }
@@ -85,13 +85,13 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                             receiver = withContext(Dispatchers.IO) { EvidenceReceiver().also { created = it } }
                             error = null
                             pairing = true
-                            report("HTTPS evidence receiver enabled on port $EVIDENCE_PORT.")
+                            report(ActivityKind.EVIDENCE, "HTTPS evidence receiver enabled on port $EVIDENCE_PORT.")
                         } catch (cancelled: CancellationException) {
                             created?.close()
                             throw cancelled
                         } catch (failure: Exception) {
                             error = "Cannot enable evidence receiver: ${failure.message}"
-                            report(error!!)
+                            report(ActivityKind.ERROR, error!!)
                         } finally { starting = false }
                     }
                 }) { Text("Enable receiving") }
@@ -99,7 +99,7 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                     TextButton(enabled = !starting, onClick = { pairing = true }) { Text("Wi-Fi / advanced") }
                     TextButton(enabled = !starting, onClick = {
                         receiver?.close(); receiver = null
-                        report("Evidence receiver stopped. Devices must pair again after restart.")
+                        report(ActivityKind.EVIDENCE, "Evidence receiver stopped. Devices must pair again after restart.")
                     }) { Text("Stop") }
                 }
             }
@@ -136,13 +136,13 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                                 usbDevice = device
                                 usbCode = code
                                 error = null
-                                report("USB pairing offered to ${device.name}. Confirm the matching number on Android.")
+                                report(ActivityKind.PAIRING, "USB pairing offered to ${device.name}. Confirm the matching number on Android.")
                             } catch (cancelled: CancellationException) {
                                 if (receiver == null) created?.close()
                                 throw cancelled
                             } catch (failure: Exception) {
                                 error = "USB pairing failed: ${failure.message}"
-                                report(error!!)
+                                report(ActivityKind.ERROR, error!!)
                             } finally { starting = false }
                         }
                     }) { Text("Pair") }
@@ -198,11 +198,11 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                                 try {
                                     withContext(Dispatchers.IO) { manager.enableEvidenceUsb(device) }
                                     error = null
-                                    report("USB evidence route enabled for ${device.name}.")
+                                    report(ActivityKind.PAIRING, "USB evidence route enabled for ${device.name}.")
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (failure: Exception) {
-                                    error = "USB evidence route failed: ${failure.message}"; report(error!!)
+                                    error = "USB evidence route failed: ${failure.message}"; report(ActivityKind.ERROR, error!!)
                                 }
                             }
                         }) { Text("Enable USB for ${device.name}") }

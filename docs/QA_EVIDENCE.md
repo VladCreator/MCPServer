@@ -12,8 +12,11 @@ unpaired or unavailable states do not. Desktop uses a green receiver-ready badge
 and hides Pair only while that device has recent authenticated activity.
 
 Use the **QA Evidence icon** or **Activity/history icon** in the Android/iOS
-dashboard header to open the corresponding right-side panel. Only one panel is
-visible: selecting the other icon switches panels; selecting the current icon
+dashboard header to open QA Evidence on the **right** or Activity on the **left**.
+The open panel's button has a filled accent background and selected accessibility
+state in both themes. Only one panel is
+visible: selecting the other icon closes the current panel before opening the
+other side; selecting the current icon
 again closes it. Landscape tablets (both viewport dimensions at least
 600 dp, width greater than height) use an inline dismissible panel; portrait
 devices and phones, including landscape phones, use a modal panel with a scrim.
