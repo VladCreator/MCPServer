@@ -1,10 +1,19 @@
 package com.vlad.tester.desktop
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.unit.dp
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.datatransfer.DataFlavor
@@ -40,6 +49,22 @@ internal fun BuildDropZone(
     enabled: Boolean, onDrop: (File) -> Unit, onError: (String) -> Unit,
     background: Color, foreground: Color, accent: Color, modifier: Modifier
 ) {
+    if (!enabled) {
+        // Keep disabled state fully in Compose so dialogs can appear above this area.
+        Box(
+            modifier = modifier
+                .background(ComposeColor(background.rgb), RoundedCornerShape(4))
+                .border(1.dp, ComposeColor(accent.rgb), RoundedCornerShape(4)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "Drop disabled - uncheck devices or finish the current operation",
+                color = ComposeColor(foreground.rgb)
+            )
+        }
+        return
+    }
+
     val currentEnabled by rememberUpdatedState(enabled)
     val currentDrop by rememberUpdatedState(onDrop)
     val currentError by rememberUpdatedState(onError)
@@ -89,8 +114,7 @@ internal fun BuildDropZone(
         panel.isEnabled = enabled
         panel.background = background
         (panel.getComponent(0) as JLabel).foreground = foreground
-        (panel.getComponent(0) as JLabel).text = if (enabled)
-            "Drop Android APK or iOS simulator .app here" else "Drop disabled - uncheck devices or finish the current operation"
+        (panel.getComponent(0) as JLabel).text = "Drop Android APK or iOS simulator .app here"
         panel.border = BorderFactory.createDashedBorder(accent)
     })
 }
