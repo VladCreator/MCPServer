@@ -119,7 +119,7 @@ private fun DesktopDrawer(
                     CompositionLocalProvider(LocalLayoutDirection provides direction) {
                         DismissibleDrawerSheet(drawerState = state,
                             modifier = Modifier.width(panelWidth).fillMaxHeight()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row {
                                     Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                                     TextButton(onClick = onClose) { Text("Close") }

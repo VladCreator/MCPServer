@@ -48,7 +48,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
@@ -290,13 +289,13 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
         }
     }
 
-    OutlinedCard(modifier) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("QA Evidence", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                TextButton(onClick = { desktopDialog = true }, enabled = actionsEnabled) { Text("Desktop") }
-                TextButton(onClick = { refreshRevision++ }, enabled = !loading && !busy) { Text("Refresh") }
-            }
+    Column(modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { desktopDialog = true }, enabled = actionsEnabled) { Text("Desktop") }
+            TextButton(onClick = { refreshRevision++ }, enabled = !loading && !busy) { Text("Refresh") }
+        }
             if (desktopActive) {
                 val dark = isSystemInDarkTheme()
                 Surface(
@@ -317,7 +316,7 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                 Text("No saved evidence yet. Record a QA step, request a screenshot, or retain a run artifact. Host reports are not stored here.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 groupEvidenceByDay(entries).forEach { (day, evidence) ->
                     val expanded = day in expandedDays
                     item(key = "day:$day") {
@@ -423,7 +422,6 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
                         }
                     }
                 }
-            }
         }
     }
     if (desktopDialog) DesktopPairingDialog(desktop, {

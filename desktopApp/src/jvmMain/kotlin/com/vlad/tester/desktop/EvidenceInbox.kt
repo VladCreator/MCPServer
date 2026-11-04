@@ -1,6 +1,7 @@
 package com.vlad.tester.desktop
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,10 +74,9 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
             delay(1000)
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row {
-                Text("QA Evidence", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 if (receiver == null) TextButton(enabled = !starting, onClick = {
                     starting = true
                     scope.launch {
@@ -158,7 +157,6 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                     }) { Text("${flow.folder.name} - ${flow.count} files (open folder)") }
                 }
             }
-        }
     }
     if (usbCode != null) AlertDialog(onDismissRequest = { usbCode = null },
         title = { Text("Pair ${usbDevice?.name}") },
