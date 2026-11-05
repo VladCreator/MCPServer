@@ -252,6 +252,26 @@ class DeviceManager(
         runner.run(listOf(xcrun, "simctl", "shutdown", device.id), 30)
     }
 
+    fun rotate(device: Device) {
+        when (device.platform) {
+            Platform.ANDROID -> {
+                if (!device.canInstall) throw DesktopFailure("Rotate requires an authorized Android device.")
+                val tool = requireAdb()
+                val current = runner.run(listOf(tool, "-s", device.id, "shell", "settings", "get", "system", "user_rotation"), 10)
+                    .trim().toIntOrNull()
+                    ?: throw DesktopFailure("Cannot read current Android rotation.")
+                val next = if (current in setOf(1, 3)) 0 else 1
+                runner.run(listOf(tool, "-s", device.id, "shell", "settings", "put", "system", "accelerometer_rotation", "0"), 10)
+                runner.run(listOf(tool, "-s", device.id, "shell", "settings", "put", "system", "user_rotation", next.toString()), 10)
+            }
+            Platform.IOS_SIMULATOR -> {
+                if (device.state != "Booted") throw DesktopFailure("Rotate requires a booted iOS simulator.")
+                runner.run(listOf(xcrun, "simctl", "io", device.id, "rotate", "right"), 20)
+            }
+            Platform.IOS_DEVICE -> throw DesktopFailure("Physical iOS rotation is not supported in this release.")
+        }
+    }
+
     fun inspect(file: File, platform: Platform): BuildIdentity {
         return when (platform) {
             Platform.ANDROID -> {

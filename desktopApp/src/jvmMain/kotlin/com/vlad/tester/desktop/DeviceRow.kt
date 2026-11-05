@@ -16,6 +16,7 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,7 +35,7 @@ internal fun DeviceRow(
     device: Device, selected: Boolean, selectionEnabled: Boolean, actionsEnabled: Boolean,
     hasBuild: Boolean, bridge: BridgeState, onSelect: (Boolean) -> Unit,
     onRun: () -> Unit, onBridge: () -> Unit, onInstall: () -> Unit, onBoot: () -> Unit,
-    onShutdown: () -> Unit
+    onShutdown: () -> Unit, onRotate: () -> Unit
 ) {
     val compactButtonSize = 32.dp
     val controlSlotSize = 32.dp
@@ -83,6 +84,12 @@ internal fun DeviceRow(
                     if (device.platform == Platform.IOS_SIMULATOR && device.state == "Booted") {
                         DeviceActionIcon(Icons.Rounded.PowerSettingsNew, "Shutdown ${device.name}",
                             enabled = actionsEnabled, onClick = onShutdown,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                    }
+                    if ((device.platform == Platform.ANDROID && device.canInstall) ||
+                        (device.platform == Platform.IOS_SIMULATOR && device.state == "Booted")) {
+                        DeviceActionIcon(Icons.Rounded.Refresh, "Rotate ${device.name}",
+                            enabled = actionsEnabled, onClick = onRotate,
                             buttonSize = compactButtonSize, iconSize = compactIconSize)
                     }
                     if (selected && hasBuild) {

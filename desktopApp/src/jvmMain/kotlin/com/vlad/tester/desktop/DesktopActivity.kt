@@ -9,6 +9,7 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.ui.graphics.vector.ImageVector
 import java.time.LocalTime
@@ -18,6 +19,7 @@ internal enum class ActivityKind(val label: String, val icon: ImageVector) {
     RUN("Tester launch", Icons.Rounded.PlayArrow),
     BRIDGE_CONNECT("Bridge connected", Icons.Rounded.Link),
     BRIDGE_DISCONNECT("Bridge disconnected", Icons.Rounded.LinkOff),
+    ROTATE("Screen rotate", Icons.Rounded.Refresh),
     BOOT("Simulator startup", Icons.Rounded.PowerSettingsNew),
     SHUTDOWN("Simulator shutdown", Icons.Rounded.PowerSettingsNew),
     EVIDENCE("QA Evidence receiver", Icons.Rounded.Description),

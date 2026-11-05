@@ -422,6 +422,20 @@ private fun DesktopDashboard(
                                                         fail("Simulator shutdown failed: ${failure.message}")
                                                     } finally { setBusy(false); refresh() }
                                                 }
+                                            },
+                                            onRotate = {
+                                                setBusy(true)
+                                                scope.launch {
+                                                    record(ActivityKind.ROTATE, "Rotating ${device.name}")
+                                                    try {
+                                                        withContext(Dispatchers.IO) { manager.rotate(device) }
+                                                        record(ActivityKind.ROTATE, "Rotate requested for ${device.name}")
+                                                    } catch (failure: DesktopFailure) {
+                                                        fail(failure.message ?: "Screen rotate failed.")
+                                                    } catch (failure: IOException) {
+                                                        fail("Screen rotate failed: ${failure.message}")
+                                                    } finally { setBusy(false); refresh() }
+                                                }
                                             })
                                         HorizontalDivider()
                                     }
