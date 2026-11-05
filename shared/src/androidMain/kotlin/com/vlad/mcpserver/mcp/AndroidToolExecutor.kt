@@ -350,11 +350,12 @@ class AndroidToolExecutor(
                 "audio_state" -> audio.state()
                 "get_device_state" -> ToolResult(deviceState.readText())
                 "device_state" -> setDeviceState(arguments)
+                "rotate_screen" -> rotateScreen(arguments)
                 "ui_diff" -> uiDiff(arguments)
                 else -> ToolResult("Tool '$toolName' is not available.", isError = true)
             }
         if (!result.isError && toolName in setOf("click_element", "input_text", "scroll", "ui_gesture",
-                "touch_test", "launch_app", "swipe", "global_action", "device_state")) references.clear()
+                "touch_test", "launch_app", "swipe", "global_action", "device_state", "rotate_screen")) references.clear()
         return result
     }
 
@@ -382,7 +383,7 @@ class AndroidToolExecutor(
         val mutations = setOf(
             "touch_test", "launch_app", "swipe", "click_element", "input_text", "scroll",
             "global_action", "ui_gesture", "run_route", "create_notification", "take_photo",
-            "qa_session", "ui_diff", "audio_instruction", "device_state", "collect_failure_bundle", "export_run", "cancel_run",
+            "qa_session", "ui_diff", "audio_instruction", "device_state", "rotate_screen", "collect_failure_bundle", "export_run", "cancel_run",
             "open_link", "clipboard", "route_policy"
         )
         val result = buildJsonObject {
@@ -407,13 +408,14 @@ class AndroidToolExecutor(
                             context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) add("camera")
                         if (tool.name == "create_notification" &&
                             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) add("notifications")
+                        if (tool.name == "rotate_screen" && !Settings.System.canWrite(context)) add("write_settings")
                     }
                     add(buildJsonObject {
                         put("name", tool.name)
                         put("execution_location", "android_device")
                         put("implemented", true)
                         put("status", if (missing.isNotEmpty()) "blocked" else
-                            if (tool.name in touchTools || tool.name in setOf("device_state", "get_logs", "launch_app", "take_photo", "clipboard", "get_test_environment")) "conditional"
+                            if (tool.name in touchTools || tool.name in setOf("device_state", "rotate_screen", "get_logs", "launch_app", "take_photo", "clipboard", "get_test_environment")) "conditional"
                             else "available")
                         putJsonArray("missing_permissions") { missing.forEach { add(it) } }
                         put("requires_confirmation_when_enabled", tool.sensitive)
@@ -1547,6 +1549,47 @@ class AndroidToolExecutor(
             return ToolResult("action must be set, restore or status.", isError = true)
         }
         return deviceState.set(owner, arguments)
+    }
+
+    private suspend fun rotateScreen(arguments: JsonObject): ToolResult {
+        if (arguments.keys.any { it !in setOf("direction") }) {
+            return ToolResult("rotate_screen only accepts optional direction=left|right.", isError = true)
+        }
+        if (!Settings.System.canWrite(context)) {
+            return ToolResult("WRITE_SETTINGS required; explicitly grant Modify system settings to Tester.", isError = true)
+        }
+        val direction = arguments.string("direction")?.lowercase() ?: "right"
+        if (direction !in setOf("left", "right")) {
+            return ToolResult("direction must be left or right.", isError = true)
+        }
+        val current = Settings.System.getInt(context.contentResolver, Settings.System.USER_ROTATION, 0)
+        val next = when (direction) {
+            "right" -> (current + 1) % 4
+            else -> (current + 3) % 4
+        }
+        if (!Settings.System.putInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0)) {
+            return ToolResult("Rotation policy rejected by the system.", isError = true)
+        }
+        if (!Settings.System.putInt(context.contentResolver, Settings.System.USER_ROTATION, next)) {
+            return ToolResult("Rotation value rejected by the system.", isError = true)
+        }
+        repeat(20) {
+            val auto = Settings.System.getInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
+            val readback = Settings.System.getInt(context.contentResolver, Settings.System.USER_ROTATION, current)
+            if (auto == 0 && readback == next) {
+                val message = "Rotated screen $direction from ${rotationName(current)} to ${rotationName(next)}."
+                return ToolResult(message)
+            }
+            delay(100)
+        }
+        return ToolResult("Rotation write did not stabilize in time.", isError = true)
+    }
+
+    private fun rotationName(value: Int): String = when (value and 3) {
+        0 -> "portrait"
+        1 -> "landscape"
+        2 -> "reverse_portrait"
+        else -> "reverse_landscape"
     }
 
     private suspend fun uiDiff(arguments: JsonObject): ToolResult {

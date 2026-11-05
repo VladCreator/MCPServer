@@ -96,7 +96,7 @@ class AndroidAgentContractTests(unittest.TestCase):
         capabilities = result["structuredContent"]
         self.assertEqual("0.4.1", capabilities["server_version"])
         tools = capabilities["tools"]
-        self.assertEqual(43, len(tools))
+        self.assertEqual(44, len(tools))
         self.assertFalse(capabilities["visibility"]["live_capture"])
         self.assertEqual("unsupported; explicitly deferred", capabilities["visibility"]["recording"])
         self.assertIn("host", capabilities["visibility"]["execution_location"])

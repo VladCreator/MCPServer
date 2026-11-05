@@ -553,6 +553,18 @@ object McpTools {
         requirement = "WRITE_SETTINGS/WRITE_SECURE_SETTINGS for rotation/dark/animations; volume/keep-awake otherwise"
     )
 
+    val rotateScreen: ToolDefinition = ToolDefinition(
+        name = "rotate_screen",
+        description = "Rotate screen orientation for QA checks. Defaults to a right rotation; can rotate left or right.",
+        inputSchema = schema(emptyList()) {
+            putJsonObject("direction") {
+                put("type", "string")
+                putJsonArray("enum") { add("left"); add("right") }
+            }
+        },
+        requirement = "WRITE_SETTINGS permission"
+    )
+
     val uiDiff: ToolDefinition = ToolDefinition(
         name = "ui_diff",
         description = "Save a visual baseline or compare the current screen with it. Returns a diff percentage; " +
@@ -777,6 +789,7 @@ object McpTools {
         audioState,
         getDeviceState,
         deviceState,
+        rotateScreen,
         uiDiff,
         runRoute,
         getCapabilities,

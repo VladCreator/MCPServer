@@ -25,7 +25,7 @@ def call(method, params=None):
 class SimulatorBridgeTests(unittest.TestCase):
     def test_discovery(self):
         self.assertIn("tools", call("initialize")["result"]["capabilities"])
-        self.assertEqual(call("tools/list")["result"]["tools"], [bridge.SCREENSHOT_TOOL])
+        self.assertEqual(call("tools/list")["result"]["tools"], [bridge.SCREENSHOT_TOOL, bridge.ROTATE_TOOL])
 
     def test_notifications_and_invalid_requests(self):
         self.assertIsNone(bridge.handle(
@@ -37,6 +37,20 @@ class SimulatorBridgeTests(unittest.TestCase):
         self.assertEqual(call("tools/call", {
             "name": "take_screenshot", "arguments": {"unexpected": True},
         })["error"]["code"], -32602)
+        self.assertEqual(call("tools/call", {
+            "name": "rotate_screen", "arguments": {"direction": "down"},
+        })["error"]["code"], -32602)
+
+    def test_rotate(self):
+        calls = []
+
+        def capture(command, **kwargs):
+            calls.append(command)
+
+        with patch.object(bridge.subprocess, "run", side_effect=capture):
+            result = call("tools/call", {"name": "rotate_screen", "arguments": {"direction": "left"}})["result"]
+        self.assertFalse(result["isError"])
+        self.assertEqual(["xcrun", "simctl", "io", UDID, "rotate", "left"], calls[0])
 
     def test_screenshot_and_cleanup(self):
         png = b"\x89PNG\r\n\x1a\nimage"

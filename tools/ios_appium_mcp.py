@@ -149,10 +149,14 @@ STATE = tool(
     },
     ["action"],
 )
+ROTATE = tool(
+    "rotate_screen",
+    "Rotate orientation between portrait and landscape.",
+)
 
 TOOLS = [
     SCREEN_TREE, SCREENSHOT, UI_FIND, UI_WAIT, UI_ASSERT, UI_GESTURE,
-    CLICK, INPUT, SCROLL, SWIPE, GLOBAL, LAUNCH, DEVICE, STATE,
+    CLICK, INPUT, SCROLL, SWIPE, GLOBAL, LAUNCH, DEVICE, STATE, ROTATE,
 ]
 
 
@@ -747,6 +751,11 @@ def handle_tool(app, name, arguments):
             app.call("POST", "/orientation", {"orientation": rotation})
             return tool_result(f"Orientation set to {rotation}.")
         return tool_result(json.dumps({"orientation": app.orientation(), "window": app.rect()}, indent=2))
+    if name == "rotate_screen":
+        current = app.orientation().upper()
+        target = "LANDSCAPE" if current.startswith("PORTRAIT") else "PORTRAIT"
+        app.call("POST", "/orientation", {"orientation": target})
+        return tool_result(f"Orientation rotated from {current} to {target}.")
     raise ToolFailure(f"Unknown tool: {name}")
 
 

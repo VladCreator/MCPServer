@@ -59,23 +59,35 @@ class BridgeTests(unittest.TestCase):
             base_url = "http://127.0.0.1:4723"
             udid = "UDID"
             bundle_id = "com.vlad.mcpserver"
+            _orientation = "PORTRAIT"
             def source(self): return XML
             def screenshot(self): return "iVBORw0KGgo="
             def rect(self): return {"x": 0, "y": 0, "width": 402, "height": 874}
-            def orientation(self): return "PORTRAIT"
+            def orientation(self): return self._orientation
+            def call(self, method, path, payload=None, timeout=60):
+                if method == "POST" and path == "/orientation":
+                    self._orientation = payload.get("orientation", self._orientation)
+                    return {"value": None}
+                return {"value": None}
 
         init = bridge.handle(FakeApp(), {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
         self.assertIn("protocolVersion", init["result"])
         listing = bridge.handle(FakeApp(), {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
         names = [tool["name"] for tool in listing["result"]["tools"]]
-        self.assertEqual(14, len(names))
+        self.assertEqual(15, len(names))
         self.assertIn("ui_find", names)
+        self.assertIn("rotate_screen", names)
         result = bridge.handle(FakeApp(), {
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "ui_find", "arguments": {"text": "Settings"}},
         })
         text = result["result"]["content"][-1]["text"]
         self.assertEqual(1, json.loads(text)["count"])
+        rotated = bridge.handle(FakeApp(), {
+            "jsonrpc": "2.0", "id": 31, "method": "tools/call",
+            "params": {"name": "rotate_screen", "arguments": {}},
+        })
+        self.assertIn("Orientation rotated", rotated["result"]["content"][-1]["text"])
         unknown = bridge.handle(FakeApp(), {"jsonrpc": "2.0", "id": 4, "method": "unknown"})
         self.assertEqual(-32601, unknown["error"]["code"])
 

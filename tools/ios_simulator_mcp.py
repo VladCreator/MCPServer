@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local stdio MCP server for screenshots of one explicitly selected iOS simulator."""
+"""Local stdio MCP server for screenshot and rotate actions on one selected iOS simulator."""
 
 import argparse
 import base64
@@ -22,6 +22,20 @@ SCREENSHOT_TOOL = {
     "inputSchema": {
         "type": "object",
         "properties": {},
+        "additionalProperties": False,
+    },
+}
+ROTATE_TOOL = {
+    "name": "rotate_screen",
+    "description": (
+        "Rotate the selected iOS simulator display by 90 degrees. "
+        "Useful for portrait/landscape QA checks."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "direction": {"type": "string", "enum": ["left", "right"]},
+        },
         "additionalProperties": False,
     },
 }
@@ -50,6 +64,20 @@ def screenshot(udid):
                 "data": base64.b64encode(image).decode("ascii"),
             },
         ],
+        "isError": False,
+    }
+
+
+def rotate(udid, direction):
+    subprocess.run(
+        ["xcrun", "simctl", "io", udid, "rotate", direction],
+        check=True, capture_output=True, text=True, timeout=20,
+    )
+    return {
+        "content": [{
+            "type": "text",
+            "text": f"Simulator {udid} rotated {direction}.",
+        }],
         "isError": False,
     }
 
@@ -87,25 +115,34 @@ def handle(request, udid):
     elif method == "ping":
         result = {}
     elif method == "tools/list":
-        result = {"tools": [SCREENSHOT_TOOL]}
+        result = {"tools": [SCREENSHOT_TOOL, ROTATE_TOOL]}
     elif method == "tools/call":
-        if params.get("name") != "take_screenshot":
-            return error(request_id, -32602, "Unknown tool")
+        name = params.get("name")
         arguments = params.get("arguments", {})
-        if not isinstance(arguments, dict) or arguments:
-            return error(request_id, -32602, "take_screenshot accepts an empty arguments object")
+        if not isinstance(arguments, dict):
+            return error(request_id, -32602, "arguments must be an object")
         try:
-            result = screenshot(udid)
+            if name == "take_screenshot":
+                if arguments:
+                    return error(request_id, -32602, "take_screenshot accepts an empty arguments object")
+                result = screenshot(udid)
+            elif name == "rotate_screen":
+                direction = arguments.get("direction", "right")
+                if direction not in ("left", "right"):
+                    return error(request_id, -32602, "direction must be left or right")
+                result = rotate(udid, direction)
+            else:
+                return error(request_id, -32602, "Unknown tool")
         except (OSError, ValueError, subprocess.SubprocessError) as failure:
             detail = str(failure)
             if isinstance(failure, subprocess.CalledProcessError):
                 detail = failure.stderr.strip() or detail
-            print(f"Screenshot failed for {udid}: {detail}", file=sys.stderr)
+            print(f"Simulator tool failed for {udid}: {detail}", file=sys.stderr)
             result = {
                 "content": [{
                     "type": "text",
                     "text": (
-                        f"Screenshot failed for simulator {udid}: {detail}. "
+                        f"Simulator action failed for {udid}: {detail}. "
                         "Ensure that simulator is booted and Xcode command-line tools are selected."
                     ),
                 }],
