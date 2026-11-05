@@ -402,6 +402,14 @@ object McpTools {
                 put("type", "boolean")
                 put("description", "Default false. For action=step, explicitly request an approved current-screen JPEG saved with that step to QA Evidence.")
             }
+            putJsonObject("evidence_mode") {
+                put("type", "string")
+                put("description", "For action=step: default or human_verified. human_verified records a privacy-safe manual verification state without an automatic screenshot capture.")
+            }
+            putJsonObject("human_verified_reason") {
+                put("type", "string")
+                put("description", "For action=step with evidence_mode=human_verified: concise reason (for example contains_pii).")
+            }
             putJsonObject("step_id") { put("type", "integer"); put("description", "For action=attach_evidence: the existing step number to update.") }
             putJsonObject("screenshot_artifact_id") { put("type", "string"); put("description", "For action=attach_evidence: QA evidence filename to link to the step.") }
             putJsonObject("capture_timestamp") { put("type", "string"); put("description", "Optional ISO-8601 capture timestamp when attaching external evidence.") }

@@ -254,6 +254,19 @@ class ReconnectTests(unittest.TestCase):
         self.gateway.tools()
         self.assertEqual(1, self.backend.connects)
 
+    def test_capabilities_expose_failure_state_and_recovery_hint(self):
+        self.backend.connect()
+        data = self.gateway.capabilities(connect=False)
+        backend = data["backends"][0]
+        self.assertFalse(backend["connected"])
+        self.assertEqual("transport_unreachable", backend["failure_state"])
+        self.assertIn("retry health_check", backend["suggested_action"])
+        self.assertEqual("ios: unreachable", backend["original_error"])
+
+    def test_call_failure_reports_classified_state(self):
+        with self.assertRaisesRegex(gateway.BackendError, "transport_unreachable"):
+            self.gateway.call("ios__get_device_state", {})
+
 
 class FakeMcpServer(BaseHTTPRequestHandler):
     """Minimal Streamable HTTP MCP server; `restart()` forgets all sessions."""

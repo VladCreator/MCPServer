@@ -763,7 +763,13 @@ class AndroidToolExecutor(
                     "through system/crash logs, which need READ_LOGS (adb shell pm grant ${context.packageName} " +
                     "android.permission.READ_LOGS) and, on Android 13+, tapping 'Allow' on the system " +
                     "'access all device logs' dialog (shown once per Tester process; click_element can tap it). Retry after allowing.",
-                isError = true
+                isError = true,
+                structuredContent = buildJsonObject {
+                    put("reason", "diagnostics_limited")
+                    put("effective_log_access", false)
+                    put("package_name", pkg)
+                    put("read_logs_granted", context.checkSelfPermission(android.Manifest.permission.READ_LOGS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                }
             )
         }
         return runCatching {
@@ -776,10 +782,17 @@ class AndroidToolExecutor(
             if (filtered.isEmpty()) {
                 ToolResult(
                     header + "No log lines matched. Other apps' logs require READ_LOGS (adb shell pm grant " +
-                        "${context.packageName} android.permission.READ_LOGS) and, on Android 13+, allowing the system log-access dialog."
+                        "${context.packageName} android.permission.READ_LOGS) and, on Android 13+, allowing the system log-access dialog.",
+                    structuredContent = buildJsonObject {
+                        put("effective_log_access", pkg == null || pids.isNotEmpty())
+                        pkg?.let { put("package_name", it) }
+                    }
                 )
             } else {
-                ToolResult((header + filtered.joinToString("\n")).take(MAX_LOG_CHARS))
+                ToolResult((header + filtered.joinToString("\n")).take(MAX_LOG_CHARS), structuredContent = buildJsonObject {
+                    put("effective_log_access", pkg == null || pids.isNotEmpty())
+                    pkg?.let { put("package_name", it) }
+                })
             }
         }.getOrElse { ToolResult("Unable to read logs: ${it.message}", isError = true) }
     }
@@ -1271,11 +1284,17 @@ class AndroidToolExecutor(
             "step" -> {
                 val title = arguments.string("title").orEmpty()
                 val status = arguments.string("status").orEmpty()
+                val evidenceMode = arguments.string("evidence_mode")?.lowercase() ?: "default"
+                if (evidenceMode !in setOf("default", "human_verified")) {
+                    return ToolResult("evidence_mode must be default or human_verified.", isError = true)
+                }
+                val humanVerified = evidenceMode == "human_verified"
+                val humanReason = arguments.string("human_verified_reason")
                 val validStep = qa.activeFlowId() != null && title.isNotBlank() &&
                     status.lowercase().ifBlank { "info" } in setOf("pass", "fail", "blocked", "info")
                 val requestedCapture = arguments.bool("capture_screenshot") || screenshotOutcome != null
                 val capture = when {
-                    !requestedCapture || !validStep -> null
+                    humanVerified || !requestedCapture || !validStep -> null
                     screenshotOutcome != null -> screenshotOutcome
                     else -> captureQaStepScreenshot()
                 }
@@ -1292,7 +1311,9 @@ class AndroidToolExecutor(
                     screenshotCapturedAt = capture?.capturedAt,
                     screenshotForegroundPackage = capture?.foregroundPackage,
                     screenshotPossibleObstruction = capture?.possibleObstruction,
-                    screenshotDenialSignal = capture?.denialSignal
+                    screenshotDenialSignal = capture?.denialSignal,
+                    humanVerifiedEvidence = humanVerified,
+                    humanVerifiedReason = humanReason
                 )
             }
             "attach_evidence" -> {

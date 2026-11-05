@@ -59,6 +59,20 @@ def truncate(value, limit=500):
     return text[:limit]
 
 
+def classify_failure_state(error_text):
+    text = (error_text or "").lower()
+    if any(token in text for token in (
+        "unreachable at", "unreachable", "nothing listens on mac port", "timed out", "connection refused",
+        "connection reset", "adb command failed", "adb requires exactly one device", "forwarded endpoint"
+    )):
+        return "transport_unreachable", "Verify tunnel/port/device connectivity, then retry health_check."
+    if any(token in text for token in (
+        "initialize failed", "tool discovery failed", "did not return mcp-session-id", "invalid tool discovery response"
+    )):
+        return "mcp_initialize_failed", "Refresh the MCP connection/session and retry initialization."
+    return "service_not_ready", "Open Tester, confirm server readiness, then retry health_check."
+
+
 CONNECT_TIMEOUT_S = 10
 HEARTBEAT_INTERVAL_S = 15
 
@@ -482,20 +496,23 @@ class Gateway:
     def capabilities(self, connect=True):
         if connect:
             self.start(force=True)
+        def backend_status(backend):
+            state, action = classify_failure_state(backend.error)
+            return {
+                "name": backend.name,
+                "platform": backend.platform,
+                "connected": backend.connected,
+                "tool_count": len(backend.tools),
+                "error": backend.error,
+                "failure_state": None if backend.connected else state,
+                "suggested_action": None if backend.connected else action,
+                "original_error": None if backend.connected else backend.error,
+                "last_verified": getattr(backend, "last_verified", None),
+                "bridge": backend.adb.state if isinstance(backend, HttpBackend) and backend.adb else "unmanaged",
+            }
         return {
             "gateway_version": GATEWAY_VERSION,
-            "backends": [
-                {
-                    "name": backend.name,
-                    "platform": backend.platform,
-                    "connected": backend.connected,
-                    "tool_count": len(backend.tools),
-                    "error": backend.error,
-                    "last_verified": getattr(backend, "last_verified", None),
-                    "bridge": backend.adb.state if isinstance(backend, HttpBackend) and backend.adb else "unmanaged",
-                }
-                for backend in self.backends
-            ],
+            "backends": [backend_status(backend) for backend in self.backends],
             "gateway_tools": ["qa_capabilities", "qa_session"],
         }
 
@@ -598,6 +615,11 @@ class Gateway:
         if not backend:
             raise BackendError(f"Unknown backend: {prefix}")
         backend.ensure_connected(force=True)
+        if not backend.connected:
+            state, action = classify_failure_state(backend.error)
+            raise BackendError(
+                f"{prefix}: {state}; original_error={backend.error}; suggested_action={action}"
+            )
         start = time.monotonic()
         try:
             try:
