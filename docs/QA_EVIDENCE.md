@@ -138,6 +138,13 @@ within the evidence source (for example `r-<12 hex>.md` for native reports,
 `p-<12 hex>.jpg` for legacy camera photos, `steps-<8 hex>.txt` for session
 lists, and `s01-<8 hex>.jpg` for step screenshots). Original file paths and validation are unchanged.
 
+Desktop flow transfer keeps these QA Evidence display names whenever they fit the
+receiver filename policy. The transfer manifest now records `file`
+(Desktop-received filename), `display_name` (Android QA Evidence name), optional
+`source_name` (original stored filename/artifact) and `evidence_id` (local
+Android evidence identity). This keeps evidence statements auditable when a
+captured artifact filename differs from the UI display alias.
+
 ## Viewing, sharing and downloading
 
 **Tapping a filename** opens a full-screen preview with a Close action (system

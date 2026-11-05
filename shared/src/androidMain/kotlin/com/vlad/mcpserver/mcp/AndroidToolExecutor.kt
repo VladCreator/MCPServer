@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityNodeInfo
 import com.vlad.mcpserver.McpTouchAccessibilityService
 import com.vlad.mcpserver.NodeSelector
+import com.vlad.mcpserver.QaEvidenceNames
 import com.vlad.mcpserver.ScreenNavigator
 import com.vlad.mcpserver.Screenshot
 import com.vlad.mcpserver.AppVisibility
@@ -1029,6 +1030,7 @@ class AndroidToolExecutor(
         return captureScreenshot(service, maxDimension).fold(
             onSuccess = { shot ->
                 val file = File(context.filesDir, "qa/evidence/screenshot-${UUID.randomUUID()}.jpg")
+                val displayName = QaEvidenceNames.stored(file.name, file.path)
                 try {
                     writeQaEvidenceFile(file) { it.writeBytes(shot.jpegBytes) }
                 } catch (error: Exception) {
@@ -1044,12 +1046,14 @@ class AndroidToolExecutor(
                         ". Screenshot ${shot.width}x${shot.height} (screen " +
                         "${shot.screenWidth}x${shot.screenHeight}). Multiply image coordinates by " +
                         "${"%.3f".format(shot.screenWidth.toFloat() / shot.width)} to get screen " +
-                        "coordinates for touch_test. Saved in QA Evidence: ${file.name}.",
+                        "coordinates for touch_test. Saved in QA Evidence: $displayName (artifact: ${file.name}).",
                     imageBase64 = java.util.Base64.getEncoder().encodeToString(shot.jpegBytes),
                     imageMimeType = "image/jpeg",
                     evidencePaths = listOf(file.absolutePath),
                     structuredContent = buildJsonObject {
                         put("screenshot_file", file.name)
+                        put("screenshot_artifact_id", file.name)
+                        put("screenshot_display_name", displayName)
                         put("capture_timestamp", captureAt)
                         foreground?.toString()?.let { put("foreground_package", it) }
                         put("image_width", shot.width)

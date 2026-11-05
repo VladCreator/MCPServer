@@ -23,7 +23,8 @@ internal sealed interface EvidenceSource {
 
 internal data class QaEvidence(
     val id: String, val name: String, val mime: String, val created: Long,
-    val origin: String, val source: EvidenceSource, val flowId: Long? = null
+    val origin: String, val source: EvidenceSource, val flowId: Long? = null,
+    val sourceName: String? = null
 )
 
 internal object QaEvidenceNames {
@@ -54,7 +55,7 @@ internal class EvidenceFiles(private val roots: List<File>) {
         files.filter { it.isFile && permitted(it) && mime(it.name) != null }.map { file ->
             QaEvidence(file.canonicalPath, QaEvidenceNames.stored(file.name, file.canonicalPath),
                 checkNotNull(mime(file.name)), file.lastModified(),
-                root.name, EvidenceSource.StoredFile(file))
+                root.name, EvidenceSource.StoredFile(file), sourceName = file.name)
         }
     }.distinctBy { it.id }
 
@@ -121,20 +122,22 @@ internal class QaEvidenceRepository(context: Context) {
             .filter { it.isFile && Regex("mcp_[0-9]+\\.jpg").matches(it.name) &&
                 it.canonicalFile.parentFile == context.filesDir.canonicalFile }
             .map { QaEvidence(it.canonicalPath, QaEvidenceNames.compact("p", it.name, "jpg"), "image/jpeg", it.lastModified(),
-                "Camera", EvidenceSource.StoredFile(it)) }
+                "Camera", EvidenceSource.StoredFile(it), sourceName = it.name) }
         val reports = store.localRuns().flatMap { run ->
             val id = checkNotNull(run.string("run_id"))
             listOf("markdown" to "md", "json" to "json", "junit" to "xml").map { (format, ext) ->
                 QaEvidence("run:$id:$format", QaEvidenceNames.compact("r", "$id:$format", ext),
                     if (format == "junit") "application/xml" else if (format == "json") "application/json" else "text/markdown",
                     run["created_at_ms"]?.jsonPrimitive?.longOrNull ?: 0L,
-                    "Run ${run.string("status")}", EvidenceSource.RunReport(run, format), runLinks[id])
+                    "Run ${run.string("status")}", EvidenceSource.RunReport(run, format), runLinks[id],
+                    sourceName = "$id.$ext")
             }
         }
         val artifacts = store.localArtifacts().mapNotNull { artifact ->
             val ext = EvidenceFiles.extension(artifact.mime) ?: return@mapNotNull null
             QaEvidence("artifact:${artifact.id}", QaEvidenceNames.compact("a", artifact.id, ext), artifact.mime,
-                artifact.created, "Run ${artifact.runId}", EvidenceSource.Artifact(artifact.runId, artifact.id), runLinks[artifact.runId])
+                artifact.created, "Run ${artifact.runId}", EvidenceSource.Artifact(artifact.runId, artifact.id), runLinks[artifact.runId],
+                sourceName = "${artifact.id}.$ext")
         }
         val linkedFiles = legacy.map { it.copy(flowId = fileLinks[it.id]) }
         return (linkedFiles + reports + artifacts).sortedByDescending { it.created }

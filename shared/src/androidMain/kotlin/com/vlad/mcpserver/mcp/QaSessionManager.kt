@@ -1,6 +1,7 @@
 package com.vlad.mcpserver.mcp
 
 import android.content.Context
+import com.vlad.mcpserver.QaEvidenceNames
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -157,7 +158,11 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             structuredContent = buildJsonObject {
                 put("step", step.number); put("status", normalized)
                 put("evidence_file", step.evidenceName)
-                step.screenshotName?.let { put("screenshot_file", it) }
+                step.screenshotName?.let {
+                    put("screenshot_file", it)
+                    put("screenshot_artifact_id", it)
+                    put("screenshot_display_name", screenshotDisplayName(it))
+                }
                 if (captureFailed) put("screenshot_error", captureError.take(300))
                 step.screenshotFailureReason?.let { put("screenshot_failure_reason", it) }
                 step.screenshotCapturedAt?.let { put("screenshot_captured_at", it) }
@@ -188,13 +193,13 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             return ToolResult("screenshot_artifact_id must be a QA evidence filename.", isError = true)
         }
         val evidenceDirectory = File(context.filesDir, "qa/evidence")
-        val photo = File(evidenceDirectory, artifact)
-        if (!photo.isFile) return ToolResult("Screenshot artifact not found: $artifact", isError = true)
+        val photo = resolveScreenshotArtifact(evidenceDirectory, artifact)
+            ?: return ToolResult("Screenshot artifact not found: $artifact", isError = true)
         val index = session.steps.indexOfFirst { it.number == stepId }
         if (index < 0) return ToolResult("Unknown step_id=$stepId for this session.", isError = true)
         val currentStep = session.steps[index]
         val updated = currentStep.copy(
-            screenshotName = artifact,
+            screenshotName = photo.name,
             screenshotRequested = true,
             screenshotError = null,
             screenshotFailureReason = null,
@@ -210,12 +215,14 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             writeQaStepEvidence(trace, text, null, null)
             session.steps[index] = updated
             ToolResult(
-                "Step $stepId updated with screenshot evidence: $artifact",
+                "Step $stepId updated with screenshot evidence: ${screenshotDisplayName(photo.name)} (artifact: ${photo.name})",
                 flowId = session.flowId,
                 evidencePaths = listOfNotNull(trace.absolutePath, photo.absolutePath),
                 structuredContent = buildJsonObject {
                     put("step", stepId)
-                    put("screenshot_file", artifact)
+                    put("screenshot_file", photo.name)
+                    put("screenshot_artifact_id", photo.name)
+                    put("screenshot_display_name", screenshotDisplayName(photo.name))
                     capturedAt?.let { put("screenshot_captured_at", it.take(64)) }
                     foregroundPackage?.let { put("screenshot_foreground_package", it.take(200)) }
                     possibleObstruction?.let { put("screenshot_possible_obstruction", it) }
@@ -318,7 +325,7 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                     if (step.actual.isNotBlank()) appendLine("- Actual: ${step.actual}")
                     if (step.notes.isNotBlank()) appendLine("- Notes: ${step.notes}")
                     appendLine("- Screenshot: ${when {
-                        step.screenshotName != null -> step.screenshotName
+                        step.screenshotName != null -> screenshotSummary(step.screenshotName)
                         step.screenshotError != null -> "not captured (${step.screenshotError})"
                         else -> "not requested"
                     }}")
@@ -375,7 +382,7 @@ internal fun qaSessionEvidenceText(
         if (step.actual.isNotBlank()) appendLine("   Actual: ${step.actual}")
         if (step.notes.isNotBlank()) appendLine("   Notes: ${step.notes}")
         appendLine("   Screenshot: ${when {
-            step.screenshotName != null -> step.screenshotName
+            step.screenshotName != null -> screenshotSummary(step.screenshotName)
             step.screenshotError != null -> "not captured (${step.screenshotError})"
             !step.screenshotRequested -> "not requested"
             else -> "requested, not captured"
@@ -386,6 +393,21 @@ internal fun qaSessionEvidenceText(
         step.screenshotPossibleObstruction?.let { appendLine("   Screenshot warning: possible_obstruction=$it") }
         appendLine()
     }
+}
+
+private fun screenshotSummary(fileName: String): String {
+    val display = screenshotDisplayName(fileName)
+    return if (display == fileName) fileName else "$display (artifact: $fileName)"
+}
+
+private fun screenshotDisplayName(fileName: String): String = QaEvidenceNames.stored(fileName)
+
+private fun resolveScreenshotArtifact(evidenceDirectory: File, requested: String): File? {
+    val direct = File(evidenceDirectory, requested)
+    if (direct.isFile) return direct
+    val listed = evidenceDirectory.listFiles() ?: return null
+    val matches = listed.filter { it.isFile && screenshotDisplayName(it.name) == requested }
+    return if (matches.size == 1) matches.single() else null
 }
 
 internal fun writeQaStepEvidence(trace: File, text: String, photo: File?, screenshot: ByteArray?) {

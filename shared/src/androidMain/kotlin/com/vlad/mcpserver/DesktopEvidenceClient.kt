@@ -86,14 +86,18 @@ internal class DesktopEvidenceClient(context: Context) {
         val archive = File.createTempFile("flow-$flowId-", ".zip", cache)
         try {
             var total = 0L
+            val transfers = planTransfers(entries)
             ZipOutputStream(archive.outputStream().buffered()).use { zip ->
                 val manifest = buildJsonObject {
                     put("flow_id", flowId)
                     put("files", buildJsonArray {
-                        entries.forEachIndexed { index, item ->
+                        transfers.forEach { transfer ->
+                            val item = transfer.item
                             add(buildJsonObject {
-                                put("file", "e${index + 1}.${item.name.substringAfterLast('.').lowercase()}")
-                                put("original_name", item.name)
+                                put("file", transfer.name)
+                                put("display_name", item.name)
+                                item.sourceName?.let { put("source_name", it) }
+                                put("evidence_id", item.id)
                                 put("created_at", item.created)
                                 put("origin", item.origin)
                                 put("mime", item.mime)
@@ -106,11 +110,11 @@ internal class DesktopEvidenceClient(context: Context) {
                 zip.putNextEntry(ZipEntry("manifest.json"))
                 zip.write(manifest)
                 zip.closeEntry()
-                entries.forEachIndexed { index, item ->
+                transfers.forEach { transfer ->
+                    val item = transfer.item
                     val staged = repository.stage(item)
                     try {
-                        val extension = item.name.substringAfterLast('.').lowercase()
-                        zip.putNextEntry(ZipEntry("e${index + 1}.$extension"))
+                        zip.putNextEntry(ZipEntry(transfer.name))
                         staged.inputStream().use { input ->
                             val buffer = ByteArray(64 * 1024)
                             while (true) {
@@ -131,6 +135,43 @@ internal class DesktopEvidenceClient(context: Context) {
             return request(pair, "/evidence", archive, flowId)
         } finally {
             check(archive.delete()) { "Cannot remove temporary flow archive." }
+        }
+    }
+
+    private data class PlannedTransfer(val item: QaEvidence, val name: String)
+
+    private fun planTransfers(entries: List<QaEvidence>): List<PlannedTransfer> {
+        val used = linkedSetOf<String>()
+        return entries.mapIndexed { index, item ->
+            val extension = item.name.substringAfterLast('.').lowercase().ifBlank { "bin" }
+            val preferred = sanitizeTransferName(item.name)
+            val baseFallback = "e${index + 1}"
+            val preferredOrFallback = preferred ?: "$baseFallback.$extension"
+            var selected = preferredOrFallback
+            var suffix = 1
+            while (selected in used) {
+                selected = "$baseFallback-$suffix.$extension"
+                suffix++
+            }
+            used += selected
+            PlannedTransfer(item, selected)
+        }
+    }
+
+    private fun sanitizeTransferName(name: String): String? {
+        if (!name.contains('.')) return null
+        val base = name.substringBeforeLast('.')
+            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+            .trim('_')
+            .take(70)
+            .ifBlank { return null }
+        val extension = name.substringAfterLast('.').lowercase()
+            .replace(Regex("[^a-z0-9]"), "")
+            .take(8)
+            .ifBlank { return null }
+        val candidate = "$base.$extension"
+        return candidate.takeIf {
+            it.matches(Regex("[A-Za-z0-9_-]{1,80}\\.[a-z0-9]{1,8}"))
         }
     }
 
