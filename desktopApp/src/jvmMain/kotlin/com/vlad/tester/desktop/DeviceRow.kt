@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.LinkOff
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Refresh
@@ -35,7 +36,7 @@ internal fun DeviceRow(
     device: Device, selected: Boolean, selectionEnabled: Boolean, actionsEnabled: Boolean,
     hasBuild: Boolean, bridge: BridgeState, onSelect: (Boolean) -> Unit,
     onRun: () -> Unit, onBridge: () -> Unit, onInstall: () -> Unit, onBoot: () -> Unit,
-    onShutdown: () -> Unit, onRotate: () -> Unit
+    onShutdown: () -> Unit, onRotate: () -> Unit, onScreenshot: () -> Unit
 ) {
     val compactButtonSize = 32.dp
     val controlSlotSize = 32.dp
@@ -90,6 +91,9 @@ internal fun DeviceRow(
                         (device.platform == Platform.IOS_SIMULATOR && device.state == "Booted")) {
                         DeviceActionIcon(Icons.Rounded.Refresh, "Rotate ${device.name}",
                             enabled = actionsEnabled, onClick = onRotate,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                        DeviceActionIcon(Icons.Rounded.Image, "Take screenshot on ${device.name}",
+                            enabled = actionsEnabled, onClick = onScreenshot,
                             buttonSize = compactButtonSize, iconSize = compactIconSize)
                     }
                     if (selected && hasBuild) {

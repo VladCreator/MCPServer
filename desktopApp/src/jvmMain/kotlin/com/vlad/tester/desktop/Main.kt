@@ -436,6 +436,20 @@ private fun DesktopDashboard(
                                                         fail("Screen rotate failed: ${failure.message}")
                                                     } finally { setBusy(false); refresh() }
                                                 }
+                                            },
+                                            onScreenshot = {
+                                                setBusy(true)
+                                                scope.launch {
+                                                    record(ActivityKind.SCREENSHOT, "Capturing screenshot on ${device.name}")
+                                                    try {
+                                                        val saved = withContext(Dispatchers.IO) { manager.screenshot(device) }
+                                                        record(ActivityKind.SCREENSHOT, "Saved screenshot from ${device.name}: ${saved.path}")
+                                                    } catch (failure: DesktopFailure) {
+                                                        fail(failure.message ?: "Screenshot capture failed.")
+                                                    } catch (failure: IOException) {
+                                                        fail("Screenshot capture failed: ${failure.message}")
+                                                    } finally { setBusy(false); refresh() }
+                                                }
                                             })
                                         HorizontalDivider()
                                     }

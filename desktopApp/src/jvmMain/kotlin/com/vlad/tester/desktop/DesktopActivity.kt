@@ -3,6 +3,7 @@ package com.vlad.tester.desktop
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Link
@@ -20,6 +21,7 @@ internal enum class ActivityKind(val label: String, val icon: ImageVector) {
     BRIDGE_CONNECT("Bridge connected", Icons.Rounded.Link),
     BRIDGE_DISCONNECT("Bridge disconnected", Icons.Rounded.LinkOff),
     ROTATE("Screen rotate", Icons.Rounded.Refresh),
+    SCREENSHOT("Screenshot", Icons.Rounded.Image),
     BOOT("Simulator startup", Icons.Rounded.PowerSettingsNew),
     SHUTDOWN("Simulator shutdown", Icons.Rounded.PowerSettingsNew),
     EVIDENCE("QA Evidence receiver", Icons.Rounded.Description),

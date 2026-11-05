@@ -6,6 +6,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.io.IOException
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 enum class Platform(val label: String) {
@@ -270,6 +272,36 @@ class DeviceManager(
             }
             Platform.IOS_DEVICE -> throw DesktopFailure("Physical iOS rotation is not supported in this release.")
         }
+    }
+
+    fun screenshot(device: Device): File {
+        val directory = File(System.getProperty("user.home"), "Pictures/TesterDesktop").apply {
+            if (!isDirectory && !mkdirs()) throw DesktopFailure("Cannot create screenshot folder: $path")
+        }
+        val stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now())
+        val safeName = device.name.replace(Regex("[^A-Za-z0-9._-]+"), "-").trim('-')
+            .ifBlank { "device" }
+        val target = File(directory, "tester-$safeName-$stamp.png")
+        when (device.platform) {
+            Platform.ANDROID -> {
+                if (!device.canInstall) throw DesktopFailure("Screenshot requires an authorized Android device.")
+                val tool = requireAdb()
+                val remote = "/sdcard/Download/tester-desktop-screenshot.png"
+                runner.run(listOf(tool, "-s", device.id, "shell", "screencap", "-p", remote), 20)
+                try {
+                    runner.run(listOf(tool, "-s", device.id, "pull", remote, target.canonicalPath), 30)
+                } finally {
+                    runCatching { runner.run(listOf(tool, "-s", device.id, "shell", "rm", "-f", remote), 10) }
+                }
+            }
+            Platform.IOS_SIMULATOR -> {
+                if (device.state != "Booted") throw DesktopFailure("Screenshot requires a booted iOS simulator.")
+                runner.run(listOf(xcrun, "simctl", "io", device.id, "screenshot", target.canonicalPath), 30)
+            }
+            Platform.IOS_DEVICE -> throw DesktopFailure("Physical iOS screenshot capture is not supported in this release.")
+        }
+        if (!target.isFile || target.length() == 0L) throw DesktopFailure("Screenshot command returned, but no file was produced.")
+        return target
     }
 
     fun inspect(file: File, platform: Platform): BuildIdentity {
