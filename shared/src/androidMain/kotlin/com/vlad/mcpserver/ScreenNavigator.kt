@@ -65,6 +65,18 @@ data class Screenshot(
  */
 object ScreenNavigator {
 
+    enum class ScreenshotFailureReason {
+        ACCESSIBILITY_UNAVAILABLE,
+        SECURE_WINDOW,
+        CAPTURE_TIMEOUT,
+        CAPTURE_FAILED
+    }
+
+    class ScreenshotFailureException(
+        val reason: ScreenshotFailureReason,
+        message: String
+    ) : IllegalStateException(message)
+
     @Volatile
     private var lastNodes: List<AccessibilityNodeInfo> = emptyList()
 
@@ -463,7 +475,8 @@ object ScreenNavigator {
                     }
 
                     override fun onFailure(errorCode: Int) {
-                        cont.resume(Result.failure(IllegalStateException(screenshotError(errorCode))))
+                        val (reason, message) = screenshotError(errorCode)
+                        cont.resume(Result.failure(ScreenshotFailureException(reason, message)))
                     }
                 }
             if (windowId != null) service.takeScreenshotOfWindow(windowId, service.mainExecutor, callback)
@@ -493,15 +506,19 @@ object ScreenNavigator {
         return Result.success(result)
     }
 
-    private fun screenshotError(code: Int): String = when (code) {
+    private fun screenshotError(code: Int): Pair<ScreenshotFailureReason, String> = when (code) {
         AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW ->
-            "The current screen is protected (FLAG_SECURE) and cannot be captured."
+            ScreenshotFailureReason.SECURE_WINDOW to
+                "The current screen is protected (FLAG_SECURE) and cannot be captured."
         AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT ->
-            "Screenshots were requested too quickly; wait a moment and retry."
+            ScreenshotFailureReason.CAPTURE_TIMEOUT to
+                "Screenshots were requested too quickly; wait a moment and retry."
         AccessibilityService.ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS ->
-            "The accessibility service is not allowed to take screenshots. Re-enable 'MCP Touch Service'."
-        AccessibilityService.ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY -> "Invalid display."
-        else -> "Internal error ($code)."
+            ScreenshotFailureReason.ACCESSIBILITY_UNAVAILABLE to
+                "The accessibility service is not allowed to take screenshots. Re-enable 'MCP Touch Service'."
+        AccessibilityService.ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY ->
+            ScreenshotFailureReason.CAPTURE_FAILED to "Invalid display."
+        else -> ScreenshotFailureReason.CAPTURE_FAILED to "Internal error ($code)."
     }
 
     internal fun isMeaningful(node: AccessibilityNodeInfo): Boolean =

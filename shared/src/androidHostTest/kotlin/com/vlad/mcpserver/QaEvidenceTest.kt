@@ -185,7 +185,10 @@ class QaEvidenceTest {
             fun step(number: Int, title: String, screenshot: String? = null, error: String? = null) =
                 QaSessionManager.Step(number, title, "Expected $number", "Actual $number", "pass",
                     "Note $number", "2026-11-01T12:00:00Z", trace.name, screenshot,
-                    screenshot != null || error != null, error)
+                    screenshot != null || error != null, error,
+                    if (error != null) "capture_failed" else null,
+                    if (screenshot != null) "2026-11-01T12:00:00-07:00" else null,
+                    "com.example.app", false, null)
             val first = step(1, "Open Project")
             writeQaStepEvidence(trace, qaSessionEvidenceText("Drawings", 1, "start", listOf(first)), null, null)
             val second = step(2, "Tap Drawings", photo.name)

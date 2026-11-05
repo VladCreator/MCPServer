@@ -382,13 +382,14 @@ object McpTools {
         name = "qa_session",
         description = "QA test session: begin, record steps in one numbered evidence file per Android session, check status or end and write a JSON/Markdown report. " +
             "Use step for every action/assertion. On Android, set capture_screenshot=true to save the current screen in QA Evidence; " +
-            "each requested image requires explicit approval and secure/unavailable screens are reported as capture failures. " +
+            "each requested image requires explicit approval and secure/unavailable screens are reported as typed capture failures. " +
+            "Use action=attach_evidence to link a separately captured screenshot artifact back to a recorded step. " +
             "On Android, each agent has its own active session; flow_id links dashboard Activity and saved evidence.",
         required = listOf("action"),
         inputSchema = schema(listOf("action")) {
             putJsonObject("action") {
                 put("type", "string")
-                putJsonArray("enum") { add("begin"); add("step"); add("status"); add("end") }
+                putJsonArray("enum") { add("begin"); add("step"); add("attach_evidence"); add("status"); add("end") }
             }
             putJsonObject("test_case") { put("type", "string"); put("description", "Test case name/ID for begin") }
             putJsonObject("title") { put("type", "string"); put("description", "Step title") }
@@ -401,6 +402,11 @@ object McpTools {
                 put("type", "boolean")
                 put("description", "Default false. For action=step, explicitly request an approved current-screen JPEG saved with that step to QA Evidence.")
             }
+            putJsonObject("step_id") { put("type", "integer"); put("description", "For action=attach_evidence: the existing step number to update.") }
+            putJsonObject("screenshot_artifact_id") { put("type", "string"); put("description", "For action=attach_evidence: QA evidence filename to link to the step.") }
+            putJsonObject("capture_timestamp") { put("type", "string"); put("description", "Optional ISO-8601 capture timestamp when attaching external evidence.") }
+            putJsonObject("foreground_package") { put("type", "string"); put("description", "Optional foreground package observed at capture time.") }
+            putJsonObject("possible_obstruction") { put("type", "boolean"); put("description", "Optional warning flag indicating possible overlay/obstruction at capture time.") }
             putJsonObject("state_key") { put("type", "string"); put("description", "Recovery key for end cleanup if device_state changed fields; never recorded in reports.") }
         },
         requirement = "App sandbox for reports"

@@ -32,7 +32,12 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
         val evidenceName: String,
         val screenshotName: String?,
         val screenshotRequested: Boolean,
-        val screenshotError: String?
+        val screenshotError: String?,
+        val screenshotFailureReason: String?,
+        val screenshotCapturedAt: String?,
+        val screenshotForegroundPackage: String?,
+        val screenshotPossibleObstruction: Boolean?,
+        val screenshotDenialSignal: Boolean?
     )
 
     private data class Session(
@@ -86,7 +91,12 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
         notes: String,
         screenshot: ByteArray? = null,
         screenshotError: String? = null,
-        screenshotRequested: Boolean = screenshot != null || screenshotError != null
+        screenshotRequested: Boolean = screenshot != null || screenshotError != null,
+        screenshotFailureReason: String? = null,
+        screenshotCapturedAt: String? = null,
+        screenshotForegroundPackage: String? = null,
+        screenshotPossibleObstruction: Boolean? = null,
+        screenshotDenialSignal: Boolean? = null
     ): ToolResult {
         val session = current ?: return ToolResult(
             "No active QA session. Call qa_session with action=begin first.",
@@ -116,7 +126,12 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
             screenshotName = screenshot?.let { screenshotName },
             screenshotRequested = screenshotRequested,
             screenshotError = (screenshotError
-                ?: if (screenshotRequested && screenshot == null) "Requested screenshot was not captured." else null)?.take(300)
+                ?: if (screenshotRequested && screenshot == null) "Requested screenshot was not captured." else null)?.take(300),
+            screenshotFailureReason = screenshotFailureReason?.take(64),
+            screenshotCapturedAt = screenshotCapturedAt?.take(64),
+            screenshotForegroundPackage = screenshotForegroundPackage?.take(200),
+            screenshotPossibleObstruction = screenshotPossibleObstruction,
+            screenshotDenialSignal = screenshotDenialSignal
         )
         val trace = File(evidenceDirectory, step.evidenceName)
         val photo = step.screenshotName?.let { File(evidenceDirectory, it) }
@@ -144,11 +159,73 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                 put("evidence_file", step.evidenceName)
                 step.screenshotName?.let { put("screenshot_file", it) }
                 if (captureFailed) put("screenshot_error", captureError.take(300))
+                step.screenshotFailureReason?.let { put("screenshot_failure_reason", it) }
+                step.screenshotCapturedAt?.let { put("screenshot_captured_at", it) }
+                step.screenshotForegroundPackage?.let { put("screenshot_foreground_package", it) }
+                step.screenshotPossibleObstruction?.let { put("screenshot_possible_obstruction", it) }
+                step.screenshotDenialSignal?.let { put("screenshot_denial_signal", it) }
                 put("screenshot_requested", screenshotRequested)
                 putJsonArray("evidence_files") { paths.forEach { add(it.substringAfterLast('/')) } }
                 put("flow_id", session.flowId)
             }
         )
+    }
+
+    @Synchronized fun attachEvidence(
+        stepId: Int,
+        screenshotArtifactId: String,
+        capturedAt: String?,
+        foregroundPackage: String?,
+        possibleObstruction: Boolean?
+    ): ToolResult {
+        val session = current ?: return ToolResult(
+            "No active QA session. Call qa_session with action=begin first.",
+            isError = true
+        )
+        if (stepId <= 0) return ToolResult("step_id must be a positive integer.", isError = true)
+        val artifact = screenshotArtifactId.trim()
+        if (artifact.isBlank() || artifact.contains('/') || artifact.contains('\\')) {
+            return ToolResult("screenshot_artifact_id must be a QA evidence filename.", isError = true)
+        }
+        val evidenceDirectory = File(context.filesDir, "qa/evidence")
+        val photo = File(evidenceDirectory, artifact)
+        if (!photo.isFile) return ToolResult("Screenshot artifact not found: $artifact", isError = true)
+        val index = session.steps.indexOfFirst { it.number == stepId }
+        if (index < 0) return ToolResult("Unknown step_id=$stepId for this session.", isError = true)
+        val currentStep = session.steps[index]
+        val updated = currentStep.copy(
+            screenshotName = artifact,
+            screenshotRequested = true,
+            screenshotError = null,
+            screenshotFailureReason = null,
+            screenshotCapturedAt = capturedAt?.take(64),
+            screenshotForegroundPackage = foregroundPackage?.take(200),
+            screenshotPossibleObstruction = possibleObstruction,
+            screenshotDenialSignal = null
+        )
+        val updatedSteps = session.steps.toMutableList().also { it[index] = updated }
+        val trace = File(evidenceDirectory, updated.evidenceName)
+        return try {
+            val text = qaSessionEvidenceText(session.testCase, session.flowId, session.startedAt, updatedSteps)
+            writeQaStepEvidence(trace, text, null, null)
+            session.steps[index] = updated
+            ToolResult(
+                "Step $stepId updated with screenshot evidence: $artifact",
+                flowId = session.flowId,
+                evidencePaths = listOfNotNull(trace.absolutePath, photo.absolutePath),
+                structuredContent = buildJsonObject {
+                    put("step", stepId)
+                    put("screenshot_file", artifact)
+                    capturedAt?.let { put("screenshot_captured_at", it.take(64)) }
+                    foregroundPackage?.let { put("screenshot_foreground_package", it.take(200)) }
+                    possibleObstruction?.let { put("screenshot_possible_obstruction", it) }
+                    put("flow_id", session.flowId)
+                }
+            )
+        } catch (error: Exception) {
+            ToolResult("Unable to update QA step evidence: ${error.message}", isError = true,
+                structuredContent = buildJsonObject { put("reason", "evidence_storage_failed") })
+        }
     }
 
     @Synchronized fun status(): ToolResult {
@@ -205,6 +282,11 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                         step.screenshotName?.let { put("screenshot_file", it) }
                         put("screenshot_requested", step.screenshotRequested)
                         step.screenshotError?.let { put("screenshot_error", it) }
+                        step.screenshotFailureReason?.let { put("screenshot_failure_reason", it) }
+                        step.screenshotCapturedAt?.let { put("screenshot_captured_at", it) }
+                        step.screenshotForegroundPackage?.let { put("screenshot_foreground_package", it) }
+                        step.screenshotPossibleObstruction?.let { put("screenshot_possible_obstruction", it) }
+                        step.screenshotDenialSignal?.let { put("screenshot_denial_signal", it) }
                     })
                 }
             }
@@ -240,6 +322,10 @@ class QaSessionManager(private val context: Context, private val clientId: Strin
                         step.screenshotError != null -> "not captured (${step.screenshotError})"
                         else -> "not requested"
                     }}")
+                    step.screenshotFailureReason?.let { appendLine("- Screenshot reason: $it") }
+                    step.screenshotCapturedAt?.let { appendLine("- Screenshot captured at: $it") }
+                    step.screenshotForegroundPackage?.let { appendLine("- Screenshot foreground package: $it") }
+                    step.screenshotPossibleObstruction?.let { appendLine("- Screenshot warning: possible_obstruction=$it") }
                     appendLine("- Evidence: ${listOfNotNull(step.evidenceName, step.screenshotName).joinToString(", ")}")
                     appendLine()
                 }
@@ -294,6 +380,10 @@ internal fun qaSessionEvidenceText(
             !step.screenshotRequested -> "not requested"
             else -> "requested, not captured"
         }}")
+        step.screenshotFailureReason?.let { appendLine("   Screenshot reason: $it") }
+        step.screenshotCapturedAt?.let { appendLine("   Screenshot captured at: $it") }
+        step.screenshotForegroundPackage?.let { appendLine("   Screenshot foreground package: $it") }
+        step.screenshotPossibleObstruction?.let { appendLine("   Screenshot warning: possible_obstruction=$it") }
         appendLine()
     }
 }

@@ -105,6 +105,12 @@ and text/data documents have distinct treatments.
   If the accessibility screenshot service is unavailable or capture is blocked,
   the step trace and tool result report that failure rather than substituting a
   camera image.
+- If a screenshot was captured separately (for example using `take_screenshot`),
+  `qa_session action=attach_evidence` can link that artifact back to a specific
+  step by `step_id` and `screenshot_artifact_id`. Attached/step screenshots record
+  capture metadata when available (capture timestamp, foreground package and
+  optional `possible_obstruction` warning) so QA can assess relevance without
+  mutating test state.
 - JPEGs explicitly requested using `take_screenshot` are now also saved in
   `files/qa/evidence`, not just returned inline to the agent. They are linked to
   the active session's flow and support filename previews, sharing and downloads.

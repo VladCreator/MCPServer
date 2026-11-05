@@ -64,6 +64,17 @@ class AndroidToolExecutor(
         { _, _, _ -> true }
 ) : ToolExecutor {
 
+    private data class QaScreenshotOutcome(
+        val screenshot: Screenshot? = null,
+        val errorMessage: String? = null,
+        val reason: String? = null,
+        val capturedAt: String? = null,
+        val foregroundPackage: String? = null,
+        val possibleObstruction: Boolean? = null,
+        val denialSignal: Boolean? = null,
+        val fallbackAttempted: Boolean = false
+    )
+
     private val audio = AndroidAudioController(context)
     private val deviceState = AndroidDeviceStateController.get(context)
     private val qaSessions = java.util.concurrent.ConcurrentHashMap<String, QaSessionManager>()
@@ -183,7 +194,14 @@ class AndroidToolExecutor(
                 arguments.bool("capture_screenshot")
             if ((McpTools.isSensitive(toolName) || capturesQaStep) &&
                 !consent(clientId, toolName, approvalArguments)) {
-                if (capturesQaStep) return@withContext qaSession(clientId, arguments, screenshotDenied = true)
+                if (capturesQaStep) {
+                    return@withContext qaSession(clientId, arguments,
+                        screenshotOutcome = QaScreenshotOutcome(
+                            errorMessage = "Screenshot approval was denied.",
+                            reason = "approval_denied",
+                            denialSignal = true
+                        ))
+                }
                 return@withContext ToolResult("User rejected the tool call.", isError = true,
                     structuredContent = buildJsonObject { put("reason", "consent_denied"); put("retryable", false) })
             }
@@ -1007,6 +1025,7 @@ class AndroidToolExecutor(
             ).passed
         }
         val foreground = service.rootInActiveWindow?.packageName
+        val captureAt = java.time.OffsetDateTime.now().toString()
         return captureScreenshot(service, maxDimension).fold(
             onSuccess = { shot ->
                 val file = File(context.filesDir, "qa/evidence/screenshot-${UUID.randomUUID()}.jpg")
@@ -1029,10 +1048,30 @@ class AndroidToolExecutor(
                     imageBase64 = java.util.Base64.getEncoder().encodeToString(shot.jpegBytes),
                     imageMimeType = "image/jpeg",
                     evidencePaths = listOf(file.absolutePath),
-                    structuredContent = buildJsonObject { put("screenshot_file", file.name) }
+                    structuredContent = buildJsonObject {
+                        put("screenshot_file", file.name)
+                        put("capture_timestamp", captureAt)
+                        foreground?.toString()?.let { put("foreground_package", it) }
+                        put("image_width", shot.width)
+                        put("image_height", shot.height)
+                        put("screen_width", shot.screenWidth)
+                        put("screen_height", shot.screenHeight)
+                        put("window_left", shot.originX)
+                        put("window_top", shot.originY)
+                        put("possible_obstruction", foreground?.toString() == context.packageName)
+                        put("window_id", service.rootInActiveWindow?.windowId ?: -1)
+                    }
                 )
             },
-            onFailure = { ToolResult("Screenshot failed: ${it.message}", isError = true) }
+            onFailure = {
+                val reason = screenshotFailureReason(it)
+                ToolResult("Screenshot failed: ${it.message}", isError = true,
+                    structuredContent = buildJsonObject {
+                        put("reason", reason)
+                        put("capture_timestamp", captureAt)
+                        foreground?.toString()?.let { put("foreground_package", it) }
+                    })
+            }
         )
     }
 
@@ -1212,7 +1251,7 @@ class AndroidToolExecutor(
     private suspend fun qaSession(
         clientId: String,
         arguments: JsonObject,
-        screenshotDenied: Boolean = false
+        screenshotOutcome: QaScreenshotOutcome? = null
     ): ToolResult {
         val qa = qaSessions.getOrPut(clientId) { QaSessionManager(context, clientId) }
         val action = arguments.string("action")?.lowercase()
@@ -1230,25 +1269,39 @@ class AndroidToolExecutor(
                 val status = arguments.string("status").orEmpty()
                 val validStep = qa.activeFlowId() != null && title.isNotBlank() &&
                     status.lowercase().ifBlank { "info" } in setOf("pass", "fail", "blocked", "info")
-                val capture = if (arguments.bool("capture_screenshot") && validStep && !screenshotDenied) {
-                    val service = touchService()
-                    val root = service?.rootInActiveWindow
-                    when {
-                        service == null -> Result.failure(IllegalStateException("Accessibility screenshot service is unavailable."))
-                        root == null -> Result.failure(IllegalStateException("No active window is available."))
-                        else -> captureScreenshot(service, DEFAULT_SCREENSHOT_DIMENSION, root.windowId)
-                    }
-                } else null
+                val requestedCapture = arguments.bool("capture_screenshot") || screenshotOutcome != null
+                val capture = when {
+                    !requestedCapture || !validStep -> null
+                    screenshotOutcome != null -> screenshotOutcome
+                    else -> captureQaStepScreenshot()
+                }
                 qa.step(
                     title = title,
                     expected = arguments.string("expected").orEmpty(),
                     actual = arguments.string("actual").orEmpty(),
                     status = status,
                     notes = arguments.string("notes").orEmpty(),
-                    screenshot = capture?.getOrNull()?.jpegBytes,
-                    screenshotError = if (screenshotDenied) "User denied screenshot approval."
-                        else capture?.exceptionOrNull()?.message,
-                    screenshotRequested = arguments.bool("capture_screenshot") || screenshotDenied
+                    screenshot = capture?.screenshot?.jpegBytes,
+                    screenshotError = capture?.errorMessage,
+                    screenshotRequested = requestedCapture,
+                    screenshotFailureReason = capture?.reason,
+                    screenshotCapturedAt = capture?.capturedAt,
+                    screenshotForegroundPackage = capture?.foregroundPackage,
+                    screenshotPossibleObstruction = capture?.possibleObstruction,
+                    screenshotDenialSignal = capture?.denialSignal
+                )
+            }
+            "attach_evidence" -> {
+                val stepId = arguments.int("step_id")
+                    ?: return ToolResult("Missing required argument: step_id", isError = true)
+                val artifact = arguments.string("screenshot_artifact_id")
+                    ?: return ToolResult("Missing required argument: screenshot_artifact_id", isError = true)
+                qa.attachEvidence(
+                    stepId = stepId,
+                    screenshotArtifactId = artifact,
+                    capturedAt = arguments.string("capture_timestamp"),
+                    foregroundPackage = arguments.string("foreground_package"),
+                    possibleObstruction = arguments.optionalBool("possible_obstruction")
                 )
             }
             "status" -> qa.status()
@@ -1270,7 +1323,71 @@ class AndroidToolExecutor(
                     flowId = report.flowId
                 )
             }
-            else -> ToolResult("action must be begin, step, status or end.", isError = true)
+            else -> ToolResult("action must be begin, step, attach_evidence, status or end.", isError = true)
+        }
+    }
+
+    private suspend fun captureQaStepScreenshot(): QaScreenshotOutcome {
+        val service = touchService() ?: return QaScreenshotOutcome(
+            errorMessage = "Accessibility screenshot service is unavailable.",
+            reason = "accessibility_unavailable"
+        )
+        val root = service.rootInActiveWindow ?: return QaScreenshotOutcome(
+            errorMessage = "No active window is available.",
+            reason = "accessibility_unavailable"
+        )
+        val beforeForeground = root.packageName?.toString()
+        val windowId = root.windowId
+        val first = captureScreenshot(service, DEFAULT_SCREENSHOT_DIMENSION, windowId)
+        if (first.isSuccess) {
+            return screenshotSuccess(first.getOrThrow(), beforeForeground)
+        }
+        val firstError = first.exceptionOrNull()
+        val firstReason = screenshotFailureReason(firstError)
+        val stillForeground = service.rootInActiveWindow?.packageName?.toString() == beforeForeground
+        val retryable = firstReason !in setOf("secure_window", "accessibility_unavailable", "approval_denied")
+        if (stillForeground && retryable) {
+            val retry = captureScreenshot(service, DEFAULT_SCREENSHOT_DIMENSION, windowId)
+            if (retry.isSuccess) return screenshotSuccess(retry.getOrThrow(), beforeForeground, fallback = true)
+            return screenshotFailure(retry.exceptionOrNull(), beforeForeground, fallback = true)
+        }
+        return screenshotFailure(firstError, beforeForeground, fallback = false)
+    }
+
+    private fun screenshotSuccess(
+        screenshot: Screenshot,
+        foregroundPackage: String?,
+        fallback: Boolean = false
+    ): QaScreenshotOutcome = QaScreenshotOutcome(
+        screenshot = screenshot,
+        reason = null,
+        capturedAt = java.time.OffsetDateTime.now().toString(),
+        foregroundPackage = foregroundPackage,
+        possibleObstruction = foregroundPackage == context.packageName,
+        fallbackAttempted = fallback
+    )
+
+    private fun screenshotFailure(
+        error: Throwable?,
+        foregroundPackage: String?,
+        fallback: Boolean
+    ): QaScreenshotOutcome = QaScreenshotOutcome(
+        errorMessage = error?.message ?: "Requested screenshot was not captured.",
+        reason = screenshotFailureReason(error),
+        capturedAt = java.time.OffsetDateTime.now().toString(),
+        foregroundPackage = foregroundPackage,
+        possibleObstruction = foregroundPackage == context.packageName,
+        fallbackAttempted = fallback
+    )
+
+    private fun screenshotFailureReason(error: Throwable?): String {
+        val typed = error as? ScreenNavigator.ScreenshotFailureException
+        return when (typed?.reason) {
+            ScreenNavigator.ScreenshotFailureReason.SECURE_WINDOW -> "secure_window"
+            ScreenNavigator.ScreenshotFailureReason.ACCESSIBILITY_UNAVAILABLE -> "accessibility_unavailable"
+            ScreenNavigator.ScreenshotFailureReason.CAPTURE_TIMEOUT -> "capture_timeout"
+            ScreenNavigator.ScreenshotFailureReason.CAPTURE_FAILED -> "capture_failed"
+            null -> "capture_failed"
         }
     }
 
