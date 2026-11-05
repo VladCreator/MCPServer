@@ -245,6 +245,13 @@ class DeviceManager(
         runner.run(listOf(xcrun, "simctl", "bootstatus", device.id, "-b"), 120)
     }
 
+    fun shutdown(device: Device) {
+        if (device.platform != Platform.IOS_SIMULATOR || device.state != "Booted") {
+            throw DesktopFailure("Only a booted iOS simulator can be shut down.")
+        }
+        runner.run(listOf(xcrun, "simctl", "shutdown", device.id), 30)
+    }
+
     fun inspect(file: File, platform: Platform): BuildIdentity {
         return when (platform) {
             Platform.ANDROID -> {

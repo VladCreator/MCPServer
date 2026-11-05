@@ -31,7 +31,7 @@ internal fun DesktopStatusBar(adbPath: String?) {
                         else MaterialTheme.colorScheme.error)
             }
         }
-        Text("0.4.1", style = MaterialTheme.typography.bodySmall,
+        Text("0.4.2", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

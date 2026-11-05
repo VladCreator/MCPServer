@@ -19,6 +19,7 @@ internal enum class ActivityKind(val label: String, val icon: ImageVector) {
     BRIDGE_CONNECT("Bridge connected", Icons.Rounded.Link),
     BRIDGE_DISCONNECT("Bridge disconnected", Icons.Rounded.LinkOff),
     BOOT("Simulator startup", Icons.Rounded.PowerSettingsNew),
+    SHUTDOWN("Simulator shutdown", Icons.Rounded.PowerSettingsNew),
     EVIDENCE("QA Evidence receiver", Icons.Rounded.Description),
     PAIRING("Pairing", Icons.Rounded.Key),
     ERROR("Error", Icons.Rounded.WarningAmber),

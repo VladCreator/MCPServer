@@ -1,6 +1,7 @@
 package com.vlad.tester.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Refresh
@@ -47,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -243,6 +245,12 @@ private fun DesktopDashboard(
             } finally { setBusy(false) }
         }
     }
+    fun onBuildDropped(file: File) {
+        val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
+        apk = if (platform == Platform.ANDROID) file else null
+        app = if (platform == Platform.IOS_SIMULATOR) file else null
+        selected = discovery.devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
+    }
     suspend fun refresh() {
         scanning = true
         try {
@@ -268,10 +276,22 @@ private fun DesktopDashboard(
         }, modifier = Modifier.weight(1f).fillMaxWidth()) { activityActive, evidenceActive, toggleActivity, toggleEvidence ->
             Column(Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     DeviceActionIcon(Icons.Rounded.History, "Toggle Activity",
                         enabled = true, onClick = toggleActivity, selected = activityActive)
-                    Spacer(Modifier.weight(1f))
+                    BuildDropZone(
+                        !busy && pending.isEmpty() && selected.isEmpty(),
+                        ::onBuildDropped,
+                        ::fail,
+                        java.awt.Color.WHITE,
+                        java.awt.Color(0x1F, 0x29, 0x37),
+                        java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
+                        Modifier.weight(1f).height(44.dp)
+                    )
                     DeviceActionIcon(Icons.Rounded.Description, "Toggle QA Evidence",
                         enabled = true, onClick = toggleEvidence, selected = evidenceActive)
                 }
@@ -288,18 +308,9 @@ private fun DesktopDashboard(
                         TextButton(onClick = { error = null }) { Text("Dismiss") }
                     }
                 }
-                Card(Modifier.fillMaxWidth()) {
+                Card(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Installation files", style = MaterialTheme.typography.titleLarge)
-                        BuildDropZone(!busy && pending.isEmpty() && selected.isEmpty(), { file ->
-                            val platform = if (file.extension.equals("apk", true)) Platform.ANDROID else Platform.IOS_SIMULATOR
-                            apk = if (platform == Platform.ANDROID) file else null
-                            app = if (platform == Platform.IOS_SIMULATOR) file else null
-                            selected = devices.filter { it.platform == platform && it.canInstall }.map { it.key }.toSet()
-                        }, ::fail, java.awt.Color(MaterialTheme.colorScheme.surfaceVariant.toArgb(), true),
-                            java.awt.Color(MaterialTheme.colorScheme.onSurfaceVariant.toArgb(), true),
-                            java.awt.Color(MaterialTheme.colorScheme.outline.toArgb(), true),
-                            Modifier.fillMaxWidth().height(60.dp))
                         BuildSelection(apk ?: app, !busy && pending.isEmpty()) { apk = null; app = null; selected = emptySet() }
                         if (selected.isNotEmpty()) Text("Uncheck all devices to drop a different file.",
                             style = MaterialTheme.typography.bodySmall)
@@ -307,8 +318,11 @@ private fun DesktopDashboard(
                     }
                 }
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                    Card(Modifier.fillMaxWidth().heightIn(max = maxHeight)
-                        .semantics { contentDescription = "Devices container" }) {
+                    Card(
+                        Modifier.fillMaxWidth().heightIn(max = maxHeight)
+                            .semantics { contentDescription = "Devices container" },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
                         Column(Modifier.padding(16.dp)) {
                             Row {
                                 Text("Devices", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -392,6 +406,20 @@ private fun DesktopDashboard(
                                                         fail(failure.message ?: "Simulator boot failed.")
                                                     } catch (failure: IOException) {
                                                         fail("Simulator boot failed: ${failure.message}")
+                                                    } finally { setBusy(false); refresh() }
+                                                }
+                                            },
+                                            onShutdown = {
+                                                setBusy(true)
+                                                scope.launch {
+                                                    record(ActivityKind.SHUTDOWN, "Shutting down ${device.name}")
+                                                    try {
+                                                        withContext(Dispatchers.IO) { manager.shutdown(device) }
+                                                        record(ActivityKind.SHUTDOWN, "Shutdown requested for ${device.name}")
+                                                    } catch (failure: DesktopFailure) {
+                                                        fail(failure.message ?: "Simulator shutdown failed.")
+                                                    } catch (failure: IOException) {
+                                                        fail("Simulator shutdown failed: ${failure.message}")
                                                     } finally { setBusy(false); refresh() }
                                                 }
                                             })
@@ -480,10 +508,23 @@ internal fun DeviceActionIcon(
 
 @Composable
 private fun BuildSelection(file: File?, enabled: Boolean, clear: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Column(Modifier.weight(1f)) {
             SelectionContainer { Text(file?.path ?: "No file selected", style = MaterialTheme.typography.bodySmall) }
         }
-        if (file != null) TextButton(onClick = clear, enabled = enabled) { Text("Clear") }
+        if (file != null) {
+            DeviceActionIcon(
+                icon = Icons.Rounded.Close,
+                label = "Clear selected build file",
+                enabled = enabled,
+                onClick = clear,
+                buttonSize = 30.dp,
+                iconSize = 16.dp
+            )
+        }
     }
 }

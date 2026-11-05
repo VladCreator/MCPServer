@@ -33,7 +33,8 @@ import androidx.compose.ui.unit.dp
 internal fun DeviceRow(
     device: Device, selected: Boolean, selectionEnabled: Boolean, actionsEnabled: Boolean,
     hasBuild: Boolean, bridge: BridgeState, onSelect: (Boolean) -> Unit,
-    onRun: () -> Unit, onBridge: () -> Unit, onInstall: () -> Unit, onBoot: () -> Unit
+    onRun: () -> Unit, onBridge: () -> Unit, onInstall: () -> Unit, onBoot: () -> Unit,
+    onShutdown: () -> Unit
 ) {
     val compactButtonSize = 32.dp
     val controlSlotSize = 32.dp
@@ -79,6 +80,11 @@ internal fun DeviceRow(
                             enabled = actionsEnabled, onClick = onBoot,
                             buttonSize = compactButtonSize, iconSize = compactIconSize)
                     }
+                    if (device.platform == Platform.IOS_SIMULATOR && device.state == "Booted") {
+                        DeviceActionIcon(Icons.Rounded.PowerSettingsNew, "Shutdown ${device.name}",
+                            enabled = actionsEnabled, onClick = onShutdown,
+                            buttonSize = compactButtonSize, iconSize = compactIconSize)
+                    }
                     if (selected && hasBuild) {
                         DeviceActionIcon(Icons.Rounded.Download, "Install on ${device.name}",
                             enabled = actionsEnabled, onClick = onInstall,
@@ -114,8 +120,10 @@ internal fun DeviceRow(
                     }
                 )
             }
-            Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
-            SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("OS: ${device.osVersion ?: "Unavailable"}", style = MaterialTheme.typography.bodySmall)
+                SelectionContainer { Text(device.id, style = MaterialTheme.typography.bodySmall) }
+            }
             if (device.state == "unauthorized") Text("Unlock the device and accept USB debugging.",
                 color = MaterialTheme.colorScheme.error)
             if (device.platform == Platform.ANDROID) {
