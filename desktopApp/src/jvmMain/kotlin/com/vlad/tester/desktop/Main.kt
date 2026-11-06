@@ -46,8 +46,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -204,6 +202,7 @@ private fun DesktopDashboard(
     setShowAllDevices: (Boolean) -> Unit, settingsError: String?, dismissSettingsError: () -> Unit
 ) {
     val manager = remember { DeviceManager() }
+    val evidenceStatus = remember { EvidenceStatusController() }
     val scope = rememberCoroutineScope()
     var discovery by remember { mutableStateOf(Discovery(emptyList(), emptyList())) }
     var scanning by remember { mutableStateOf(false) }
@@ -270,8 +269,8 @@ private fun DesktopDashboard(
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         DesktopPanels(activity, evidence = {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                EvidenceInbox(manager, discovery.devices, busy, ::record)
+            Column(Modifier.fillMaxSize()) {
+                EvidenceInbox(manager, discovery.devices, busy, ::record, statusController = evidenceStatus)
             }
         }, modifier = Modifier.weight(1f).fillMaxWidth()) { activityActive, evidenceActive, toggleActivity, toggleEvidence ->
             Column(Modifier.fillMaxSize().padding(16.dp),
@@ -461,7 +460,17 @@ private fun DesktopDashboard(
             }
         }
         HorizontalDivider()
-        DesktopStatusBar(manager.adbPath)
+        DesktopStatusBar(
+            adbPath = manager.adbPath,
+            version = "0.5.0",
+            receivingEnabled = evidenceStatus.receivingEnabled,
+            canEnableReceiving = evidenceStatus.canEnable,
+            canPairEvidence = evidenceStatus.canPair,
+            canStopReceiving = evidenceStatus.canStop,
+            onEnableReceiving = { evidenceStatus.onEnable?.invoke() },
+            onPairEvidence = { evidenceStatus.onPair?.invoke() },
+            onStopReceiving = { evidenceStatus.onStop?.invoke() }
+        )
     }
     if (pending.isNotEmpty()) {
         val tasks = pending

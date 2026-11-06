@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
 }
 
-version = "0.4.1"
+version = "0.5.0"
 
 val iconDirectory = layout.buildDirectory.dir("desktop-icon/tester.iconset")
 val createIconDirectory = tasks.register<Exec>("createIconDirectory") {
@@ -61,10 +61,10 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             packageName = "Tester Desktop"
             // jpackage requires a positive major version even for prerelease apps.
-            packageVersion = "1.4.1"
+            packageVersion = "1.5.0"
             macOS {
                 bundleID = "com.vlad.tester.desktop"
-                packageBuildVersion = "20"
+                packageBuildVersion = "21"
                 iconFile.set(desktopIcon)
             }
         }
@@ -73,7 +73,7 @@ compose.desktop {
 
 val normalizeMacVersion = tasks.register<Exec>("normalizeMacVersion") {
     dependsOn("createDistributable")
-    commandLine("/usr/bin/plutil", "-replace", "CFBundleShortVersionString", "-string", "0.4.1",
+    commandLine("/usr/bin/plutil", "-replace", "CFBundleShortVersionString", "-string", "0.5.0",
         layout.buildDirectory.file("compose/binaries/main/app/Tester Desktop.app/Contents/Info.plist").get().asFile)
 }
 

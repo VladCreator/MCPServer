@@ -10,7 +10,11 @@ import kotlinx.serialization.json.contentOrNull
 import platform.CoreGraphics.CGRectMake
 import platform.CoreGraphics.CGSizeMake
 import platform.Foundation.NSLock
+import platform.Foundation.NSDate
+import platform.Foundation.NSFileManager
 import platform.Foundation.base64EncodedStringWithOptions
+import platform.Foundation.timeIntervalSince1970
+import platform.Foundation.writeToFile
 import platform.UIKit.UIApplication
 import platform.UIKit.UIButton
 import platform.UIKit.UIControlStateNormal
@@ -89,6 +93,8 @@ object IosQaLog {
 
 @OptIn(ExperimentalForeignApi::class)
 class IosWhiteBox {
+
+    private val evidenceFiles = IosFileAccess()
 
     /**
      * Walks the key window on the main thread. UIKit containers without content
@@ -250,9 +256,20 @@ class IosWhiteBox {
         }
         val data = UIImageJPEGRepresentation(image, 0.8)
             ?: return@withContext ToolResult("Unable to encode the screenshot.", isError = true)
+        val artifact = "screenshot-${NSDate().timeIntervalSince1970.toLong()}.jpg"
+        val directory = "${evidenceFiles.documentsDirectory()}/qa/evidence"
+        NSFileManager.defaultManager.createDirectoryAtPath(
+            path = directory,
+            withIntermediateDirectories = true,
+            attributes = null,
+            error = null
+        )
+        val filePath = "$directory/$artifact"
+        val stored = data.writeToFile(filePath, atomically = true)
         ToolResult(
             text = "Own-app screenshot ${image.size.useContents { "${this.width.toInt()}x${this.height.toInt()}" }} " +
-                "(screen ${screenWidth.toInt()}x${screenHeight.toInt()}).",
+                "(screen ${screenWidth.toInt()}x${screenHeight.toInt()})." +
+                if (stored) " Saved in QA Evidence: $artifact (artifact: $artifact)." else "",
             imageBase64 = data.base64EncodedStringWithOptions(0u),
             imageMimeType = "image/jpeg"
         )

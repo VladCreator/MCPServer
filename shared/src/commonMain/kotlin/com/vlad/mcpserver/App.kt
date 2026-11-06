@@ -4,6 +4,7 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.History
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -79,11 +80,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -326,6 +329,16 @@ private fun AppHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                IconButton(
+                    onClick = onActivity,
+                    modifier = Modifier.semantics { selected = activePanel == DashboardPanel.ACTIVITY },
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = if (activePanel == DashboardPanel.ACTIVITY) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        contentColor = if (activePanel == DashboardPanel.ACTIVITY) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(Icons.Rounded.History, contentDescription = "Toggle Activity")
+                }
                 Text(
                     text = "Tester",
                     style = MaterialTheme.typography.headlineSmall,
@@ -340,14 +353,6 @@ private fun AppHeader(
             )
         }
         Row {
-            IconButton(onClick = onActivity,
-                modifier = Modifier.semantics { selected = activePanel == DashboardPanel.ACTIVITY },
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = if (activePanel == DashboardPanel.ACTIVITY) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    contentColor = if (activePanel == DashboardPanel.ACTIVITY) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                )) {
-                Icon(Icons.Rounded.History, contentDescription = "Toggle Activity")
-            }
             IconButton(onClick = onEvidence,
                 modifier = Modifier.semantics { selected = activePanel == DashboardPanel.EVIDENCE },
                 colors = IconButtonDefaults.iconButtonColors(
@@ -1072,6 +1077,10 @@ internal fun groupActivityByDay(
 private fun ActivityRow(log: ToolExecutionLog) {
     val colors = MaterialTheme.colorScheme
     val warning = LocalMcpExtraColors.current.warning
+    val screenshotMeta = remember(log.id, log.result) { extractScreenshotMeta(log) }
+    val screenshotPreview by produceState<ImageBitmap?>(initialValue = null, key1 = screenshotMeta?.artifactId) {
+        value = screenshotMeta?.artifactId?.let { loadActivityScreenshotPreview(it) }
+    }
     val statusColor = when (log.status) {
         "SUCCESS" -> colors.tertiary
         "WARNING" -> warning
@@ -1147,6 +1156,24 @@ private fun ActivityRow(log: ToolExecutionLog) {
                         text = result,
                         style = MaterialTheme.typography.bodySmall
                     )
+                }
+                screenshotMeta?.let { screenshot ->
+                    Text(
+                        text = buildString {
+                            append("Screenshot")
+                            screenshot.displayName?.let { append(": "); append(it) }
+                            screenshot.artifactId?.let { append(" (artifact: "); append(it); append(")") }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.primary
+                    )
+                    screenshotPreview?.let { image ->
+                        Image(
+                            bitmap = image,
+                            contentDescription = screenshot.displayName ?: "Captured screenshot",
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)
+                        )
+                    }
                 }
             }
         }

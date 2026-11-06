@@ -5,6 +5,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -36,7 +38,14 @@ import java.net.Inet4Address
 import java.net.SocketException
 
 @Composable
-internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: Boolean, report: (ActivityKind, String) -> Unit) {
+internal fun EvidenceInbox(
+    manager: DeviceManager,
+    devices: List<Device>,
+    busy: Boolean,
+    report: (ActivityKind, String) -> Unit,
+    statusController: EvidenceStatusController? = null,
+    modifier: Modifier = Modifier
+) {
     val scope = rememberCoroutineScope()
     var receiver by remember { mutableStateOf<EvidenceReceiver?>(null) }
     var flows by remember { mutableStateOf(emptyList<ReceivedFlow>()) }
@@ -74,33 +83,48 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
             delay(1000)
         }
     }
-    Column(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
+    fun enableReceiver(openPairingAfterStart: Boolean) {
+        starting = true
+        scope.launch {
+            var created: EvidenceReceiver? = null
+            try {
+                receiver = withContext(Dispatchers.IO) { EvidenceReceiver().also { created = it } }
+                error = null
+                if (openPairingAfterStart) pairing = true
+                report(ActivityKind.EVIDENCE, "HTTPS evidence receiver enabled on port $EVIDENCE_PORT.")
+            } catch (cancelled: CancellationException) {
+                created?.close()
+                throw cancelled
+            } catch (failure: Exception) {
+                error = "Cannot enable evidence receiver: ${failure.message}"
+                report(ActivityKind.ERROR, error!!)
+            } finally { starting = false }
+        }
+    }
+    fun stopReceiver() {
+        receiver?.close(); receiver = null
+        report(ActivityKind.EVIDENCE, "Evidence receiver stopped. Devices must pair again after restart.")
+    }
+    SideEffect {
+        statusController?.receivingEnabled = receiver != null
+        statusController?.canEnable = receiver == null && !starting
+        statusController?.canPair = receiver != null && !starting
+        statusController?.canStop = receiver != null && !starting
+        statusController?.onEnable = { enableReceiver(openPairingAfterStart = false) }
+        statusController?.onPair = { if (receiver == null) enableReceiver(openPairingAfterStart = true) else pairing = true }
+        statusController?.onStop = ::stopReceiver
+    }
+    Column(modifier.fillMaxSize().padding(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                if (receiver == null) TextButton(enabled = !starting, onClick = {
-                    starting = true
-                    scope.launch {
-                        var created: EvidenceReceiver? = null
-                        try {
-                            receiver = withContext(Dispatchers.IO) { EvidenceReceiver().also { created = it } }
-                            error = null
-                            pairing = true
-                            report(ActivityKind.EVIDENCE, "HTTPS evidence receiver enabled on port $EVIDENCE_PORT.")
-                        } catch (cancelled: CancellationException) {
-                            created?.close()
-                            throw cancelled
-                        } catch (failure: Exception) {
-                            error = "Cannot enable evidence receiver: ${failure.message}"
-                            report(ActivityKind.ERROR, error!!)
-                        } finally { starting = false }
+            if (statusController == null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    if (receiver == null) TextButton(enabled = !starting, onClick = {
+                        enableReceiver(openPairingAfterStart = true)
+                    }) { Text("Enable receiving") }
+                    else {
+                        TextButton(enabled = !starting, onClick = { pairing = true }) { Text("Wi-Fi / advanced") }
+                        TextButton(enabled = !starting, onClick = ::stopReceiver) { Text("Stop") }
                     }
-                }) { Text("Enable receiving") }
-                else {
-                    TextButton(enabled = !starting, onClick = { pairing = true }) { Text("Wi-Fi / advanced") }
-                    TextButton(enabled = !starting, onClick = {
-                        receiver?.close(); receiver = null
-                        report(ActivityKind.EVIDENCE, "Evidence receiver stopped. Devices must pair again after restart.")
-                    }) { Text("Stop") }
                 }
             }
             if (receiver != null) {
@@ -148,8 +172,7 @@ internal fun EvidenceInbox(manager: DeviceManager, devices: List<Device>, busy: 
                     }) { Text("Pair") }
                 }
             }
-            val receivedListMaxHeight = if (flows.isEmpty()) 100.dp else 260.dp
-            LazyColumn(Modifier.animateContentSize().heightIn(max = receivedListMaxHeight)) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).animateContentSize()) {
                 items(flows, key = { it.folder.path }) { flow ->
                     TextButton(onClick = {
                         try { Desktop.getDesktop().open(flow.folder) }

@@ -40,6 +40,8 @@ import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.AlertDialog
@@ -293,8 +295,14 @@ actual fun QaEvidenceCard(modifier: Modifier, evidenceRevision: Int) {
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { desktopDialog = true }, enabled = actionsEnabled) { Text("Desktop") }
-            TextButton(onClick = { refreshRevision++ }, enabled = !loading && !busy) { Text("Refresh") }
+            IconButton(onClick = { desktopDialog = true }, enabled = actionsEnabled,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)) {
+                Icon(Icons.Rounded.Link, contentDescription = "Desktop pairing")
+            }
+            IconButton(onClick = { refreshRevision++ }, enabled = !loading && !busy,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh QA Evidence")
+            }
         }
             if (desktopActive) {
                 val dark = isSystemInDarkTheme()

@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.awt.Desktop
+import java.io.File
 
 @Composable
 private fun ActivityPanel(activity: List<DesktopActivity>) {
@@ -45,17 +47,50 @@ private fun ActivityPanel(activity: List<DesktopActivity>) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (activity.isEmpty()) item { Text("No activity yet.") }
             items(activity) { entry ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(entry.kind.icon, contentDescription = entry.kind.label, modifier = Modifier.size(18.dp),
-                        tint = if (entry.kind == ActivityKind.ERROR) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant)
-                    SelectionContainer(Modifier.weight(1f)) {
-                        Text(entry.displayText, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(
+                            entry.kind.icon,
+                            contentDescription = entry.kind.label,
+                            modifier = Modifier.size(18.dp),
+                            tint = activityKindColor(entry.kind)
+                        )
+                        SelectionContainer(Modifier.weight(1f)) {
+                            Text(entry.displayText, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp))
+                        }
+                    }
+                    screenshotPath(entry.message)?.let { path ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SelectionContainer(Modifier.weight(1f)) {
+                                Text(path, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = {
+                                runCatching { Desktop.getDesktop().open(File(path).parentFile ?: File(path)) }
+                            }) { Text("Open") }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun activityKindColor(kind: ActivityKind) = when (kind) {
+    ActivityKind.ERROR -> MaterialTheme.colorScheme.error
+    ActivityKind.SCREENSHOT -> MaterialTheme.colorScheme.secondary
+    ActivityKind.BRIDGE_CONNECT, ActivityKind.RUN, ActivityKind.EVIDENCE -> MaterialTheme.colorScheme.tertiary
+    ActivityKind.PAIRING -> MaterialTheme.colorScheme.primary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+private fun screenshotPath(message: String): String? {
+    val marker = ": /"
+    val index = message.indexOf(marker)
+    return if (message.contains("Saved screenshot") && index >= 0) {
+        message.substring(index + 2).trim().takeIf { it.startsWith("/") }
+    } else null
 }
 
 @Composable

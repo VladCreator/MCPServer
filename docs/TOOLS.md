@@ -1,4 +1,4 @@
-# Supported tools — Tester 0.4.1
+# Supported tools — Tester 0.5.0
 
 Tester exposes **43 tools** over MCP on Android, including combined waits,
 durable scenarios, reviewed route discovery, scoped CI consent, private evidence,

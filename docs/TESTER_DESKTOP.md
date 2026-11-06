@@ -1,6 +1,6 @@
 # Tester Desktop
 
-Tester Desktop **0.4.1** is a separate macOS Compose Desktop companion, aligned
+Tester Desktop **0.5.0** is a separate macOS Compose Desktop companion, aligned
 with the Android and iOS release. It manages local
 installation files and devices; it does not replace the mobile MCP servers or
 change the existing gateway. Mobile and desktop modules remain independent.
@@ -36,9 +36,9 @@ For a local macOS installer:
 
 Output: `desktopApp/build/compose/binaries/main/dmg/`. This is a local unsigned
 distribution, not a notarized release. Packaging targets the host architecture.
-The DMG filename uses the internal jpackage version `1.4.1` (jpackage rejects a
-zero major version); the packaged app's Info.plist and dashboard show `0.4.1`,
-with build number `20`.
+The DMG filename uses the internal jpackage version `1.5.0` (jpackage rejects a
+zero major version); the packaged app's Info.plist and dashboard show `0.5.0`,
+with build number `21`.
 Release builds leave dependency JARs unoptimized so signed cryptographic
 libraries retain their valid embedded signatures.
 
